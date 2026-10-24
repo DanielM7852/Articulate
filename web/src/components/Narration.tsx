@@ -55,10 +55,12 @@ export function useNarration(shared?: Speech) {
           if (reason === 'ended') return finish();
           // Blocked or failed audio: fall back to reading time from when the line appeared.
           const remaining = readingTime(text) - (performance.now() - started);
+          clearTimeout(timer.current);
           timer.current = window.setTimeout(finish, Math.max(0, remaining));
         },
       });
-      if (!spoke) timer.current = window.setTimeout(finish, readingTime(text));
+      // Audio off: reading time. Audio on: a watchdog, in case playback starts but never reports an end.
+      timer.current = window.setTimeout(finish, spoke ? readingTime(text) * 2.5 : readingTime(text));
     },
     [clear],
   );

@@ -262,3 +262,8 @@ button.lp-pill:active {
     backdrop-filter: none;
   }
 }
+
+/* The graph pane in practice has pills in its top-left corner; the axis caption sits below them */
+.lp .vg-axis--y {
+  top: 56px;
+}

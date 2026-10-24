@@ -11,7 +11,9 @@ npm run dev        # http://localhost:5173
 npm run build      # typecheck + production build
 ```
 
-Use Chrome or Edge and allow microphone access. The app uses a hash router, so the built `dist/` folder works on any static host.
+Use Chrome or Edge and allow camera and microphone access. The app uses a hash router, so the built `dist/` folder works on any static host.
+
+`npm run smoke` walks the whole flow in headless Chromium against a running dev server (fake camera and microphone), prints what each screen showed, and saves screenshots to `smoke-out/`. Run `npx playwright install chromium` once first.
 
 ## Routes
 

@@ -26,6 +26,7 @@ async function playCartesia(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, rate: rate ?? null }),
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok || !isCurrent()) return false;
     const blob = await res.blob();

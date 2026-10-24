@@ -33,7 +33,7 @@ export default function Intro() {
     narration.show(LINES[beat]);
   }, [beat, narration.show]);
 
-  // Once the guide has materialised: a beat, a smile and a hello, then the invitation.
+  // Once the guide has materialised (or failed to): a beat, a smile and a hello, then the invitation.
   useEffect(() => {
     if (!guideReady) return;
     const hello = setTimeout(() => setBeat('hello'), 500);
@@ -64,7 +64,6 @@ export default function Intro() {
       primary={{
         label: 'Let’s begin',
         icon: <ArrowRight size={18} aria-hidden="true" />,
-        disabled: beat === 'loading',
         onClick: () => go('/quiz/1'),
       }}
     >
@@ -73,6 +72,7 @@ export default function Intro() {
         look={look}
         zoom={beat === 'loading' ? 1 : 0.82}
         onReady={() => setGuideReady(true)}
+        onError={() => setGuideReady(true)}
       />
       <span className="lp-overlay lp-overlay--tl lp-pill intro-camera" aria-live="polite">
         {cameraLine.icon}

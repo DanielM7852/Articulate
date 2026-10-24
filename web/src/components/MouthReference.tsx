@@ -29,6 +29,7 @@ export function MouthReference({
   look = null,
   zoom = 1,
   onReady,
+  onError,
 }: {
   /** Mouth shape to loop; null rests the face. */
   cue: MouthCueId | null;
@@ -38,6 +39,8 @@ export function MouthReference({
   look?: Look | null;
   zoom?: number;
   onReady?: () => void;
+  /** The 3D guide could not load; the screen should carry on without it. */
+  onError?: () => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const demoRef = useRef<MouthDemo | null>(null);
@@ -73,8 +76,9 @@ export function MouthReference({
   const ready = state === 'ready';
   useEffect(() => {
     if (ready) onReady?.();
+    if (state === 'error') onError?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+  }, [state]);
 
   // Props apply once the demo exists and again whenever they change.
   useEffect(() => {

@@ -37,8 +37,10 @@ const DEMO_START = { f1: 620, f2: 1500 };
 const GLIDE_MS = 2600;
 const YOU_HOLD_SEC = 1.5;
 
-/** A scripted cursor for the explanation: glides into the ee region, then rests there. */
-function useDemoCursor(active: boolean) {
+/** A scripted cursor for the explanation: glides into the ee region, then rests there. The hold only counts once `holding`. */
+function useDemoCursor(active: boolean, holding: boolean) {
+  const holdingRef = useRef(holding);
+  holdingRef.current = holding;
   const [state, setState] = useState<{ point: VowelPoint | null; trace: VowelPoint[]; holdSec: number }>({
     point: null,
     trace: [],
@@ -66,7 +68,7 @@ function useDemoCursor(active: boolean) {
         timestampMs: now - t0,
         segment: 0,
       };
-      if (inTarget(point, TARGET)) arrivedAt ??= now;
+      if (holdingRef.current && inTarget(point, TARGET)) arrivedAt ??= now;
       else arrivedAt = null;
       setState((s) => ({
         point,
@@ -87,7 +89,7 @@ export default function Tutorial() {
   const mic = useMicrophone();
   const live = useVowelTracking(mic.stream, TARGET);
   const [phase, setPhase] = useState<Phase>('watch');
-  const demo = useDemoCursor(phase === 'dot' || phase === 'ring');
+  const demo = useDemoCursor(phase === 'dot' || phase === 'ring', phase === 'ring');
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
@@ -117,15 +119,17 @@ export default function Tutorial() {
 
   const solo = phase === 'you' || phase === 'done';
   const graph = solo ? live : { ...demo, tracking: phase !== 'watch', status: 'tracking' as const };
-  const micBlocked = mic.status === 'denied';
+  const micBlocked = mic.status === 'denied' || mic.status === 'unsupported';
+  const micMessage =
+    mic.status === 'denied' ? 'Microphone blocked · allow it in site settings' : mic.status === 'unsupported' ? 'No microphone in this browser · you can skip ahead' : null;
 
   const primary =
     phase === 'mic'
       ? {
-          label: micBlocked ? 'Try the microphone again' : 'Allow microphone',
+          label: mic.status === 'denied' ? 'Try the microphone again' : 'Allow microphone',
           icon: <Mic size={18} aria-hidden="true" />,
           onClick: () => void mic.start(),
-          disabled: mic.status === 'requesting',
+          disabled: mic.status === 'requesting' || mic.status === 'unsupported',
         }
       : phase === 'done'
         ? { label: 'Start practicing', icon: <ArrowRight size={18} aria-hidden="true" />, onClick: finish }
@@ -153,9 +157,9 @@ export default function Tutorial() {
             statusLabel={solo ? (live.tracking ? 'Tracking your vowel' : 'Listening') : phase === 'watch' ? 'Watch the guide' : 'Example'}
             holdSec={Math.min(graph.holdSec, HOLD_GOAL_SEC)}
           />
-          {micBlocked && (
+          {micBlocked && micMessage && (
             <span className="lp-overlay lp-overlay--bl lp-pill" role="alert">
-              <TriangleAlert size={15} aria-hidden="true" /> Microphone blocked · allow it in site settings
+              <TriangleAlert size={15} aria-hidden="true" /> {micMessage}
             </span>
           )}
         </section>

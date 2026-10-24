@@ -40,27 +40,34 @@ export function useFaceTracking(enabled: boolean) {
     let cancelled = false;
     let stream: MediaStream | null = null;
     let timer = 0;
-    let detector: { detectForVideo(v: HTMLVideoElement, t: number): { detections: Detection[] }; close(): void } | null = null;
+    let detector: Detector | null = null;
     const video = document.createElement('video');
     video.muted = true;
     video.playsInline = true;
 
     (async () => {
       setStatus('requesting');
+      let acquired: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
+        acquired = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
       } catch {
         if (!cancelled) setStatus('denied');
         return;
       }
-      if (cancelled) return;
+      if (cancelled) {
+        // Cleanup ran while the permission prompt was open: release what we just got.
+        acquired.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      stream = acquired;
       video.srcObject = stream;
       await video.play().catch(() => undefined);
       setStatus('loading');
+      let created: Detector;
       try {
         const { FaceDetector, FilesetResolver } = await import('@mediapipe/tasks-vision');
         const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-        detector = await FaceDetector.createFromOptions(vision, {
+        created = await FaceDetector.createFromOptions(vision, {
           baseOptions: { modelAssetPath: MODEL_URL },
           runningMode: 'VIDEO',
           minDetectionConfidence: 0.5,
@@ -69,7 +76,11 @@ export function useFaceTracking(enabled: boolean) {
         if (!cancelled) setStatus('unavailable');
         return;
       }
-      if (cancelled) return;
+      if (cancelled) {
+        created.close();
+        return;
+      }
+      detector = created;
       setStatus('searching');
       let lastSeen = 0;
       let lastTs = -1;
@@ -85,8 +96,9 @@ export function useFaceTracking(enabled: boolean) {
           const b = face.boundingBox;
           const cx = (b.originX + b.width / 2) / video.videoWidth;
           const cy = (b.originY + b.height / 2) / video.videoHeight;
-          // Raw (unmirrored) frame: left of frame is the viewer's left.
-          const target = { x: (cx - 0.5) * 2.4, y: (0.5 - cy) * 2.4 };
+          // The camera faces the learner, so a learner on their own right appears on the
+          // left of the unmirrored frame. Flip x so +x is the viewer's right, like the pointer.
+          const target = { x: (0.5 - cx) * 2.4, y: (0.5 - cy) * 2.4 };
           const prev = smooth.current ?? target;
           const next = { x: prev.x + (target.x - prev.x) * SMOOTH, y: prev.y + (target.y - prev.y) * SMOOTH };
           smooth.current = next;
@@ -116,6 +128,11 @@ export function useFaceTracking(enabled: boolean) {
 
 interface Detection {
   boundingBox?: { originX: number; originY: number; width: number; height: number };
+}
+/** The slice of MediaPipe's FaceDetector this hook uses. */
+interface Detector {
+  detectForVideo(video: HTMLVideoElement, timestampMs: number): { detections: Detection[] };
+  close(): void;
 }
 
 const clamp = (v: number) => Math.max(-1, Math.min(1, v));
