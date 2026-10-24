@@ -9,7 +9,8 @@ import { TeacherCaptions } from '../components/TeacherCaptions';
 import { unlockTeacherAudio } from '../audio/teacher';
 import { useLipTracking } from '../vision/useLipTracking';
 import { AttemptRecorder } from '../live/attemptRecorder';
-import { offlineSink } from '../live/metricSink';
+import { offlineSink, type MetricSink } from '../live/metricSink';
+import { createSpacetimeSink, type SinkStatus } from '../live/spacetimeSink';
 import { profileIdFor, requestLiveCoach, type LiveCoachResponse } from '../live/liveCoach';
 import { useCoachSequence } from '../live/useCoachSequence';
 import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
@@ -89,7 +90,28 @@ export default function PracticeStudio() {
   const lip = useLipTracking(videoEl, camera);
   const mouthRef = useRef<MouthReferenceHandle | null>(null);
   const recorder = useRef<AttemptRecorder | null>(null);
-  if (!recorder.current) recorder.current = new AttemptRecorder(offlineSink);
+  // The recorder holds one stable sink that delegates to whichever SpacetimeDB sink is live
+  // for the current profile; until one is ready it behaves exactly like offlineSink.
+  const sinkRef = useRef<MetricSink>(offlineSink);
+  const [syncStatus, setSyncStatus] = useState<SinkStatus>('offline');
+  const delegate = useRef<MetricSink>({
+    get connected() {
+      return sinkRef.current.connected;
+    },
+    beginAttempt: (id, sound) => sinkRef.current.beginAttempt(id, sound),
+    push: (kind, seq, frames) => sinkRef.current.push(kind, seq, frames),
+    endAttempt: (id) => sinkRef.current.endAttempt(id),
+  });
+  if (!recorder.current) recorder.current = new AttemptRecorder(delegate.current);
+  useEffect(() => {
+    const sink = createSpacetimeSink({ profileId, displayName: learnerName || 'Learner', onStatus: setSyncStatus });
+    sinkRef.current = sink;
+    setSyncStatus(sink.status);
+    return () => {
+      sinkRef.current = offlineSink;
+      sink.close();
+    };
+  }, [profileId, learnerName]);
   const attemptIdRef = useRef<string>('');
   const runId = useRef(0);
   const coachAbort = useRef<AbortController | null>(null);
@@ -388,6 +410,9 @@ export default function PracticeStudio() {
             <Volume2 size={18} aria-hidden="true" />
             {referencePlaying ? 'Playing…' : 'Hear example'}
           </button>
+          <span role="status" style={{ fontSize: 12, opacity: 0.65 }}>
+            Live sync {syncStatus === 'ready' ? 'on' : 'off'}
+          </span>
           <button
             type="button"
             className={`ob-cta ${recording ? 'ob-cta--stop' : ''}`}
