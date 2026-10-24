@@ -12,7 +12,7 @@ This is the state of the first backend milestone: two recordings can be measured
 - Constrained DTW is used only for duration ratios outside ±15% when a Sakoe-Chiba band of at most 0.45 can connect the sequences. It is not a general pronunciation aligner. Word and syllable times are not available yet.
 - Live Claude and live Moss were not called in the automated tests. Without credentials, retrieval and coaching use disclosed fallbacks.
 - Cartesia speaks the prepared reference when a key is set, and the coaching line is still only a handoff example. This process does not open a second voice agent.
-- The local session store is one JSON file per session on one machine. It does not retain raw audio. Duplicate attempt ids replay the first result. SpacetimeDB, when configured, stores profiles, progress, and compact curves for the caller's identity. See `docs/spacetimedb.md`. Unconfigured runs do not write that database.
+- The local session store is one JSON file per session on one machine. It does not retain raw audio. Duplicate attempt ids replay the first result. SpacetimeDB, when configured, stores profiles, progress, and compact curves for the caller's identity. See `docs/live-metrics.md`. Unconfigured runs do not write that database.
 - Cancellation is checked between stages. A pitch extraction already running in a worker finishes, and its result is discarded if a newer attempt has taken the session.
 - The first pYIN call in a process pays Numba compilation time. Timeouts are configurable because of that.
 - Progress events describe this process only.

@@ -17,10 +17,11 @@ from app.errors import CoachValidationError
 from app.reasoning.learner_progress import (
     LessonPlan,
     LessonProgress,
+    ProgressStore,
+    apply_attempt,
+    build_progress_store,
     counts_for,
     empty_progress,
-    load_progress,
-    record_attempt,
 )
 
 logger = logging.getLogger(__name__)
@@ -239,9 +240,12 @@ def _apply_plan(grounded: VowelCoachResponse, attempt: VowelAttempt, choice: Pla
     return grounded.model_copy(update={"nextAction": action, "nextCue": cue, "plan": plan})
 
 
-async def coach_attempt(settings: Settings, body: VowelCoachRequest, client=None) -> VowelCoachResponse:
+async def coach_attempt(
+    settings: Settings, body: VowelCoachRequest, client=None, progress_store: ProgressStore | None = None
+) -> VowelCoachResponse:
+    store = progress_store if progress_store is not None else build_progress_store(settings)
     current = body.plan or LessonPlan(sound=body.attempt.sound, pace="unhurried", assistance=body.attempt.assistance)
-    stored = load_progress(settings.store_dir, body.learnerId) if body.learnerId else None
+    stored = await store.load(body.learnerId) if body.learnerId else None
     already = stored is not None and body.attempt.attemptId in stored.counted_attempt_ids and stored.plan is not None
     progress = stored or empty_progress(body.learnerId or "anonymous")
     if stored is None:
@@ -275,7 +279,8 @@ async def coach_attempt(settings: Settings, body: VowelCoachRequest, client=None
         except Exception as exc:  # noqa: BLE001 - any model failure keeps the screen's own wording
             logger.warning("vowel coach kept the local wording: %s", type(exc).__name__)
     if body.learnerId and not already:
-        record_attempt(settings.store_dir, body.learnerId, body.attempt, options[choice], body.history)
+        updated = apply_attempt(stored, body.learnerId, body.attempt, options[choice], body.history)
+        await store.save(updated)
     return grounded
 
 

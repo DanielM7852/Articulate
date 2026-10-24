@@ -16,7 +16,6 @@ from app.config import Settings
 from app.errors import AudioRejected, CoachValidationError, ProviderNotConfigured, StaleAttemptError
 from app.integrations.anthropic_client import ClaudeCoach
 from app.integrations.cartesia import capture_limitation_notes, spoken_text
-from app.integrations.spacetimedb import SpacetimeClient
 from app.integrations.moss import CueRetriever, RetrievalQuery
 from app.progress import ProgressBus
 from app.reasoning.assessment import assess
@@ -54,7 +53,6 @@ class ComparisonJob:
     fixture_mode: bool = False
     fixture_scenario: str | None = None
     verifier: ContentVerifier | None = None
-    spacetime_token: str | None = None
 
 
 class Orchestrator:
@@ -67,11 +65,9 @@ class Orchestrator:
         progress: ProgressBus,
         references: ReferenceLibrary,
         verifier: ContentVerifier | None = None,
-        spacetime: SpacetimeClient | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
-        self.spacetime = spacetime if spacetime is not None else SpacetimeClient.from_settings(settings)
         self.retriever = retriever
         self.coach = coach
         self.progress = progress
@@ -234,20 +230,6 @@ class Orchestrator:
                 reasoning=reasoning,
                 timings_ms=timings,
             )
-            if self.spacetime.configured:
-                committed = self.spacetime.commit_comparison(
-                    result,
-                    exercise=reference.metadata.exercise,
-                    learner_token=job.spacetime_token,
-                )
-                result.timings_ms.spacetime_commit_ms = committed.elapsed_ms
-                if committed.ok:
-                    result.feedback.delivery_id = f"{job.attempt_id}:{status}:{assessment.finding}"
-                else:
-                    limitations.append("spacetimedb_commit_failed")
-                    if not job.spacetime_token:
-                        limitations.append("learner_identity_not_provided")
-                    result.limitations = _unique(limitations)
             self._save(job, token, result)
             self._emit(
                 job,

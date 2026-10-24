@@ -158,3 +158,18 @@ test("record_coach_turn marks attempt coached; set_learner_note upserts", () => 
   expect(harness.db.learnerNote.profile_id.find("alice")?.notes).toBe('{"a":2}');
   expect(() => note("x")).toThrow("valid JSON");
 });
+
+test("set_learner_progress is backend-only, validates, and upserts", () => {
+  const put = (who: typeof backend, id: string, j: string) =>
+    tx(who, (c) =>
+      module.set_learner_progress(c, { profile_id: id, progress_json: j }),
+    );
+  expect(() => put(alice, "alice", "{}")).toThrow("backend only");
+  expect(() => put(backend, "bad id!", "{}")).toThrow("invalid profile_id");
+  expect(() => put(backend, "alice", "[]")).toThrow("JSON object");
+  put(backend, "alice", '{"a":1}');
+  put(backend, "alice", '{"a":2}');
+  expect(harness.db.learnerProgress.profile_id.find("alice")?.progress).toBe(
+    '{"a":2}',
+  );
+});

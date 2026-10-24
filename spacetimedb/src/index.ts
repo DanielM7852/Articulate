@@ -82,6 +82,14 @@ const learnerNote = table(
     updated_at: t.timestamp(),
   },
 );
+const learnerProgress = table(
+  { name: "learner_progress", public: false },
+  {
+    profile_id: t.string().primaryKey(),
+    progress: t.string(),
+    updated_at: t.timestamp(),
+  },
+);
 const db = schema({
   backend,
   sessions,
@@ -94,6 +102,7 @@ const db = schema({
   metricBatch,
   coachTurn,
   learnerNote,
+  learnerProgress,
 });
 export default db;
 
@@ -388,5 +397,20 @@ export const set_learner_note = db.reducer(
     if (ctx.db.learnerNote.profile_id.find(profile_id))
       ctx.db.learnerNote.profile_id.update(row);
     else ctx.db.learnerNote.insert(row);
+  },
+);
+
+export const set_learner_progress = db.reducer(
+  { profile_id: t.string(), progress_json: t.string() },
+  (ctx, { profile_id, progress_json }) => {
+    const principal = ctx.db.backend.id.find(0);
+    if (!principal || !ctx.sender.isEqual(principal.identity))
+      throw new Error("backend only");
+    if (!profileIdRe.test(profile_id)) throw new Error("invalid profile_id");
+    parseJsonObject(progress_json, "progress_json");
+    const row = { profile_id, progress: progress_json, updated_at: ctx.timestamp };
+    if (ctx.db.learnerProgress.profile_id.find(profile_id))
+      ctx.db.learnerProgress.profile_id.update(row);
+    else ctx.db.learnerProgress.insert(row);
   },
 );

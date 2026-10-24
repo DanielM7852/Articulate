@@ -30,7 +30,7 @@ The practice screen posts its attempt summary to `POST /v1/coach`. With `ANTHROP
 
 ## Not implemented
 
-- Convex: the storage interface can be replaced later. The current implementation is local JSON. SpacetimeDB is an additional subscription store, documented in `docs/spacetimedb.md`. It does not replace the local session file.
+- Convex: the storage interface can be replaced later. The current implementation is local JSON. SpacetimeDB is an additional subscription store, documented in `docs/live-metrics.md`. It does not replace the local session file.
 - Runpod, Azure Speech, Annapurna/Graviton, Elastic, and Bitdeer/Vultr: deferred. Elastic was not added beside Moss.
 
 ## Cue library

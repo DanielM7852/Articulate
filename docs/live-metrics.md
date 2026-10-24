@@ -11,6 +11,7 @@ Module: `spacetimedb/src/index.ts`. All tables are `public: false`.
 | `metric_batch` | `id` u64 PK autoInc, `attempt_id` (index), `kind` (`audio`/`video`), `seq` u32, `frame_count` u32, `frames` (JSON array text), `received_at` |
 | `coach_turn` | `attempt_id` PK, `profile_id` (index), `created_at`, `decision` (JSON) |
 | `learner_note` | `profile_id` PK, `notes` (JSON), `updated_at` |
+| `learner_progress` | `profile_id` PK, `progress` (JSON lesson progress for `/v1/coach`), `updated_at` |
 
 ## Client reducers (any identity)
 
@@ -25,6 +26,7 @@ Argument order below is the positional order for HTTP `POST /v1/database/{db}/ca
 
 - `record_coach_turn(attempt_id, summary_json, decision_json)`: attempt must exist; each argument a JSON object of at most 16384 bytes. Sets `learner_attempt.summary`, status `coached`, and inserts or replaces the `coach_turn` row.
 - `set_learner_note(profile_id, notes_json)`: JSON object at most 16384 bytes; upsert. `profile_id` validated as above.
+- `set_learner_progress(profile_id, progress_json)`: backend only; same checks and upsert as `set_learner_note`. `/v1/coach` writes it when `SPACETIME_*` is set and uses `.local_store/learner_progress/` otherwise.
 
 ## Error messages
 

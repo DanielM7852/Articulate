@@ -4,7 +4,6 @@ from app.config import Settings
 from app.audio.content import ContentVerifier
 from app.audio.gateway import ReferenceLibrary
 from app.integrations.anthropic_client import ClaudeCoach
-from app.integrations.spacetimedb import SpacetimeClient
 from app.integrations.cues import load_cue_library
 from app.integrations.moss import CueRetriever
 from app.progress import ProgressBus
@@ -22,5 +21,4 @@ def build_orchestrator(settings: Settings) -> Orchestrator:
         progress=ProgressBus(),
         references=ReferenceLibrary(settings),
         verifier=ContentVerifier(),
-        spacetime=SpacetimeClient.from_settings(settings),
     )

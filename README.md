@@ -14,7 +14,7 @@ cue back.
 | [`vowel-mapper/`](vowel-mapper/README.md) | On-device F1/F2 formant engine (AudioWorklet + Worker, Burg LPC) with its own standalone test page and unit/e2e tests. The web app imports `vowel-mapper/src/audio` directly. | `cd vowel-mapper && npm ci && npm run dev` |
 | [`mouth-demo/`](mouth-demo/README.md) | 3D hologram mouth demonstration (three.js, optional TalkingHead) with front and side-cutaway views. The web app imports `mouth-demo/src/mouth-demo.js` directly. | `cd mouth-demo && npm install && npm run dev` |
 | `apps/web/`, `services/api/`, `spacetimedb/`, `packages/contracts/` | The coaching backbone workstream: a session controller with versioned contracts, Parselmouth formants, Moss retrieval, a Cartesia WebSocket voice and SpacetimeDB persistence. Independent of `web/` and `backend/`. | see [Backbone](#backbone) |
-| `docs/` | Contracts and notes: [`backend-contract.md`](docs/backend-contract.md), [`protocol.md`](docs/protocol.md), [`coaching-agent.md`](docs/coaching-agent.md), [`limitations.md`](docs/limitations.md), [`sponsor-integration.md`](docs/sponsor-integration.md), [`spacetimedb.md`](docs/spacetimedb.md). | |
+| `docs/` | Contracts and notes: [`backend-contract.md`](docs/backend-contract.md), [`protocol.md`](docs/protocol.md), [`coaching-agent.md`](docs/coaching-agent.md), [`limitations.md`](docs/limitations.md), [`sponsor-integration.md`](docs/sponsor-integration.md), [`live-metrics.md`](docs/live-metrics.md). | |
 
 ## Quick start
 
