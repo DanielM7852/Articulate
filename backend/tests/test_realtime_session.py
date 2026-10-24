@@ -42,13 +42,17 @@ def test_model_and_eagerness_are_configurable():
     assert cfg["audio"]["input"]["turn_detection"]["eagerness"] == "low"
 
 
-def test_tools_are_the_three_persona_tools():
+def test_tools_are_the_persona_tools():
     names = [t["name"] for t in TOOLS]
-    assert names == ["get_coaching", "start_practice", "end_practice"]
+    assert names == ["get_coaching", "start_practice", "end_practice", "learner_attempt", "stay_quiet", "ask_coach"]
     assert all(t["type"] == "function" for t in TOOLS)
     coaching = TOOLS[0]["parameters"]
     assert coaching["required"] == ["attempt_id"]
-    assert CLIENT_TOOLS == {"start_practice", "end_practice"}
+    assert CLIENT_TOOLS == {"start_practice", "end_practice", "learner_attempt", "stay_quiet"}
+    by_name = {t["name"]: t["parameters"] for t in TOOLS}
+    empty = {"type": "object", "properties": {}, "additionalProperties": False}
+    assert by_name["learner_attempt"] == empty and by_name["stay_quiet"] == empty
+    assert by_name["ask_coach"]["required"] == ["question"]
     json.dumps(TOOLS)  # serialisable as sent
 
 
@@ -57,6 +61,14 @@ def test_instructions_carry_the_persona_rules():
     for rule in ("one or two short sentences", "never judge pronunciation", "never say \"listen\", \"hear\"",
                  "stay silent", "get_coaching", "captions", "digits"):
         assert rule in text, rule
+
+
+def test_instructions_classify_turns_and_route_through_tools():
+    text = instructions("Ava")
+    for token in ("[app]", "learner_attempt", "stay_quiet", "ask_coach", "start_practice", "end_practice",
+                  "truck", "three words or fewer", "untrusted", "Claude speech coach"):
+        assert token in text, token
+    assert len(text.split()) < 900
 
 
 def test_client_secret_request_wraps_session_with_ttl():

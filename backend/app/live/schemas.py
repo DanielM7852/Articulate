@@ -418,3 +418,52 @@ class TalkDraft(BaseModel):
     cueId: CueId | None = None
     showSideView: bool = False
     intent: TalkIntent | None = None
+
+
+class WordAskCoaching(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    caption: str = Field(max_length=600)
+    focusZoneId: str | None = Field(default=None, max_length=16)
+
+
+class WordAskAttempt(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    verdict: str | None = Field(default=None, max_length=32)
+    hitCount: int | None = None
+    zoneCount: int | None = None
+    weakestZoneId: str | None = Field(default=None, max_length=16)
+
+
+class WordAskRequest(BaseModel):
+    """A learner's question about the word lesson, relayed by Ava's ask_coach tool."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    profileId: str
+    word: str = Field(min_length=1, max_length=32)
+    question: str = Field(min_length=1, max_length=500)
+    lastCoaching: WordAskCoaching | None = None
+    lastAttempt: WordAskAttempt | None = None
+    tries: int = Field(default=0, ge=0, le=10000)
+
+    @field_validator("profileId")
+    @classmethod
+    def _profile(cls, value: str) -> str:
+        if not valid_profile_id(value):
+            raise ValueError("profileId must match [A-Za-z0-9_.:@-]{1,64}")
+        return value
+
+
+class WordAskResponse(BaseModel):
+    say: str
+    source: Literal["model", "fallback"]
+
+
+class WordAskDraft(BaseModel):
+    """Model output for one answer. Code validates it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    say: str = Field(min_length=1, max_length=600)

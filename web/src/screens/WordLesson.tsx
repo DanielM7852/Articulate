@@ -14,7 +14,7 @@ import { useVoiceFrames, type VoiceFrames } from '../audio/useVoiceFrames';
 import { useLipTracking, type LipTrackingStatus } from '../vision/useLipTracking';
 import { CUE_MIN_MS, useCoachSequence } from '../live/useCoachSequence';
 import type { CueId } from '../live/liveCoach';
-import { requestWordCoach, scoreWord, wordFallbackLine } from '../live/wordCoach';
+import { requestWordAsk, requestWordCoach, scoreWord, wordFallbackLine } from '../live/wordCoach';
 import { TRACK } from '../game/words';
 import type { WordAttemptResult } from '../game/types';
 import { useAppState } from '../state/AppState';
@@ -54,12 +54,37 @@ const LINES = {
   done: `That's the word. Nice work.`,
 };
 
-/** Realtime Ava: how long to wait for her first sentence, for her to finish, and the talk window between attempts. */
+/** Realtime Ava: how long to wait for her first sentence, for her to finish, and for start_practice to wait for her. */
 const AVA_START_MS = 5000;
 const AVA_IDLE_MS = 25_000;
-const TALK_QUIET_MS = 5000;
-const TALK_CAP_MS = 30_000;
 const START_PRACTICE_IDLE_MS = 10_000;
+/** Talk window: how long a finished board result waits for Ava to say whether it was an attempt or talk (and how long
+ *  a learner_attempt waits for the board's result). */
+const ATTEMPT_DECIDE_MS = 3000;
+const TALK_POLL_MS = 120;
+/** A transcript with at most this many words and no question mark counts as an attempt when Ava did not decide. */
+const ATTEMPT_MAX_WORDS = 3;
+
+const LESSON_CONTEXT =
+  `[app] Lesson context: the practice word is "${SPEC.word}". The app runs the lesson and the board measures every try. ` +
+  'Stay silent until the app sends you a coaching result or the learner speaks to you between tries.';
+const DONE_MESSAGE =
+  '[app] The lesson is complete and the board is off. If the learner tries the word again, tell them the lesson is done and they can press Finish.';
+const MISSED_MESSAGE =
+  '[app] The board did not catch that try; nothing was measured. Briefly ask the learner to say the word again.';
+
+/** The talk window between attempts: the board listens and Ava hears the learner at the same time. */
+interface TalkWindow {
+  active: boolean;
+  run: number;
+  /** Ava called learner_attempt for the current utterance. */
+  attemptCalled: boolean;
+  /** Ava started talking (a sentence started or ask_coach was called) for the current utterance. */
+  talked: boolean;
+  held: WordAttemptResult | null;
+  decideTimer: ReturnType<typeof setTimeout> | null;
+  missTimer: ReturnType<typeof setTimeout> | null;
+}
 
 /** Per-turn instructions for the last coaching relay (appended to Ava's persona, never replacing it). */
 const FINAL_INSTRUCTIONS =
@@ -129,7 +154,15 @@ export default function WordLesson() {
   // so with no key / a failed connect / narration off the lesson is exactly the scripted one.
   const coachCache = useRef(new Map<string, AvaCoaching>());
   const lastCoachId = useRef<string | null>(null);
-  const learnerCount = useRef(0);
+  const lastResult = useRef<WordAttemptResult | null>(null);
+  const lastTranscript = useRef<string | null>(null);
+  // Who may speak through Cartesia: the scripted sequence or realtime Ava, never both (Ava's canSpeak reads this).
+  const floor = useRef<'script' | 'ava'>('script');
+  const win = useRef<TalkWindow>({ active: false, run: 0, attemptCalled: false, talked: false, held: null, decideTimer: null, missTimer: null });
+  const windowLiveRef = useRef(false);
+  const [windowLive, setWindowLive] = useState(false);
+  // Late-bound handlers for the talk window (assigned each render below), so the hook options stay stable.
+  const talkEvents = useRef<{ attempt: () => void; talk: () => void }>({ attempt: () => undefined, talk: () => undefined });
   const startPracticeSignal = useRef(false);
   const avaLipStop = useRef<(() => void) | null>(null);
   const avaCue = useRef(false); // a cue owns the mouth, so no lip sync
@@ -145,10 +178,35 @@ export default function WordLesson() {
     onStartPractice: () => {
       startPracticeSignal.current = true;
     },
+    canSpeak: () => floor.current === 'ava',
     onLearnerSpeech: () => {
-      learnerCount.current += 1;
+      lastTranscript.current = null; // a new utterance: the previous transcript no longer describes it
+    },
+    onUserTranscript: (text) => {
+      lastTranscript.current = text;
+    },
+    onLearnerAttempt: () => talkEvents.current.attempt(),
+    askCoach: async (question) => {
+      talkEvents.current.talk(); // Ava is about to answer: this utterance was talk
+      const cached = lastCoachId.current ? coachCache.current.get(lastCoachId.current) : undefined;
+      const score = lastResult.current ? scoreWord(lastResult.current) : null;
+      const resp = await requestWordAsk(
+        {
+          profileId,
+          word: SPEC.word,
+          question,
+          lastCoaching: cached ? { caption: cached.caption, focusZoneId: cached.focusZoneId } : null,
+          lastAttempt: score
+            ? { verdict: score.verdict, hitCount: score.hitCount, zoneCount: score.zoneCount, weakestZoneId: score.weakestZoneId }
+            : null,
+          tries: triesRef.current,
+        },
+        AbortSignal.timeout(10_000),
+      );
+      return { say: resp.say };
     },
     onSpeech: (sp) => {
+      talkEvents.current.talk(); // a sentence started: whatever the learner just said is being answered
       // Same binding as useCoachSequence.lipSync; the previous sentence's binding is released first.
       avaLipStop.current?.();
       avaLipStop.current = null;
@@ -194,7 +252,21 @@ export default function WordLesson() {
       mounted.current = false;
       runId.current++;
       coachAbort.current?.abort();
+      if (win.current.decideTimer) clearTimeout(win.current.decideTimer);
+      if (win.current.missTimer) clearTimeout(win.current.missTimer);
+      win.current.active = false;
     };
+  }, []);
+
+  /** Close the talk window: the board and Ava stop deciding, timers cleared. Safe to call at any time. */
+  const endWindow = useCallback(() => {
+    const w = win.current;
+    if (w.decideTimer) clearTimeout(w.decideTimer);
+    if (w.missTimer) clearTimeout(w.missTimer);
+    Object.assign(w, { active: false, attemptCalled: false, talked: false, held: null, decideTimer: null, missTimer: null });
+    windowLiveRef.current = false;
+    setWindowLive(false);
+    setTalking(false);
   }, []);
 
   // Narration switched off mid-lesson: drop the realtime session so Ava never speaks over a silent lesson.
@@ -209,12 +281,33 @@ export default function WordLesson() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** The scripted sequence takes the floor: realtime Ava may not speak and is silenced first (never two voices). */
+  const takeFloor = useCallback(
+    (resetView = false) => {
+      floor.current = 'script';
+      if (realtimeActive()) quietAva(resetView);
+    },
+    [realtimeActive, quietAva],
+  );
+
+  /** Realtime Ava takes the floor: let any scripted line finish, stop the sequence, then she may speak. */
+  const giveFloorToAva = useCallback(
+    async (my: number): Promise<boolean> => {
+      await seq.whenIdle();
+      if (runId.current !== my) return false;
+      seq.cancel();
+      floor.current = 'ava';
+      return true;
+    },
+    [seq.whenIdle, seq.cancel],
+  );
+
   /** One Ava line. With narration off the caption stays up for its reading time. False if superseded. */
   const line = useCallback(
     async (text: string, side = false, cueId: CueId | null = null): Promise<boolean> => {
       const my = runId.current;
       const started = Date.now();
-      if (realtimeActive()) quietAva(false); // never two voices
+      takeFloor();
       await seq.speakLine({ text, cueId, showSideView: side }, { narration: voiceOnRef.current });
       if (runId.current !== my) return false;
       if (!voiceOnRef.current) {
@@ -223,7 +316,7 @@ export default function WordLesson() {
       }
       return runId.current === my;
     },
-    [seq.speakLine, realtimeActive, quietAva],
+    [seq.speakLine, takeFloor],
   );
 
   /** Connect the realtime persona. Failure (no key, quota, network) is not an error: the scripted lesson carries on. */
@@ -242,9 +335,9 @@ export default function WordLesson() {
       a.disconnect();
       return;
     }
-    const ph = phaseRef.current;
-    if (ph === 'coaching' || ph === 'done') return;
-    await a.setPracticeMode(true); // mic to OpenAI stays off while scripted lines play and the board is live
+    // The session opens gated (mic disabled, VAD off) and the floor is the script's, so Ava stays silent until a relay,
+    // the talk window or the done chat hands her the floor.
+    a.sendAppMessage(LESSON_CONTEXT, false);
   }, []);
 
   /** Ava's cue, then the board goes live with a fresh attempt id. */
@@ -264,6 +357,8 @@ export default function WordLesson() {
     prepareTeacher();
     void unlockTeacherAudio();
     narration.show(null);
+    floor.current = 'script';
+    endWindow();
     triesRef.current = 0;
     setTries(0);
     setFocusZoneId(null);
@@ -278,22 +373,30 @@ export default function WordLesson() {
     if (left > 0) await sleep(left);
     if (runId.current !== my) return;
     await goLive(LINES.yourTurn);
-  }, [connectAva, goLive, line, narration.show, setPhase]);
+  }, [connectAva, endWindow, goLive, line, narration.show, setPhase]);
+
+  /** A scripted-style turn: the script has the floor, Ava is silenced and gated, the board goes live with a fresh attempt. */
+  const beginTurn = useCallback(
+    async (my: number, resetView: boolean) => {
+      takeFloor(resetView);
+      if (realtimeActive()) {
+        await avaRef.current.setPracticeMode(true); // gate the mic before the board goes live
+        if (runId.current !== my) return;
+      }
+      newAttempt();
+      setPhase('live');
+    },
+    [newAttempt, realtimeActive, setPhase, takeFloor],
+  );
 
   /** Mouse path: skip whatever Ava is saying and start a new attempt now. */
   const skipToTurn = useCallback(async () => {
     const my = ++runId.current;
     coachAbort.current?.abort();
     seq.cancel();
-    setTalking(false);
-    if (realtimeActive()) {
-      quietAva();
-      await avaRef.current.setPracticeMode(true); // gate the mic before the board goes live
-      if (runId.current !== my) return;
-    }
-    newAttempt();
-    setPhase('live');
-  }, [newAttempt, quietAva, realtimeActive, seq.cancel, setPhase]);
+    endWindow();
+    await beginTurn(my, true);
+  }, [beginTurn, endWindow, seq.cancel]);
 
   /**
    * Realtime coaching for one attempt: cutaway/cue on the avatar, Ava relays the coach caption. 'spoken' when she
@@ -344,7 +447,9 @@ export default function WordLesson() {
         relayed = a.speechCount() !== before;
       }
       if (!relayed) {
-        // Ava could not take it: silence and gate her, and let the scripted path (which restores the view) speak.
+        // Ava could not take it: take the floor back, silence and gate her, and let the scripted path (which restores
+        // the view) speak.
+        floor.current = 'script';
         quietAva(false);
         avaView.current = false;
         await a.setPracticeMode(true);
@@ -363,60 +468,73 @@ export default function WordLesson() {
     [avaOpen, quietAva],
   );
 
-  /** Between attempts: the learner may talk to Ava; the board goes live after a quiet spell, on start_practice, or on the CTA. */
-  const talkThenLive = useCallback(
+  /**
+   * Between attempts: Ava has the floor with the mic open (VAD on) and the board listens at the same time. The board is
+   * live while Ava is not speaking and no result is being decided, and goes live again with a fresh attempt id after
+   * she spoke. Each learner utterance is then either an attempt (settleHeld -> runAttempt) or talk (Ava answers); see
+   * evaluateHeld. Ends on an attempt, start_practice, the CTA, or when the session is lost.
+   */
+  const talkWindow = useCallback(
     async (my: number) => {
       const a = avaRef.current;
+      const w = win.current;
       startPracticeSignal.current = false;
+      if (w.decideTimer) clearTimeout(w.decideTimer);
+      if (w.missTimer) clearTimeout(w.missTimer);
+      Object.assign(w, { active: true, run: my, attemptCalled: false, talked: false, held: null, decideTimer: null, missTimer: null });
       setTalking(true);
-      const t0 = Date.now();
-      let seen = learnerCount.current;
-      let quietFrom: number | null = Date.now(); // Ava is idle right now
+      let live = false;
       let viaPractice = false;
-      while (Date.now() - t0 < TALK_CAP_MS) {
-        await sleep(150);
-        if (runId.current !== my) return;
+      while (runId.current === my) {
         if (!avaOpen()) break;
         if (startPracticeSignal.current) {
           viaPractice = true;
           break;
         }
-        if (learnerCount.current !== seen) {
-          seen = learnerCount.current;
-          quietFrom = null; // restart the window once Ava is idle again
-        }
-        if (quietFrom === null) {
-          const idle = await a.waitForIdle(0);
+        let want: boolean = live;
+        if (w.held || a.speakingNow()) want = false; // deciding a result, or Ava is talking
+        else if (!live) {
+          want = await a.waitForIdle(0); // re-arm only once Ava is fully idle
           if (runId.current !== my) return;
-          if (idle) quietFrom = Date.now();
-        } else if (Date.now() - quietFrom >= TALK_QUIET_MS) {
-          const idle = await a.waitForIdle(0);
-          if (runId.current !== my) return;
-          if (idle) break;
-          quietFrom = null;
         }
+        if (want !== live) {
+          live = want;
+          if (live) {
+            w.attemptCalled = false;
+            w.talked = false;
+            lastTranscript.current = null;
+            newAttempt(); // always a fresh attempt id when the board goes live again
+          }
+          windowLiveRef.current = live;
+          setWindowLive(live);
+        }
+        await sleep(TALK_POLL_MS);
       }
+      if (runId.current !== my) return;
       if (viaPractice) {
         await a.waitForIdle(START_PRACTICE_IDLE_MS); // let her finish the sentence she is on
         if (runId.current !== my) return;
       }
-      setTalking(false);
-      quietAva(false);
-      await a.setPracticeMode(true);
-      if (runId.current !== my) return;
-      newAttempt();
-      setPhase('live');
+      endWindow();
+      await beginTurn(my, false);
     },
-    [avaOpen, newAttempt, quietAva, setPhase],
+    [avaOpen, beginTurn, endWindow, newAttempt],
   );
 
-  const onAttemptEnd = useCallback(
+  /** One finished attempt: coach it (filler, backend coach, then Ava relays or the script speaks) and go on. */
+  const runAttempt = useCallback(
     async (result: WordAttemptResult) => {
-      if (phaseRef.current !== 'live' || result.attemptId !== attemptIdRef.current) return;
       const my = ++runId.current;
+      endWindow();
       setPhase('thinking');
       const count = ++triesRef.current;
       setTries(count);
+      lastResult.current = result;
+      // The script owns the floor from here: Ava is silenced and gated (VAD off, mic disabled) before the filler speaks.
+      takeFloor();
+      let gate: Promise<void> = Promise.resolve();
+      const session = avaRef.current.session();
+      if (realtimeActive() && session && !session.practiceMode) gate = avaRef.current.setPracticeMode(true);
       void seq.say(LINES.filler, { narration: voiceOnRef.current });
 
       coachAbort.current?.abort();
@@ -449,21 +567,22 @@ export default function WordLesson() {
       const final = verdict === 'on_target' || count >= MAX_ATTEMPTS;
 
       if (realtimeActive()) {
-        await seq.whenIdle(); // let the filler finish, then Ava takes over (never two voices)
+        await gate;
         if (runId.current !== my) return;
-        seq.cancel();
+        if (!(await giveFloorToAva(my))) return; // the filler finishes first, then Ava takes over (never two voices)
         const outcome = await coachWithAva({ caption, focus, cueId, side, attemptId: result.attemptId, verdict, final }, my);
         if (outcome === 'aborted') return;
         if (outcome === 'spoken') {
           if (final) {
             setFocusZoneId(null);
-            setPhase('done'); // the session stays open so the learner can keep chatting until Finish
+            setPhase('done'); // the session stays open and Ava keeps the floor so the learner can chat until Finish
+            avaRef.current.sendAppMessage(DONE_MESSAGE, false);
           } else {
-            await talkThenLive(my);
+            await talkWindow(my);
           }
           return;
         }
-        // 'fallback': Ava is silenced and gated; speak the line the scripted way below.
+        // 'fallback': Ava is silenced and gated, the script has the floor; speak the line the scripted way below.
       }
       if (!(await line(caption, side, cueId))) return;
 
@@ -479,8 +598,83 @@ export default function WordLesson() {
       if (runId.current !== my) return;
       await goLive(LINES.again);
     },
-    [coachWithAva, goLive, line, profileId, realtimeActive, seq.cancel, seq.say, seq.whenIdle, setPhase, talkThenLive],
+    [coachWithAva, endWindow, giveFloorToAva, goLive, line, profileId, realtimeActive, seq.say, setPhase, takeFloor, talkWindow],
   );
+
+  // ---- talk window decisions: was the learner's utterance an attempt (the board scores it) or talk (Ava answers)?
+
+  /** The held board result is an attempt: close the window and coach it. Or talk: drop it and let the window re-arm. */
+  const settleHeld = (kind: 'attempt' | 'talk') => {
+    const w = win.current;
+    const held = w.held;
+    if (!w.active || !held) return;
+    if (w.decideTimer) clearTimeout(w.decideTimer);
+    w.decideTimer = null;
+    w.held = null;
+    if (kind === 'talk') {
+      w.attemptCalled = false;
+      w.talked = false;
+      newAttempt(); // the board already reported this attempt id; listen again with a fresh one
+      return;
+    }
+    endWindow();
+    void runAttempt(held).catch(() => undefined);
+  };
+
+  /** Ava's verdict wins (attempt before talk); at the ATTEMPT_DECIDE_MS deadline the transcript decides. */
+  const evaluateHeld = (deadline: boolean) => {
+    const w = win.current;
+    if (!w.active || !w.held || runId.current !== w.run) return;
+    if (w.attemptCalled) return settleHeld('attempt');
+    if (w.talked) return settleHeld('talk');
+    if (!deadline) return;
+    const text = lastTranscript.current?.trim() ?? '';
+    const words = text ? text.split(/\s+/).length : 0;
+    settleHeld(!text || (words <= ATTEMPT_MAX_WORDS && !text.includes('?')) ? 'attempt' : 'talk');
+  };
+
+  talkEvents.current = {
+    attempt: () => {
+      const w = win.current;
+      if (!w.active) return;
+      w.attemptCalled = true;
+      if (w.held) {
+        evaluateHeld(false);
+        return;
+      }
+      if (w.missTimer) return;
+      // Ava heard an attempt but the board has no result yet; if none comes, ask for another try.
+      w.missTimer = setTimeout(() => {
+        w.missTimer = null;
+        if (!w.active || w.held || runId.current !== w.run) return;
+        w.attemptCalled = false;
+        avaRef.current.sendAppMessage(MISSED_MESSAGE, true);
+        newAttempt();
+      }, ATTEMPT_DECIDE_MS);
+    },
+    talk: () => {
+      const w = win.current;
+      if (!w.active) return;
+      w.talked = true;
+      evaluateHeld(false);
+    },
+  };
+
+  /** Board result: a normal attempt end while live, or a result to hold and classify during the talk window. */
+  const onAttemptEnd = (result: WordAttemptResult) => {
+    if (result.attemptId !== attemptIdRef.current) return;
+    if (phaseRef.current === 'live') {
+      void runAttempt(result).catch(() => undefined);
+      return;
+    }
+    const w = win.current;
+    if (!w.active || !windowLiveRef.current || w.held || runId.current !== w.run) return;
+    w.held = result;
+    if (w.missTimer) clearTimeout(w.missTimer);
+    w.missTimer = null;
+    w.decideTimer = setTimeout(() => evaluateHeld(true), ATTEMPT_DECIDE_MS);
+    evaluateHeld(false);
+  };
 
   // Hands-free start: once the microphone is open, begin by itself if the browser already had a tap
   // (the intro and quiz provide one); otherwise wait for Begin so Ava's voice can play.
@@ -505,6 +699,8 @@ export default function WordLesson() {
     runId.current++;
     coachAbort.current?.abort();
     seq.cancel();
+    floor.current = 'script';
+    endWindow();
     quietAva();
     ava.disconnect();
     completeOnboarding();
@@ -515,12 +711,14 @@ export default function WordLesson() {
     runId.current++;
     coachAbort.current?.abort();
     seq.cancel();
+    floor.current = 'script';
+    endWindow();
     quietAva();
     ava.disconnect();
     navigate('/');
   }
 
-  const boardMode = phase === 'demo' ? 'demo' : phase === 'live' ? 'live' : 'idle';
+  const boardMode = phase === 'demo' ? 'demo' : phase === 'live' || (phase === 'coaching' && talking && windowLive) ? 'live' : 'idle';
   const lipFrame = camera && lip.status === 'tracking' ? lip.latest : null;
   const micWarning =
     mic.status === 'denied' ? 'Microphone blocked · allow it in site settings' : mic.status === 'unsupported' ? 'Microphone unsupported in this browser' : null;
@@ -531,7 +729,7 @@ export default function WordLesson() {
 
   const statusText =
     phase === 'coaching' && talking
-      ? 'Talk to Ava, or press Try again'
+      ? `Say “${SPEC.word}”, or ask Ava a question`
       : phase === 'live'
       ? `Your turn · say “${SPEC.word}”`
       : phase === 'done'
@@ -649,7 +847,7 @@ export default function WordLesson() {
             lip={lipFrame}
             mode={boardMode}
             attemptId={attemptId}
-            onAttemptEnd={(r) => void onAttemptEnd(r)}
+            onAttemptEnd={onAttemptEnd}
             focusZoneId={focusZoneId}
           />
         </section>

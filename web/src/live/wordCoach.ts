@@ -1,5 +1,6 @@
 import type { WordAttemptResult, WordSpec, ZoneResult } from '../game/types';
 import { requestLiveCoach, type LiveCoachResponse, type WordScore } from './liveCoach';
+import { livePost } from './transport';
 
 /**
  * Word coaching on /v1/live/coach (word mode), plus the same deterministic line the backend falls back to,
@@ -90,4 +91,26 @@ export function requestWordCoach({ result, profileId }: WordCoachInput, signal?:
     },
     signal,
   );
+}
+
+export interface WordAskInput {
+  profileId: string;
+  word: string;
+  question: string;
+  lastCoaching: { caption: string; focusZoneId: string | null } | null;
+  lastAttempt: { verdict: string | null; hitCount: number | null; zoneCount: number | null; weakestZoneId: string | null } | null;
+  tries: number;
+}
+
+export interface WordAskResponse {
+  say: string;
+  source: 'model' | 'fallback';
+}
+
+/** POST a learner's speech question to the word coach (Ava delegates these). Throws on any failure. */
+export function requestWordAsk(input: WordAskInput, signal?: AbortSignal): Promise<WordAskResponse> {
+  return livePost<WordAskResponse>('/v1/live/word/ask', input, signal).then((r) => {
+    if (!r || typeof r.say !== 'string' || !r.say.trim()) throw new Error('Malformed ask response');
+    return r;
+  });
 }
