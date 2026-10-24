@@ -1,0 +1,37 @@
+{
+  "reference_id": "intonation-rising-ready",
+  "transcript": "Are you ready?",
+  "intended_pattern": "rising",
+  "exercise": "intonation_rising",
+  "language": "en",
+  "analysis_version": "pitch-v1",
+  "word_boundaries": null,
+  "segments": [
+    {
+      "segment_id": "phrase",
+      "label": "full phrase",
+      "start_fraction": 0.0,
+      "end_fraction": 1.0
+    },
+    {
+      "segment_id": "ending",
+      "label": "ending glide",
+      "start_fraction": 0.65,
+      "end_fraction": 1.0
+    }
+  ],
+  "provenance": {
+    "kind": "synthetic_harmonic_fixture",
+    "reviewed": false,
+    "created": "2026-10-23",
+    "description": "Deterministic harmonic phrase generated in this repository. It is one example of a rising ending, not a recording of a human speaker and not a norm for every voice or dialect."
+  },
+  "audio_recipe": {
+    "sample_rate_hz": 16000,
+    "duration_s": 1.0,
+    "start_f0_hz": 180.0,
+    "end_f0_hz": 260.0,
+    "glide_start_fraction": 0.65,
+    "pattern": "rising"
+  }
+}

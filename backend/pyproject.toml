@@ -1,0 +1,33 @@
+[project]
+name = "articulate-backend"
+version = "0.1.0"
+description = "Audio analysis and coaching backend for Articulate intonation practice."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.6",
+    "numpy>=2.0",
+    "librosa>=0.11.0",
+    "soundfile>=0.12",
+    "anthropic>=0.49",
+    "httpx>=0.27",
+    "python-multipart>=0.0.12",
+]
+
+[project.optional-dependencies]
+moss = ["moss>=1.9.0"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
