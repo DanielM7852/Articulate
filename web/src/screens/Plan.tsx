@@ -9,7 +9,7 @@ const LESSON_STAGES = ['Look at the sound', 'Try it on your own', 'Use a cue, th
 
 export default function Plan() {
   const navigate = useNavigate();
-  const { plan, updatePlan, captions, narration, camera, preferences } = useAppState();
+  const { plan, updatePlan, captions, narration, camera, preferences, completeOnboarding } = useAppState();
   const s = SOUNDS[plan.sound];
   const guided = preferences.guidance === 'guided';
 
@@ -92,7 +92,11 @@ export default function Plan() {
           </div>
 
           <div className="btn-row" style={{ gap: 12 }}>
-            <Button variant="primary" icon={<ArrowRight size={17} aria-hidden="true" />} onClick={() => navigate('/practice')}>
+            <Button variant="primary" icon={<ArrowRight size={17} aria-hidden="true" />} onClick={() => {
+                completeOnboarding();
+                navigate('/practice');
+              }}
+            >
               Start first lesson
             </Button>
             <Button onClick={() => navigate('/quiz/1')}>Revisit preferences</Button>

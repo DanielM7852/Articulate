@@ -116,7 +116,7 @@ export default function PracticeStudio() {
     <AppShell
       context="Practice studio"
       inLesson
-      footerNote="Live capture · Formant tracking is measured separately."
+      footerNote="Live capture · The F1/F2 graph and 3D reference are placeholders for now."
     >
       <div className="page--tight">
         <LessonHeader
@@ -128,7 +128,9 @@ export default function PracticeStudio() {
 
         <div className="grid-2">
           <SoundPanel
-            title={phase === 'ready' ? 'Your voice' : 'Your recorded sound'}
+            sound={plan.sound}
+            hideGraph={!assistanceOn}
+            title={phase === 'ready' ? 'Your voice → sound graph' : 'Your recorded sound'}
             badge={
               recording ? (
                 <Badge live>Recording · {mic.elapsed.toFixed(1)} s</Badge>

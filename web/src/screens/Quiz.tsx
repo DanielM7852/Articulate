@@ -266,14 +266,9 @@ export default function Quiz() {
             <Button icon={<ArrowLeft size={17} aria-hidden="true" />} onClick={back}>
               Back
             </Button>
-            <div className="row" style={{ gap: 22 }}>
-              <button type="button" className="text-link muted" onClick={() => navigate('/setup')}>
-                Skip for now
-              </button>
-              <Button variant="primary" icon={<ArrowRight size={17} aria-hidden="true" />} onClick={next}>
-                {step === 3 ? 'Set up practice' : 'Continue'}
-              </Button>
-            </div>
+            <Button variant="primary" icon={<ArrowRight size={17} aria-hidden="true" />} onClick={next}>
+              {step === 3 ? 'Set up practice' : 'Continue'}
+            </Button>
           </div>
         </section>
       </div>

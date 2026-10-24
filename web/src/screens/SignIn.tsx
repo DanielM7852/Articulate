@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, LogIn, Sparkle } from 'lucide-react';
 import { BrandMark, Button } from '../components/ui';
 import { useAppState } from '../state/AppState';
+import { MOCK_ACCOUNT, checkMockCredentials } from '../state/auth';
 import { SOUNDS, SOUND_ORDER } from '../state/types';
 
 /**
- * Sign in. Demo auth only: no credentials leave the browser.
- * Returning learners go straight to practice (per the flow map); "Sign up" starts onboarding.
+ * Sign in. Mock auth only: credentials are checked against MOCK_ACCOUNT and never
+ * leave the browser. Every sign-in continues into onboarding (welcome, quiz, setup, plan).
  */
 export default function SignIn() {
   const navigate = useNavigate();
@@ -15,12 +16,19 @@ export default function SignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    signIn(email.split('@')[0] || 'Learner', true);
-    navigate('/practice');
+    if (!checkMockCredentials(email, password)) {
+      setError('That email and password don’t match the demo account.');
+      return;
+    }
+    signIn(MOCK_ACCOUNT.name, false);
+    navigate('/welcome');
   }
+
+  const demoOnly = () => setError('Only the demo account is available right now. Use the email and password below.');
 
   return (
     <div className="signin">
@@ -44,10 +52,7 @@ export default function SignIn() {
             <Button
               size="block"
               icon={<LogIn size={18} aria-hidden="true" />}
-              onClick={() => {
-                signIn('Learner', true);
-                navigate('/practice');
-              }}
+              onClick={demoOnly}
               style={{ fontWeight: 500, fontSize: 14 }}
             >
               Log in with Google
@@ -67,8 +72,13 @@ export default function SignIn() {
                   type="email"
                   autoComplete="email"
                   placeholder="you@example.com"
+                  required
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  aria-invalid={error ? true : undefined}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setError(null);
+                  }}
                 />
               </label>
               <label className="field">
@@ -84,8 +94,13 @@ export default function SignIn() {
                     type={show ? 'text' : 'password'}
                     autoComplete="current-password"
                     placeholder="Enter your password"
+                    required
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    aria-invalid={error ? true : undefined}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setError(null);
+                    }}
                   />
                   <button
                     type="button"
@@ -99,14 +114,28 @@ export default function SignIn() {
               </label>
             </div>
 
+            {error && (
+              <p className="strong" role="alert" style={{ color: 'var(--color-warn)', fontSize: 13 }}>
+                {error}
+              </p>
+            )}
+
             <button type="submit" className="btn btn--primary btn--block">
               Sign in
             </button>
+
+            <div className="card card--soft" style={{ padding: 14, gap: 4 }}>
+              <p className="eyebrow">Demo account</p>
+              <p className="fine">
+                Email: <span className="ink strong">{MOCK_ACCOUNT.email}</span> · Password:{' '}
+                <span className="ink strong">{MOCK_ACCOUNT.password}</span>
+              </p>
+            </div>
           </div>
 
           <p className="small" style={{ fontSize: 14, textAlign: 'center' }}>
             New to Articulate?{' '}
-            <button type="button" className="text-link underline" style={{ fontSize: 14 }} onClick={() => navigate('/welcome')}>
+            <button type="button" className="text-link underline" style={{ fontSize: 14 }} onClick={demoOnly}>
               Sign up
             </button>
           </p>

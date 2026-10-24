@@ -3,17 +3,15 @@ import { ArrowRight, Eye, SlidersHorizontal, VolumeX } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { Badge, Button } from '../components/ui';
 import { SoundContours } from '../components/practice';
-import { useAppState } from '../state/AppState';
 
 const BENEFITS = [
   { icon: Eye, title: 'Visual first', text: 'See sound patterns and explore a mouth reference.' },
   { icon: VolumeX, title: 'Sound is optional', text: 'Every instruction and example has a text caption.' },
-  { icon: SlidersHorizontal, title: 'Always your choice', text: 'Adjust support, take a break, or skip the introduction.' },
+  { icon: SlidersHorizontal, title: 'Always your choice', text: 'Adjust support, take a break, or change your preferences later.' },
 ];
 
 export default function Welcome() {
   const navigate = useNavigate();
-  const { signIn } = useAppState();
 
   return (
     <AppShell context="Welcome">
@@ -39,31 +37,10 @@ export default function Welcome() {
             ))}
           </ul>
           <div className="stack gap-14" style={{ alignItems: 'flex-start' }}>
-            <Button
-              variant="primary"
-              icon={<ArrowRight size={17} aria-hidden="true" />}
-              onClick={() => {
-                signIn('Learner', false);
-                navigate('/quiz/1');
-              }}
-            >
+            <Button variant="primary" icon={<ArrowRight size={17} aria-hidden="true" />} onClick={() => navigate('/quiz/1')}>
               Start
             </Button>
-            <Button
-              onClick={() => {
-                signIn('Learner', false);
-                navigate('/setup');
-              }}
-            >
-              Skip for now
-            </Button>
           </div>
-          <p className="small" style={{ fontSize: 14 }}>
-            Already have an account?{' '}
-            <button type="button" className="text-link underline" style={{ fontSize: 14 }} onClick={() => navigate('/')}>
-              Sign in →
-            </button>
-          </p>
         </section>
 
         <aside className="panel-navy welcome-panel" aria-label="What practice looks like">

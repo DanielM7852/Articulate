@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Camera, Check, VideoOff } from 'lucide-react';
+import { Camera, Check, Rotate3d, VideoOff, ZoomIn } from 'lucide-react';
 import type { SoundId } from '../state/types';
 import { SOUNDS } from '../state/types';
 import { Badge, Caption } from './ui';
+import { ReferenceModelPlaceholder, VowelGraphPlaceholder, type RefView } from './placeholders';
 
 /* ---------- Amplitude meter (capture quality only) ---------- */
 export function AmplitudeMeter({ levels, active }: { levels: number[]; active?: boolean }) {
@@ -40,21 +41,42 @@ export function LessonSteps({ current }: { current: number }) {
   );
 }
 
-/* ---------- Sound panel ---------- */
-export function SoundPanel({ title, badge, footer }: { title: string; badge: ReactNode; footer: ReactNode }) {
+/* ---------- Sound panel (F1/F2 cursor graph placeholder) ---------- */
+export function SoundPanel({
+  sound,
+  hideGraph,
+  title,
+  badge,
+  footer,
+}: {
+  sound: SoundId;
+  hideGraph?: boolean;
+  title: string;
+  badge: ReactNode;
+  footer: ReactNode;
+}) {
   return (
     <section className="card" aria-label="Your sound">
       <div className="card-head">
         <h2 className="card-title">{title}</h2>
         {badge}
       </div>
+      <div className="row wrap" style={{ gap: 18 }}>
+        <span className="fine row" style={{ gap: 6 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--color-navy)' }} aria-hidden="true" />
+          Voice cursor + trail
+        </span>
+        <span className="fine">◌ Dashed region = target</span>
+      </div>
+      <VowelGraphPlaceholder sound={sound} hidden={hideGraph} />
       {footer}
     </section>
   );
 }
 
-/* ---------- Reference panel ---------- */
+/* ---------- Reference panel (3D model placeholder) ---------- */
 export function ReferencePanel({ sound, status }: { sound: SoundId; status: string }) {
+  const [view, setView] = useState<RefView>('cutaway');
   const s = SOUNDS[sound];
   return (
     <section className="card" aria-label="Target reference">
@@ -62,15 +84,49 @@ export function ReferencePanel({ sound, status }: { sound: SoundId; status: stri
         <h2 className="card-title">Target reference</h2>
         <Badge tone="neutral">{status}</Badge>
       </div>
-      <VowelGlyph sound={sound} size="lg" />
-      <div className="stack gap-4">
-        <p className="navy strong" style={{ fontSize: 12 }}>
-          {s.tongue}
-        </p>
-        <p className="fine" style={{ fontSize: 12 }}>
-          {s.lips}
-        </p>
+      <div className="row row--between wrap">
+        <div className="row" style={{ gap: 7 }} role="group" aria-label="Reference view">
+          {(['front', 'side', 'cutaway'] as RefView[]).map((v) => (
+            <button
+              key={v}
+              type="button"
+              className="btn btn--sm btn--choice"
+              aria-pressed={view === v}
+              onClick={() => setView(v)}
+            >
+              {v[0].toUpperCase() + v.slice(1)}
+            </button>
+          ))}
+        </div>
+        <span className="row fine navy" style={{ gap: 10 }}>
+          <Rotate3d size={18} aria-hidden="true" /> Drag to rotate
+          <ZoomIn size={18} aria-hidden="true" /> Scroll to zoom
+        </span>
       </div>
+      <div style={{ position: 'relative', height: 262, borderRadius: 6, overflow: 'hidden' }}>
+        <ReferenceModelPlaceholder sound={sound} view={view} />
+        <div
+          style={{
+            position: 'absolute',
+            left: 18,
+            bottom: 16,
+            background: 'rgba(237,242,247,0.96)',
+            borderRadius: 4,
+            padding: '8px 10px',
+            textAlign: 'left',
+          }}
+        >
+          <p className="navy strong" style={{ fontSize: 12 }}>
+            {s.tongue}
+          </p>
+          <p className="fine" style={{ fontSize: 12 }}>
+            {s.lips}
+          </p>
+        </div>
+      </div>
+      <p className="navy" style={{ fontSize: 12, fontWeight: 500 }}>
+        Reference illustration · not your anatomy
+      </p>
       <Caption>
         “{s.spelled}” · {s.cue}
       </Caption>

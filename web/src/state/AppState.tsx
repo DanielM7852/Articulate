@@ -4,11 +4,15 @@ import type { Attempt, Preferences, Plan, SoundId } from './types';
 /**
  * Session-wide learner state. Access settings (captions, audio, narration, camera)
  * live here so they stay consistent on every screen, as the design requires.
- * Everything persists to localStorage when available; the app works without it.
+ * Preferences and attempts persist to localStorage when available; the app works
+ * without it. Sign-in and onboarding progress are session-only, so every visit
+ * starts at sign-in and runs through the welcome, quiz, setup and plan screens.
  */
 interface AppState {
   learnerName: string | null;
   isReturning: boolean;
+  /** True once the learner has finished onboarding (quiz, setup, plan) this session. */
+  onboarded: boolean;
   captions: boolean;
   audio: boolean;
   narration: boolean;
@@ -21,6 +25,7 @@ interface AppState {
 interface AppActions {
   signIn: (name: string, returning: boolean) => void;
   signOut: () => void;
+  completeOnboarding: () => void;
   setCaptions: (on: boolean) => void;
   setAudio: (on: boolean) => void;
   setNarration: (on: boolean) => void;
@@ -37,6 +42,7 @@ const STORAGE_KEY = 'articulate.state.v1';
 const defaultState: AppState = {
   learnerName: null,
   isReturning: false,
+  onboarded: false,
   captions: true,
   audio: false,
   narration: false,
@@ -56,6 +62,9 @@ const defaultState: AppState = {
   attempts: [],
 };
 
+/** Session-only fields: never restored from storage. */
+const SESSION_DEFAULTS = { learnerName: null, isReturning: false, onboarded: false } satisfies Partial<AppState>;
+
 function load(): AppState {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -64,6 +73,7 @@ function load(): AppState {
     return {
       ...defaultState,
       ...parsed,
+      ...SESSION_DEFAULTS,
       preferences: { ...defaultState.preferences, ...parsed.preferences },
       plan: { ...defaultState.plan, ...parsed.plan },
     };
@@ -80,7 +90,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       // Recordings are never persisted; only summaries of attempts.
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, ...SESSION_DEFAULTS }));
     } catch {
       /* storage unavailable: keep working in memory */
     }
@@ -90,8 +100,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const actions: AppActions = useMemo(
     () => ({
-      signIn: (name, returning) => patch({ learnerName: name, isReturning: returning }),
+      signIn: (name, returning) => patch({ learnerName: name, isReturning: returning, onboarded: false }),
       signOut: () => setState(defaultState),
+      completeOnboarding: () => patch({ onboarded: true }),
       setCaptions: (on) => patch({ captions: on }),
       setAudio: (on) => setState((s) => ({ ...s, audio: on, narration: on ? s.narration : false })),
       setNarration: (on) => setState((s) => ({ ...s, narration: on, audio: on ? true : s.audio })),
