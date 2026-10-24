@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Mic, Play, ScanFace, Snail, Square, TriangleAlert, Video, VideoOff, Volume2 } from 'lucide-react';
+import { Mic, ScanFace, Snail, Square, TriangleAlert, Video, VideoOff, Volume2 } from 'lucide-react';
+import { ResultSheet } from '../components/ResultSheet';
 import { OnboardingFrame, Segmented, StepHeading, Switch } from '../components/Onboarding';
 import { AmplitudeMeter, CameraTile, LESSON_STEPS } from '../components/practice';
 import { VowelGraph } from '../components/VowelGraph';
@@ -24,13 +25,8 @@ import { TARGETS } from '../vowel/targets';
 type Phase = 'ready' | 'recording' | 'analyzing' | 'feedback';
 type View = 'graph' | 'guide' | 'mirror';
 
-const FEELINGS = [
-  { id: 'too-hard', label: 'Too hard' },
-  { id: 'okay', label: 'Okay' },
-  { id: 'ready', label: 'Ready for more' },
-] as const;
-
-const SHEET_EXIT_MS = 220;
+/** Keeps the sheet mounted long enough for its own exit motion to finish. */
+const SHEET_EXIT_MS = 260;
 
 /** One short line for the graph's status chip. Tracking words come from the vowel-mapper engine. */
 function trackingLabel(tracking: TrackingStatus, mic: MicStatus) {
@@ -307,7 +303,8 @@ export default function PracticeStudio() {
             onReplay={recordingUrl ? replayRecording : undefined}
             onReadAloud={() => coach && speech.speak(`${coach.observation} ${coach.nextCue}`, { force: true })}
             onTryAgain={startRecording}
-            onLessHelp={() => navigate('/summary')}
+            onOnMyOwn={() => navigate('/summary')}
+            onDismiss={resetForSound}
           />
         )
       }
@@ -380,87 +377,5 @@ export default function PracticeStudio() {
         </section>
       </div>
     </OnboardingFrame>
-  );
-}
-
-function ResultSheet({
-  attempt,
-  coach,
-  leaving,
-  feeling,
-  onFeeling,
-  onReplay,
-  onReadAloud,
-  onTryAgain,
-  onLessHelp,
-}: {
-  attempt: Attempt;
-  coach: CoachResponse | null;
-  leaving: boolean;
-  feeling: Attempt['feeling'];
-  onFeeling: (id: NonNullable<Attempt['feeling']>) => void;
-  onReplay?: () => void;
-  onReadAloud: () => void;
-  onTryAgain: () => void;
-  onLessHelp: () => void;
-}) {
-  const usable = attempt.quality === 'usable';
-  return (
-    <section
-      className={`lp-sheet ${usable ? 'lp-sheet--ok' : 'lp-sheet--warn'} ${leaving ? 'is-leaving' : ''}`}
-      aria-label="Result"
-      aria-busy={!coach}
-    >
-      <div className="lp-sheet-inner">
-        <div className="lp-sheet-head">
-          <span className="lp-sheet-icon" aria-hidden="true">
-            {usable ? <CheckCircle2 size={26} /> : <TriangleAlert size={24} />}
-          </span>
-          <div className="grow">
-            <h2 className="lp-sheet-title">
-              {usable ? `Got it · ${attempt.usableVoicedSec.toFixed(1)} s of usable voice` : 'Let’s try that capture again'}
-            </h2>
-            <p className="ob-fine">
-              {usable ? 'This describes the sound only. It isn’t a pronunciation score.' : 'That’s a capture issue, not a mistake.'}
-            </p>
-          </div>
-          <button type="button" className="ob-pill" aria-label="Read feedback aloud" title="Read feedback aloud" onClick={onReadAloud} disabled={!coach}>
-            <Volume2 size={17} aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="lp-coach" aria-live="polite">
-          {coach ? (
-            <>
-              <p>{coach.observation}</p>
-              <p className="lp-cue">{coach.nextCue}</p>
-            </>
-          ) : (
-            <p className="ob-fine">Reading your attempt…</p>
-          )}
-        </div>
-
-        <div className="lp-sheet-tools">
-          <button type="button" className="ob-text-btn" onClick={onReplay} disabled={!onReplay}>
-            <Play size={16} aria-hidden="true" /> Replay mine
-          </button>
-          {usable && (
-            <div className="lp-feel">
-              <span className="ob-fine">How did that feel?</span>
-              <Segmented label="How did that feel?" options={[...FEELINGS]} value={feeling} onChange={onFeeling} />
-            </div>
-          )}
-        </div>
-
-        <div className="lp-sheet-actions">
-          <button type="button" className="ob-text-btn" onClick={onLessHelp}>
-            Try with less help
-          </button>
-          <button type="button" className="ob-cta" onClick={onTryAgain} disabled={!coach}>
-            <Mic size={18} aria-hidden="true" /> Try again
-          </button>
-        </div>
-      </div>
-    </section>
   );
 }

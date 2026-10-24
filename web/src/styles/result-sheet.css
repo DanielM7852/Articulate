@@ -1,0 +1,310 @@
+/* ---------- Result sheet (lp-sheet) ----------
+ * A floating translucent card over the action bar, not a full-width slab: the
+ * graph and mouth guide stay visible behind it. It enters from the bottom and
+ * leaves the same way. Status colour lives in the small icon and the metrics,
+ * the primary action stays navy like every other primary in the app.
+ */
+.lp-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 5;
+  width: min(600px, calc(100% - 24px));
+  max-height: min(68dvh, 580px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(24px) saturate(170%);
+  border: 1px solid rgba(218, 223, 217, 0.9);
+  border-radius: 26px;
+  box-shadow: 0 24px 60px rgba(23, 47, 78, 0.18), 0 2px 8px rgba(23, 47, 78, 0.08);
+  will-change: transform;
+  animation: lp-sheet-in 520ms var(--ease-drawer) both;
+}
+@keyframes lp-sheet-in {
+  from {
+    transform: translateY(calc(100% + 32px));
+  }
+}
+
+/* Grab zone: handle + header. Dragging here moves the whole sheet. */
+.lp-sheet-grab {
+  flex-shrink: 0;
+  padding: 8px 14px 4px 18px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.lp-sheet-grab:active {
+  cursor: grabbing;
+}
+.lp-sheet-handle {
+  display: block;
+  width: 36px;
+  height: 5px;
+  margin: 0 auto 8px;
+  border-radius: 99px;
+  background: rgba(98, 108, 108, 0.28);
+}
+.lp-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lp-sheet-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.lp-sheet--ok .lp-sheet-icon {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+.lp-sheet--warn .lp-sheet-icon {
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+}
+.lp-sheet-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--color-ink);
+}
+.lp-sheet-sub {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--color-muted);
+}
+.lp-round {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(35, 41, 35, 0.06);
+  color: var(--color-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease, transform var(--dur-press) var(--ease-out);
+}
+.lp-round:active:not(:disabled) {
+  transform: scale(0.92);
+}
+.lp-round:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+@media (hover: hover) and (pointer: fine) {
+  .lp-round:hover:not(:disabled) {
+    background: var(--color-navy-soft);
+    color: var(--color-navy);
+  }
+}
+
+/* Body scrolls on its own if a long coach reply needs more room */
+.lp-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 18px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lp-metrics {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lp-metric {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 99px;
+  background: var(--color-success-tint);
+  border: 1px solid var(--color-success-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+.lp-metric strong {
+  font-weight: 700;
+  color: var(--color-success);
+}
+
+.lp-coach {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 72px;
+}
+.lp-observation {
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--color-ink);
+}
+.lp-cue {
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--color-navy-soft);
+  font-size: 14.5px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--color-navy);
+}
+.lp-cue-label {
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.lp-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+.lp-skeleton span {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--color-line);
+  animation: lp-skeleton 1.2s ease-in-out infinite;
+}
+.lp-skeleton span:nth-child(2) {
+  width: 86%;
+  animation-delay: 120ms;
+}
+.lp-skeleton span:nth-child(3) {
+  width: 58%;
+  animation-delay: 240ms;
+}
+@keyframes lp-skeleton {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.lp-feel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.lp-feel-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+.lp-feel .ob-segmented {
+  width: 330px;
+  max-width: 100%;
+}
+.lp-feel .ob-segmented button {
+  height: 32px;
+  font-size: 12.5px;
+}
+
+/* The path forward: one primary, one alternative, replay off to the side */
+.lp-sheet-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 14px 10px;
+  border-top: 1px solid rgba(218, 223, 217, 0.7);
+}
+.lp-sheet-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lp-replay {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-navy);
+}
+.lp-sheet-path .ob-text-btn {
+  color: var(--color-navy);
+}
+.lp-sheet-cta {
+  min-width: 0;
+  height: 48px;
+  padding: 0 22px;
+}
+
+/* Phones: full-width actions, primary on top of the alternative */
+@media (max-width: 720px) {
+  .lp-sheet {
+    width: calc(100% - 16px);
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    border-radius: 22px;
+  }
+  .lp-sheet-body {
+    padding: 10px 14px 2px;
+  }
+  .lp-feel {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .lp-feel .ob-segmented {
+    width: 100%;
+  }
+  .lp-sheet-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    padding: 10px 12px 12px;
+    gap: 4px;
+  }
+  .lp-sheet-path {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .lp-sheet-cta {
+    width: 100%;
+  }
+  .lp-replay {
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .lp-sheet {
+    background: var(--color-surface);
+    backdrop-filter: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-sheet {
+    animation: lp-sheet-fade 160ms ease both;
+  }
+}
+@keyframes lp-sheet-fade {
+  from {
+    opacity: 0;
+  }
+}
