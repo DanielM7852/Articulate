@@ -7,7 +7,7 @@ export type Outcome = 'hit' | 'miss' | 'unheard';
 
 /**
  * Self-paced: each note waits for the player, and its window opens at an accepted vowel or an explicit attempt.
- * Timed: notes arrive at a fixed spacing, with a visual approach ring. Neither uses audio cues.
+ * Timed: notes arrive at a minimum spacing, with a visual approach ring. Neither uses audio cues.
  */
 export type Pacing = { kind: 'self' } | { kind: 'timed'; spacingMs: number };
 
@@ -89,6 +89,10 @@ export class GameRun {
   private readonly lastHoldMs: (number | null)[] = [];
 
   constructor(readonly steps: Step[], readonly zones: ZoneSet, options: Partial<GameOptions> = {}) {
+    for (const { note } of steps) {
+      const required = note.kind === 'hold' ? [note.vowel] : [note.from, note.to];
+      for (const vowel of required) if (!zones[vowel]) throw new Error(`Missing personal zone: ${vowel}`);
+    }
     this.options = { ...GAME_DEFAULTS, ...options };
     this.notes = steps.map((_, index) => ({
       index, status: 'upcoming', targetMs: NaN, windowStartMs: NaN, windowEndMs: NaN,
@@ -170,7 +174,7 @@ export class GameRun {
     }
     if (frame.status === 'tracking' && frame.point) {
       note.heardPoints++;
-      if (this.judge(note, frame.point)) this.resolve(note, 'hit', t);
+      if (this.judge(note, frame.point) && note.heardPoints >= this.options.minHeardPoints) this.resolve(note, 'hit', t);
     }
   }
 
@@ -208,7 +212,7 @@ export class GameRun {
     } else {
       // A slow or unheard attempt may consume the nominal spacing. The next visible ring
       // still gets its full approach; no other note is judged behind the current card.
-      next.targetMs = Math.max(next.targetMs, t + this.options.approachMs);
+      next.targetMs = Math.max(note.targetMs + this.options.pacing.spacingMs, t + this.options.approachMs);
       next.windowStartMs = next.targetMs - this.options.earlyMs;
       next.windowEndMs = next.targetMs + this.windowFor(next.index) + this.options.latencyMs;
     }

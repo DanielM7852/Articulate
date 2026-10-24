@@ -154,6 +154,10 @@ describe('game run: self-paced (default)', () => {
     return snapshot;
   };
 
+  it('rejects a run with missing personal zones before listening', () => {
+    expect(() => new GameRun([we], { ee: zones.ee })).toThrow('Missing personal zone: oo');
+  });
+
   it('keeps waiting through room noise until an accepted vowel or an explicit attempt', () => {
     const run = new GameRun([we], zones);
     let snapshot = play(run, span(0, 30000, (t) => rejected(t, 'unvoiced')));
@@ -161,6 +165,17 @@ describe('game run: self-paced (default)', () => {
     expect(snapshot.notes[0].outcome).toBeUndefined();
     run.beginAttempt(30000);
     snapshot = play(run, span(30025, 34000, (t) => rejected(t, 'unvoiced')));
+    expect(snapshot.notes[0].outcome).toBe('unheard');
+  });
+
+  it('never awards a hit before the required amount of accepted audio, even if both endpoints were visited', () => {
+    const run = new GameRun([we], zones, { minHeardPoints: 5 });
+    const snapshot = play(run, [
+      ...span(0, 1000, (t) => rejected(t, 'quiet')),
+      heard(1000, 430, 1000), heard(1025, 430, 1000),
+      heard(1050, 420, 2800), heard(1075, 420, 2800),
+      ...span(1100, 5000, (t) => rejected(t, 'quiet')),
+    ]);
     expect(snapshot.notes[0].outcome).toBe('unheard');
   });
 
@@ -278,6 +293,18 @@ describe('game run: timed', () => {
     expect(snapshot.notes[0].outcome).toBe('unheard');
     expect(snapshot.notes[1].targetMs - snapshot.timeMs).toBeGreaterThanOrEqual(run.options.approachMs);
     expect(snapshot.notes[1].heardPoints).toBe(0);
+  });
+
+  it('preserves the chosen minimum spacing after a delayed note followed by an early hit', () => {
+    const run = new GameRun([hold, hold, hold], zones, { pacing: { kind: 'timed', spacingMs: 3500 } });
+    let snapshot = run.push(rejected(0, 'quiet'));
+    const firstEnd = snapshot.notes[0].windowEndMs;
+    for (let t = 25; t <= firstEnd + 25; t += 25) snapshot = run.push(rejected(t, 'quiet'));
+    const secondStart = snapshot.notes[1].windowStartMs;
+    for (let t = firstEnd + 50; t < secondStart; t += 25) snapshot = run.push(rejected(t, 'quiet'));
+    for (let t = secondStart; t <= secondStart + 700; t += 25) snapshot = run.push(heard(t, 900, 1450));
+    expect(snapshot.notes[1].outcome).toBe('hit');
+    expect(snapshot.notes[2].targetMs - snapshot.notes[1].targetMs).toBeGreaterThanOrEqual(3500);
   });
 
   it('gives each note its own slot at the chosen spacing', () => {

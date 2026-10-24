@@ -95,3 +95,24 @@ export function lessonAvailability(lesson: Lesson, zones: ZoneSet | null): Lesso
 export function lessonZones(lesson: Lesson, zones: ZoneSet): ZoneSet {
   return Object.fromEntries(lesson.calibration.flatMap((vowel) => zones[vowel] ? [[vowel, zones[vowel]]] : []));
 }
+
+/** Extra exercises own complete target sets; remeasuring eee there never moves the base target. */
+export interface GameCalibrations {
+  base: ZoneSet | null;
+  extra: Partial<Record<string, ZoneSet>>;
+}
+
+export function calibrationKey(lesson: Lesson): string {
+  return lesson.id === 'boy' || lesson.id === 'ladder' ? lesson.id : 'base';
+}
+
+export function saveCalibration(current: GameCalibrations, key: string, zones: ZoneSet): GameCalibrations {
+  return key === 'base'
+    ? { base: zones, extra: {} }
+    : { ...current, extra: { ...current.extra, [key]: zones } };
+}
+
+export function zonesForLesson(lesson: Lesson, current: GameCalibrations): ZoneSet {
+  const key = calibrationKey(lesson);
+  return lessonZones(lesson, (key === 'base' ? current.base : current.extra[key]) ?? {});
+}
