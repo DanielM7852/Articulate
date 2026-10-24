@@ -31,7 +31,8 @@ export type SessionEvent =
   | { kind: 'utterance'; text: string; currentSound: SoundId }
   | { kind: 'attempt_feedback'; attemptId: string; currentSound: SoundId; coach: AttemptCoachSummary }
   | { kind: 'control'; control: ControlKind }
-  | { kind: 'silence'; seconds: number };
+  | { kind: 'silence'; seconds: number }
+  | { kind: 'analysis_ready'; attemptId: string; currentSound: SoundId };
 
 const TIMEOUT_MS = 20_000;
 const ACTIONS: TurnAction[] = ['demonstrate', 'prompt_attempt', 'await_reply', 'next_sound', 'end_session'];
@@ -68,6 +69,34 @@ export function startSession(
   signal?: AbortSignal,
 ): Promise<SessionStart> {
   return post<SessionStart>('/v1/live/session/start', req, signal).then(checkTurn);
+}
+
+export type ArticulationStatus = 'pending' | 'ready' | 'none' | 'delivered' | 'unknown';
+const STATUSES: ArticulationStatus[] = ['pending', 'ready', 'none', 'delivered', 'unknown'];
+const STATUS_TIMEOUT_MS = 5_000;
+
+/** Status of the background articulation analysis for one attempt. Throws on network error or non-2xx. */
+export async function getArticulationStatus(
+  attemptId: string,
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<{ status: ArticulationStatus; sound: SoundId | null }> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), STATUS_TIMEOUT_MS);
+  const onAbort = () => ctl.abort();
+  if (signal?.aborted) ctl.abort();
+  else signal?.addEventListener('abort', onAbort);
+  try {
+    const url = `/v1/live/articulation/${encodeURIComponent(attemptId)}?profileId=${encodeURIComponent(profileId)}`;
+    const res = await fetch(url, { signal: ctl.signal });
+    if (!res.ok) throw new Error(`${url} failed (${res.status})`);
+    const j = (await res.json()) as { status?: ArticulationStatus; sound?: SoundId | null };
+    if (!j || !STATUSES.includes(j.status as ArticulationStatus)) throw new Error('Malformed articulation status');
+    return { status: j.status as ArticulationStatus, sound: j.sound ?? null };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
 }
 
 export function sendTurn(

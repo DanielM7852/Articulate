@@ -1,7 +1,16 @@
-"""POST /v1/live/coach, /notes, /session/start and /session/turn. Provider failures never surface as 500s."""
+"""POST /v1/live/coach, /notes, /articulation, /session/start and /session/turn.
 
-from fastapi import APIRouter, BackgroundTasks, Request
+Provider failures never surface as 500s.
+"""
 
+import asyncio
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from app.live import insight
+from app.live.articulation import annotate_attempts, extract_features
 from app.live.notes import update_notes
 from app.live.orchestrator import LiveDeps, coach_attempt
 from app.live.runtime import get_runtime
@@ -13,10 +22,19 @@ from app.live.schemas import (
     SessionStartRequest,
     SessionTurn,
     SessionTurnRequest,
+    SoundId,
+    valid_attempt_id,
+    valid_profile_id,
 )
 from app.live.session import get_store, start_session, take_turn
 
 router = APIRouter(prefix="/v1/live")
+logger = logging.getLogger(__name__)
+
+ARTICULATION_MAX_BYTES = 1 << 20
+ARTICULATION_MIN_BYTES = 44
+_WAV_TYPES = ("audio/wav", "audio/x-wav")
+INSIGHT_RETRY_DELAY_S = 2.0
 
 
 def _deps(request: Request) -> LiveDeps:
@@ -51,4 +69,137 @@ async def live_session_start(body: SessionStartRequest, request: Request) -> Ses
 @router.post("/session/turn", response_model=SessionTurn)
 async def live_session_turn(body: SessionTurnRequest, request: Request) -> SessionTurn:
     deps = _deps(request)
-    return await take_turn(deps, get_store(deps, request.app), body)
+    return await take_turn(deps, get_store(deps, request.app), body, get_runtime(request.app))
+
+
+async def _find_attempt(history, profile_id: str, attempt_id: str, limit: int) -> tuple[list[dict], dict | None]:
+    """Recent attempts (newest first) and the one for attempt_id; waits once for the coach record to persist."""
+    for tries_left in (1, 0):
+        items = list((await history.load(profile_id, limit)).attempts)
+        match = next((i for i in items if isinstance(i, dict) and i.get("attemptId") == attempt_id), None)
+        if match is not None or not tries_left:
+            return items, match
+        await asyncio.sleep(INSIGHT_RETRY_DELAY_S)
+    return [], None
+
+
+def _pick_claim(attempt: dict, sound: str) -> dict | None:
+    art = attempt.get("articulation")
+    claims = art.get("claims") if isinstance(art, dict) and art.get("quality") == "ok" else None
+    allowed = [c for c in claims or [] if insight.claim_allowed(sound, c)]
+    allowed.sort(key=lambda c: c.get("dimension") != "height")
+    return allowed[0] if allowed else None
+
+
+async def _insight_lane(runtime, history, settings, client, profile_id: str, attempt_id: str, sound: str,
+                        features: dict) -> None:
+    """Find the gated claim for the attempt and store a validated line in the registry."""
+    items, match = await _find_attempt(history, profile_id, attempt_id, settings.live_history_limit)
+    if match is None:
+        runtime.set_insight(attempt_id, profile_id, sound, "none")
+        return
+    # Persistence may have failed (or the table is unpublished): annotate in memory from this process's features.
+    pending = []
+    for item in items:
+        if isinstance(item, dict) and "articulation" not in item and "artic" not in item:
+            stored = features if item is match else runtime.recalled_features(profile_id, item.get("attemptId"))
+            if stored is not None:
+                item = {**item, "artic": stored}
+        pending.append(item)
+    annotated = annotate_attempts(pending)
+    current = next((i for i in annotated if isinstance(i, dict) and i.get("attemptId") == attempt_id), None)
+    claim = _pick_claim(current, sound) if current else None
+    if claim is None:
+        runtime.set_insight(attempt_id, profile_id, sound, "none")
+        return
+    recent = [i for i in annotated if isinstance(i, dict) and i.get("attemptId") != attempt_id]
+    say, source = await insight.compose_line(settings, client, sound, claim, recent)
+    runtime.set_insight(attempt_id, profile_id, sound, "ready", say, source)
+
+
+async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profile_id: str, sound: str,
+                            clock: tuple[float | None, float | None]) -> None:
+    """Collector -> features -> history -> insight line. Never raises."""
+    runtime = get_runtime(request.app)
+    try:
+        features = history = None
+        state = request.app.state
+        async with runtime.articulation_slot(reserved=True) as ok:
+            if ok:
+                client = getattr(state, "live_articulation", None) or runtime.articulation()
+                if client is not None:
+                    bundle = await client.analyze(
+                        wav, attempt_id=attempt_id, capture_start_monotonic_ms=clock[0], time_origin_unix_ms=clock[1]
+                    )
+                    features = extract_features(bundle) if bundle is not None else None
+                if features is not None:
+                    history = getattr(state, "live_history", None) or runtime.history(
+                        getattr(state, "live_spacetime_transport", None)
+                    )
+                    await history.record_articulation(profile_id, attempt_id, sound, features)
+                    runtime.remember_features(profile_id, attempt_id, features)
+        if features is None:
+            runtime.set_insight(attempt_id, profile_id, sound, "none")
+            return
+        model_client = getattr(state, "live_client", None) or runtime.anthropic()
+        await _insight_lane(runtime, history, state.settings, model_client, profile_id, attempt_id, sound, features)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("articulation job failed: %s", type(exc).__name__)
+        try:
+            entry = runtime.get_insight(attempt_id, profile_id)
+            if entry is None or entry["status"] == "pending":
+                runtime.set_insight(attempt_id, profile_id, sound, "none")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@router.get("/articulation/{attemptId}")
+async def live_articulation_status(attemptId: str, profileId: str, request: Request):
+    """Insight status for the browser: never includes the line or claims."""
+    if not valid_attempt_id(attemptId):
+        raise HTTPException(422, "attemptId must be a UUID")
+    if not valid_profile_id(profileId):
+        raise HTTPException(422, "profileId must match [A-Za-z0-9_.:@-]{1,64}")
+    entry = get_runtime(request.app).get_insight(attemptId, profileId)
+    if entry is None:
+        return {"status": "unknown", "sound": None}
+    return {"status": entry["status"], "sound": entry["sound"]}
+
+
+@router.post("/articulation")
+async def live_articulation(
+    request: Request,
+    background: BackgroundTasks,
+    attemptId: str,
+    profileId: str,
+    sound: SoundId,
+    captureStartMonotonicMs: float | None = None,
+    timeOriginUnixMs: float | None = None,
+):
+    """Accept an attempt WAV; analysis runs in the background and is stored with the learner's history."""
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() not in _WAV_TYPES:
+        raise HTTPException(415, "Content-Type must be audio/wav")
+    if not valid_attempt_id(attemptId):
+        raise HTTPException(422, "attemptId must be a UUID")
+    if not valid_profile_id(profileId):
+        raise HTTPException(422, "profileId must match [A-Za-z0-9_.:@-]{1,64}")
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > ARTICULATION_MAX_BYTES:
+            raise HTTPException(413, "WAV exceeds 1 MiB")
+        chunks.append(chunk)
+    if size < ARTICULATION_MIN_BYTES:
+        raise HTTPException(422, "WAV body too small")
+    state = request.app.state
+    runtime = get_runtime(request.app)
+    if not state.settings.articulation_configured and getattr(state, "live_articulation", None) is None:
+        return JSONResponse({"accepted": False, "reason": "disabled"})
+    if not runtime.reserve_articulation():
+        return JSONResponse({"accepted": False, "reason": "busy"})
+    runtime.set_insight(attemptId, profileId, sound, "pending")
+    background.add_task(
+        _articulation_job, request, b"".join(chunks), attemptId, profileId, sound,
+        (captureStartMonotonicMs, timeOriginUnixMs),
+    )
+    return JSONResponse({"accepted": True}, status_code=202, background=background)

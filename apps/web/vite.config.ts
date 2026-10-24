@@ -16,6 +16,8 @@ export default defineConfig({
     proxy: {
       "/api": { target: "http://127.0.0.1:8000", ws: true },
       "/health": "http://127.0.0.1:8000",
+      "/v1/articulation": "http://127.0.0.1:8010",
     },
   },
+  preview: { proxy: { "/v1/articulation": "http://127.0.0.1:8010" } },
 });

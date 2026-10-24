@@ -19,6 +19,16 @@ export function SessionStatus({ state, label }: { state: DirectorState; label: s
   );
 }
 
+/** Visible (not only spoken) note that a deeper analysis of the last attempt is running in the background. */
+export function InsightBadge() {
+  return (
+    <span className="sd-insight" role="status" aria-live="polite">
+      <span className="sd-insight-dot" aria-hidden="true" />
+      Taking a closer look…
+    </span>
+  );
+}
+
 /** Always-visible tap controls for a running session, so nothing depends on voice or hearing. */
 export function SessionControls({
   state,

@@ -173,3 +173,22 @@ test("set_learner_progress is backend-only, validates, and upserts", () => {
     '{"a":2}',
   );
 });
+
+test("record_articulation is backend-only, validates, and upserts", () => {
+  const put = (who: typeof backend, id: string, j: string) =>
+    tx(who, (c) =>
+      module.record_articulation(c, {
+        attempt_id: "att-1",
+        profile_id: id,
+        features_json: j,
+      }),
+    );
+  expect(() => put(alice, "alice", "{}")).toThrow("backend only");
+  expect(() => put(backend, "bad id", "{}")).toThrow("invalid profile_id");
+  expect(() => put(backend, "alice", "[]")).toThrow("JSON object");
+  put(backend, "alice", '{"quality":"ok"}');
+  put(backend, "alice", '{"quality":"insufficient"}');
+  const rows = [...harness.db.learnerArticulation.iter()];
+  expect(rows.length).toBe(1);
+  expect(rows[0].features).toBe('{"quality":"insufficient"}');
+});

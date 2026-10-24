@@ -142,7 +142,9 @@ optional label/annotations, image samples, keyframe references, statistics and c
 
 There are no pronunciation verdicts, inferred tongue/throat coordinates, emotion
 labels, target-dependent measurements or coaching text. SPARC/ARTI-6 are not part
-of this camera collector. Your agent can reason over the dataset independently.
+of this camera collector. The separate [audio model collector](../services/articulation/README.md)
+now supplies their estimates and Silero speech activity. Your agent can consume the
+two versioned datasets independently and align their original capture clocks.
 
 ## Existing backbone camera
 

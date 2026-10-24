@@ -82,6 +82,15 @@ const learnerNote = table(
     updated_at: t.timestamp(),
   },
 );
+const learnerArticulation = table(
+  { name: "learner_articulation", public: false },
+  {
+    attempt_id: t.string().primaryKey(),
+    profile_id: t.string().index(),
+    features: t.string(),
+    created_at: t.timestamp(),
+  },
+);
 const learnerProgress = table(
   { name: "learner_progress", public: false },
   {
@@ -103,6 +112,7 @@ const db = schema({
   coachTurn,
   learnerNote,
   learnerProgress,
+  learnerArticulation,
 });
 export default db;
 
@@ -397,6 +407,26 @@ export const set_learner_note = db.reducer(
     if (ctx.db.learnerNote.profile_id.find(profile_id))
       ctx.db.learnerNote.profile_id.update(row);
     else ctx.db.learnerNote.insert(row);
+  },
+);
+
+export const record_articulation = db.reducer(
+  { attempt_id: t.string(), profile_id: t.string(), features_json: t.string() },
+  (ctx, { attempt_id, profile_id, features_json }) => {
+    const principal = ctx.db.backend.id.find(0);
+    if (!principal || !ctx.sender.isEqual(principal.identity))
+      throw new Error("backend only");
+    if (!profileIdRe.test(profile_id)) throw new Error("invalid profile_id");
+    parseJsonObject(features_json, "features_json");
+    const row = {
+      attempt_id,
+      profile_id,
+      features: features_json,
+      created_at: ctx.timestamp,
+    };
+    if (ctx.db.learnerArticulation.attempt_id.find(attempt_id))
+      ctx.db.learnerArticulation.attempt_id.update(row);
+    else ctx.db.learnerArticulation.insert(row);
   },
 );
 

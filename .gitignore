@@ -22,3 +22,4 @@ spacetimedb/node_modules/
 spacetimedb/dist/
 spacetimedb/target/
 apps/web/public/mediapipe/wasm/
+services/articulation/.models/

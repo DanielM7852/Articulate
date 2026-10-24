@@ -43,6 +43,11 @@ export interface ConversationAudio {
    * taken from a calibration window.
    */
   setTeacherLevel(rms: number): void;
+  /**
+   * PCM of the last finished attempt segment (16 kHz mono Int16, incl. ~300 ms pre-roll, max 8.5 s), handed out
+   * once. null for replies/discards. startMs is the performance.now() time of the first sample (estimated).
+   */
+  takeAttemptPcm(): { pcm: Int16Array; startMs: number } | null;
   dispose(): void;
 }
 

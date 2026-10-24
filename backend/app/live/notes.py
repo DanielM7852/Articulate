@@ -18,6 +18,50 @@ _NOTES_TIMEOUT_FLOOR_S = 30.0
 
 _SHAMING = re.compile(r"\b(wrong|bad|fail(?:ed|s|ure)?|incorrect)\b", re.IGNORECASE)
 _TONGUE_CLAIM = re.compile(r"\btongue\b", re.IGNORECASE)
+_COMPARISON = re.compile(
+    r"\b(best|strongest|good)\b[^.!?]{0,30}\b(tries|attempts|ones)\b|\bearlier\b"
+    r"|\b(?:the\s+)?model\b|\ba clear (?:ee|oo|ah)\b",
+    re.IGNORECASE,
+)
+_OBSERVATION = re.compile(r"\bI\s+(?:can\s+|could\s+)?(?:see|saw|noticed|watched|spotted)\b", re.IGNORECASE)
+_SENTENCE_SPLIT = re.compile(r"[.!?;]+")
+
+
+def has_articulation_claims(attempts: list[dict[str, Any]]) -> bool:
+    for a in attempts:
+        art = a.get("articulation")
+        if isinstance(art, dict) and art.get("quality") == "ok" and art.get("claims"):
+            return True
+    return False
+
+
+def _model_attempts(attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attempts as sent to the model: articulation claims keep only part/dimension/direction/basis (no numeric deltas)."""
+    out = []
+    for a in attempts:
+        art = a.get("articulation")
+        if not isinstance(art, dict):
+            out.append(a)
+            continue
+        claims = [
+            {k: c[k] for k in ("part", "dimension", "direction", "basis") if k in c}
+            for c in (art.get("claims") or [])
+            if isinstance(c, dict)
+        ]
+        out.append({**a, "articulation": {"quality": art.get("quality"), "claims": claims}})
+    return out
+
+
+def _tongue_text_ok(texts: list[str]) -> bool:
+    for t in texts:
+        if not _TONGUE_CLAIM.search(t):
+            continue
+        if _OBSERVATION.search(t):
+            return False
+        for sentence in _SENTENCE_SPLIT.split(t):
+            if _TONGUE_CLAIM.search(sentence) and not _COMPARISON.search(sentence):
+                return False
+    return True
 
 
 def _is_miss(attempt: dict[str, Any]) -> bool:
@@ -71,7 +115,9 @@ def _validate(draft: NotesDraft, attempts: list[dict[str, Any]]) -> NotesDraft:
     joined = " ".join(texts)
     if re.search(r"\d", joined):
         raise DecisionError("digits_in_notes")
-    if _SHAMING.search(joined) or _TONGUE_CLAIM.search(joined):
+    if _SHAMING.search(joined):
+        raise DecisionError("notes_language")
+    if _TONGUE_CLAIM.search(joined) and not (has_articulation_claims(attempts) and _tongue_text_ok(texts)):
         raise DecisionError("notes_language")
     if any(s.lastAttemptId is not None and s.lastAttemptId not in known for s in draft.struggles):
         raise DecisionError("unknown_attempt_id")
@@ -99,7 +145,7 @@ async def update_notes(deps: LiveDeps, profile_id: str) -> LearnerNotes:
 
     if attempts and deps.model_available:
         payload = json.dumps(
-            {"recentAttempts": attempts, "previousNotes": context.notes}, separators=(",", ":")
+            {"recentAttempts": _model_attempts(attempts), "previousNotes": context.notes}, separators=(",", ":")
         )
         try:
             draft = await llm.ask(

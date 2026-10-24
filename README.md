@@ -23,6 +23,13 @@ collector and integration contract. Open `/vision.html` in the `apps/web` worksp
 inspect/export full landmarks, blendshapes, geometry, pose, quality, timing and
 optional images without the backend. Import `apps/web/src/cv/index.ts` for integration.
 
+## Audio articulation data: SPARC, ARTI-6 and Silero
+
+The independent [model collector](services/articulation/README.md) adds SPARC tongue,
+lip and jaw estimates, ARTI-6 velum/tongue-root/larynx proxies, and Silero speech
+activity. It provides a local Python/HTTP interface and typed browser client for
+later agent integration. Models use explicitly prepared, pinned local checkpoints.
+
 ## Quick start
 
 ```powershell

@@ -10,6 +10,14 @@ const MODES: BargeInMode[] = ['aec', 'gated', 'headphones', 'off'];
 const PREROLL_SAMPLES = 4800; // 300 ms at 16 kHz
 const WORKLET_BLOCK = 2048;
 const INK_FLUSH_MS = 1500;
+const ATTEMPT_PCM_MAX = Math.round(16000 * 8.5); // bounded attempt buffer (~272 KB)
+
+interface PcmCapture {
+  chunks: Int16Array[];
+  samples: number;
+  /** performance.now() time of the first buffered sample (estimated from the pre-roll sample count). */
+  startMs: number;
+}
 
 function loadMode(): BargeInMode {
   try {
@@ -52,6 +60,8 @@ class Engine {
   private segFns = new Set<(r: SegmentResult) => void>();
   private ring: Int16Array[] = [];
   private ringSamples = 0;
+  private active: PcmCapture | null = null;
+  private attemptPcm: { pcm: Int16Array; startMs: number } | null = null;
   private session: InkSession | null = null;
   private teacher = false;
   private gen = 0;
@@ -96,6 +106,22 @@ class Engine {
   onSegment(fn: (r: SegmentResult) => void): () => void {
     this.segFns.add(fn);
     return () => this.segFns.delete(fn);
+  }
+
+  /** PCM (16 kHz mono Int16) of the most recent attempt segment, once; null for replies/discards. */
+  takeAttemptPcm(): { pcm: Int16Array; startMs: number } | null {
+    const a = this.attemptPcm;
+    this.attemptPcm = null;
+    return a;
+  }
+
+  private appendActive(pcm: Int16Array): void {
+    const a = this.active;
+    if (!a || a.samples >= ATTEMPT_PCM_MAX) return;
+    const room = ATTEMPT_PCM_MAX - a.samples;
+    const part = pcm.length > room ? pcm.subarray(0, room) : pcm;
+    a.chunks.push(part);
+    a.samples += part.length;
   }
 
   // ---- lifecycle ----
@@ -164,6 +190,8 @@ class Engine {
     this.session = null;
     this.ring = [];
     this.ringSamples = 0;
+    this.active = null;
+    this.attemptPcm = null;
     if (this.state.sttReady || this.state.speaking) this.set({ sttReady: false, speaking: false });
   }
 
@@ -179,6 +207,7 @@ class Engine {
     const now = performance.now();
     const lvl = frameLevel(pcm);
     this.barge.pushAec({ t: now, rms: lvl.rms / 32768, periodicity: lvl.periodicity });
+    this.appendActive(pcm);
     if (this.session) {
       this.session.push(pcm);
       return;
@@ -194,6 +223,9 @@ class Engine {
     for (const ev of events) {
       if (ev.type === 'start') {
         this.set({ speaking: true });
+        this.attemptPcm = null;
+        this.active = { chunks: [], samples: 0, startMs: performance.now() - this.ringSamples / 16 };
+        for (const c of this.ring) this.appendActive(c);
         if (this.state.listening !== 'attempt') {
           const s = this.ink.open();
           for (const c of this.ring) s.push(c);
@@ -206,6 +238,17 @@ class Engine {
         this.set({ speaking: false });
         const s = this.session;
         this.session = null;
+        const cap = this.active;
+        this.active = null;
+        if (cap && ev.type === 'segment' && ev.kind === 'attempt' && this.state.listening !== 'off') {
+          const pcm = new Int16Array(cap.samples);
+          let o = 0;
+          for (const c of cap.chunks) {
+            pcm.set(c, o);
+            o += c.length;
+          }
+          this.attemptPcm = { pcm, startMs: cap.startMs };
+        }
         if (ev.type === 'discard' || this.state.listening === 'off') {
           s?.abort();
         } else {
@@ -279,6 +322,7 @@ export function useConversationAudio(opts: {
       onSegmentStart: (fn) => eng.onSegmentStart(fn),
       onSegment: (fn) => eng.onSegment(fn),
       setTeacherSpeaking: (a) => eng.setTeacherSpeaking(a),
+      takeAttemptPcm: () => eng.takeAttemptPcm(),
       onBargeIn: (fn) => {
         bargeFns.current.add(fn);
         return () => bargeFns.current.delete(fn);

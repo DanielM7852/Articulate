@@ -1,0 +1,42 @@
+{
+  "wavlm": {
+    "repository": "microsoft/wavlm-large",
+    "revision": "c1423ed94bb01d80a3f5ce5bc39f6026a0f4828c",
+    "files": ["config.json", "preprocessor_config.json", "pytorch_model.bin"],
+    "sha256": {
+      "pytorch_model.bin": "fdee460e529396ddb2f8c8e8ce0ad74cfb747b726bc6f612e666c7c1e1963c9d"
+    }
+  },
+  "sparc": {
+    "repository": "cheoljun95/Speech-Articulatory-Coding",
+    "revision": "2e6a07d4b35022d4366a2896a6293fe16aaed78a",
+    "files": [
+      "feature_extraction.yaml",
+      "wavlm_large-9_cut-10_mngu_linear.pkl"
+    ],
+    "codeRepository": "https://github.com/Berkeley-Speech-Group/Speech-Articulatory-Coding",
+    "codeRevision": "d59139be64cdbd5a6cb76c73fda00af0d0e97e59",
+    "sha256": {
+      "wavlm_large-9_cut-10_mngu_linear.pkl": "5c71fadf7af0a9555c67fae3d59382a70d39da56c501675bc7273aa1c9e27cb8"
+    }
+  },
+  "arti6": {
+    "repository": "lee-jhwn/arti-6",
+    "revision": "ee7a98c15521b8d82dd685244f9a4a905a134221",
+    "files": ["inversion_flt_ckpt.pt", "inversion_lora_ckpt.pt"],
+    "codeRepository": "https://github.com/lee-jhwn/arti-6",
+    "codeRevision": "c61055d2b49a4ae4a7ca98b008ec7305b6ab9712",
+    "architectureFile": "arti6/inversion/wavlm_articulatory.py",
+    "architectureSha256": "aea153080eac1dcfe5b2004ecc447f1775675dbccef87239388e1b70c184ee8b",
+    "sha256": {
+      "inversion_flt_ckpt.pt": "e2ae7ea114a74a9c74df7c082ba616923c9ae0289db5ed177a2388e758b14927",
+      "inversion_lora_ckpt.pt": "278cd026f4a8b3b547dcb7665a7c2772967754bb0b6e7b175638dbb7d8022743"
+    }
+  },
+  "silero_vad": {
+    "package": "silero-vad",
+    "version": "6.2.3",
+    "backend": "onnx",
+    "windowSamples": 512
+  }
+}

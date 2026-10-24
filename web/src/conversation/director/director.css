@@ -67,6 +67,31 @@
   }
 }
 
+.sd-insight {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #f1f4fa;
+  border: 1px dashed #b9c6e0;
+  font-size: 0.9rem;
+  font-weight: 500;
+  min-height: 30px;
+}
+.sd-insight-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2f6fb0;
+  animation: sd-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sd-insight-dot {
+    animation: none;
+  }
+}
+
 .sd-controls {
   display: flex;
   flex-wrap: wrap;

@@ -8,7 +8,7 @@ import { MouthReference, type MouthReferenceHandle, type MouthView } from '../co
 import { TeacherCaptions } from '../components/TeacherCaptions';
 import { prepareTeacher, unlockTeacherAudio } from '../audio/teacher';
 import { useConversationAudio } from '../conversation/audio';
-import { SessionControls, SessionStatus } from '../conversation/director/SessionControls';
+import { InsightBadge, SessionControls, SessionStatus } from '../conversation/director/SessionControls';
 import { useSessionDirector, type CaptureOutcome } from '../conversation/director/useSessionDirector';
 import '../conversation/director/director.css';
 import { bridgeLine } from '../live/bridge';
@@ -18,6 +18,7 @@ import { AttemptRecorder } from '../live/attemptRecorder';
 import { offlineSink, type MetricSink } from '../live/metricSink';
 import { createSpacetimeSink, type SinkStatus } from '../live/spacetimeSink';
 import { profileIdFor, requestLiveCoach, type LiveCoachResponse } from '../live/liveCoach';
+import { uploadArticulation } from '../live/articulationUpload';
 import { useCoachSequence } from '../live/useCoachSequence';
 import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
 import { useSpeech } from '../audio/useSpeech';
@@ -238,6 +239,7 @@ export default function PracticeStudio() {
   async function finishCapture(): Promise<CaptureOutcome | null> {
     const myRun = ++runId.current;
     captureActive.current = false;
+    const attemptPcm = convAudio.takeAttemptPcm(); // taken now so a later segment can't replace it
     prepareTeacher(); // fetch the speech token and open the socket while the coach call runs
     void unlockTeacherAudio();
     const target = tracking.endWindow();
@@ -285,6 +287,18 @@ export default function PracticeStudio() {
 
     // Live coaching first; any failure falls back to the existing local/agent path.
     let live: LiveCoachResponse | null = null;
+    // Background articulation analysis: fire-and-forget, parallel to (never blocking) the coach call.
+    let insight: Promise<boolean> | undefined;
+    if (attemptPcm) {
+      insight = uploadArticulation({
+        attemptId: attempt.attemptId,
+        profileId,
+        sound: attempt.sound,
+        pcm: attemptPcm.pcm,
+        captureStartMonotonicMs: attemptPcm.startMs,
+        timeOriginUnixMs: performance.timeOrigin,
+      });
+    }
     try {
       const rec = await recorded;
       const ctl = new AbortController();
@@ -327,6 +341,7 @@ export default function PracticeStudio() {
       if (runId.current !== myRun) return null;
       return {
         attemptId: attempt.attemptId,
+        insight,
         coach: {
           caption: live.caption,
           cueId: live.cueId,
@@ -349,6 +364,7 @@ export default function PracticeStudio() {
     if (runId.current !== myRun) return null;
     return {
       attemptId: attempt.attemptId,
+      insight,
       coach: {
         caption: text,
         cueId: null,
@@ -574,6 +590,7 @@ export default function PracticeStudio() {
         <>
           <div className="sd-bar">
             <SessionStatus state={director.state} label={director.statusLabel} />
+            {director.insightPending && <InsightBadge />}
             <SessionControls
               state={director.state}
               onControl={director.control}

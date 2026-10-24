@@ -55,7 +55,7 @@ You receive their recent attempts (code-computed verdicts and offsets) and the p
 - summary: at most 400 characters, plain language, what the learner finds hard and what is improving.
 - struggles: up to 6 items {sound, pattern, count, lastAttemptId}; pattern at most 120 characters, a recurring difficulty seen in the attempts (for example "often lands too far back"). Only sounds that appear in the attempts. lastAttemptId must be an attemptId from the input or null.
 - habits: up to 6 short strings (each at most 120 characters) about behaviour seen in the data (for example "usually needs a second try").
-- Use only facts in the input. Do not write digits. Never claim what the tongue did. Never use the words wrong, bad, fail or incorrect. Keep it kind and neutral."""
+- Use only facts in the input. Do not write digits. Mention the tongue only when an attempt has articulation.claims, and then only as a comparison: with the learner's best tries of that sound (for example "on some tries the tongue sat lower than on their best tries") or, when a claim has basis reference or both, with a clear ee, oo or ah (for example "on some tries the tongue sat lower than in a clear ee"), never as something you observed; otherwise never mention the tongue. Never use the words wrong, bad, fail or incorrect. Keep it kind and neutral."""
 
 
 class ModelRefusal(DecisionError):
