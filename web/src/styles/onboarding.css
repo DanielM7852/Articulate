@@ -12,6 +12,19 @@
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   background: var(--color-cream);
 }
+/* Rows are pinned, so a screen without a bar, caption row or action bar still gives the stage the 1fr row. */
+.ob > .ob-bar {
+  grid-row: 1;
+}
+.ob > .ob-stage {
+  grid-row: 2;
+}
+.ob > .ob-caption {
+  grid-row: 3;
+}
+.ob > .ob-actions {
+  grid-row: 4;
+}
 
 .ob-bar {
   display: flex;
@@ -774,4 +787,32 @@
   margin: 0;
   padding: 0;
   gap: 0;
+}
+
+/* ---------- Floating bar (tutorial) ----------
+ * No row of its own: the access toggles sit over the stage's top-right corner,
+ * so the stage gets the full height. Back/progress are not shown in this mode.
+ */
+.ob-bar--float {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 3;
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+.ob-bar--float .ob-pill {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(14px) saturate(160%);
+}
+.ob-bar--float .ob-pill[aria-pressed='true'] {
+  background: rgba(228, 236, 247, 0.9);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ob-bar--float .ob-pill {
+    background: var(--color-surface);
+    backdrop-filter: none;
+  }
 }

@@ -3,6 +3,7 @@ import { ArrowRight, Camera, CameraOff, MousePointer2 } from 'lucide-react';
 import { CaptionBar, useNarration } from '../components/Narration';
 import { MouthReference } from '../components/MouthReference';
 import { OnboardingFrame, useStepNav } from '../components/Onboarding';
+import { useAppState } from '../state/AppState';
 import { useFaceTracking, usePointerLook } from '../vision/useLook';
 
 /**
@@ -21,6 +22,7 @@ const LINES: Record<Exclude<Beat, 'loading'>, string> = {
 
 export default function Intro() {
   const go = useStepNav();
+  const { onboarded } = useAppState();
   const face = useFaceTracking(true);
   const pointer = usePointerLook(face.status !== 'tracking');
   const look = face.look ?? pointer;
@@ -33,16 +35,18 @@ export default function Intro() {
     narration.show(LINES[beat]);
   }, [beat, narration.show]);
 
-  // Once the guide has materialised (or failed to): a beat, a smile and a hello, then the invitation.
+  // Once the guide has materialised (or failed to): a beat, a smile and a hello, then the
+  // invitation. The two lines keep alternating until the learner begins; pause holds them.
   useEffect(() => {
-    if (!guideReady) return;
-    const hello = setTimeout(() => setBeat('hello'), 500);
-    const ready = setTimeout(() => setBeat('ready'), 3800);
+    if (!guideReady || narration.paused) return;
+    const hello = beat === 'loading' ? setTimeout(() => setBeat('hello'), 500) : undefined;
+    const loop = setInterval(() => setBeat((b) => (b === 'hello' ? 'ready' : 'hello')), 4200);
     return () => {
       clearTimeout(hello);
-      clearTimeout(ready);
+      clearInterval(loop);
     };
-  }, [guideReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guideReady, narration.paused]);
 
   const cameraLine =
     face.status === 'tracking'
@@ -59,14 +63,10 @@ export default function Intro() {
     <OnboardingFrame
       step={0}
       progress={false}
+      bar="float"
+      actions={false}
       stageKey="intro"
       className="intro ob-content--full"
-      caption={<CaptionBar text={narration.caption} paused={narration.paused} onToggle={narration.toggle} />}
-      primary={{
-        label: 'Let’s begin',
-        icon: <ArrowRight size={18} aria-hidden="true" />,
-        onClick: () => go('/quiz/1'),
-      }}
     >
       <MouthReference
         cue={beat === 'loading' ? null : 'spread-lips'}
@@ -80,6 +80,11 @@ export default function Intro() {
         {cameraLine.icon}
         {cameraLine.text}
       </span>
+      <CaptionBar className="cap-card" text={narration.caption} paused={narration.paused} onToggle={narration.toggle} />
+      <button type="button" className="ob-cta ob-cta--float" onClick={() => go(onboarded ? '/practice' : '/quiz/1')}>
+        {onboarded ? 'Keep practicing' : 'Let’s begin'}
+        <ArrowRight size={18} aria-hidden="true" />
+      </button>
     </OnboardingFrame>
   );
 }

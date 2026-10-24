@@ -144,20 +144,11 @@ export default function Tutorial() {
         ? { label: 'Start practicing', icon: <ArrowRight size={18} aria-hidden="true" />, onClick: finish }
         : undefined;
 
+  // No bars: the access toggles float top-right, Skip top-left, the main button
+  // bottom-right, and the guide's words are a textbox at the bottom of the stage.
   return (
-    <OnboardingFrame
-      step={ONBOARDING_STEPS}
-      stageKey="tutorial"
-      className="tut ob-content--full"
-      caption={
-        <div className={`cap-wrap ${solo ? 'cap-wrap--large' : ''}`}>
-          <CaptionBar text={narration.caption} paused={narration.paused} onToggle={narration.toggle} />
-        </div>
-      }
-      secondary={phase === 'done' ? undefined : { label: 'Skip', onClick: finish }}
-      primary={primary}
-    >
-      <div className={`tut-stage ${solo ? 'is-solo' : ''}`}>
+    <OnboardingFrame step={ONBOARDING_STEPS} bar="float" actions={false} stageKey="tutorial" className="tut ob-content--full">
+      <div className={`tut-stage ${solo ? 'is-solo' : ''} ${primary ? 'has-cta' : ''}`}>
         {/* Full-size guide while explaining; once the learner takes over it shrinks into a corner of the graph. */}
         {!solo && (
           <section className="lp-pane tut-guide" aria-label="Mouth guide">
@@ -175,7 +166,7 @@ export default function Tutorial() {
             emptyHint={solo ? 'Hold “ee” and your sound appears here.' : 'Watch the example.'}
           />
           {micBlocked && micMessage && (
-            <span className="lp-overlay lp-overlay--bl lp-pill" role="alert">
+            <span className="lp-overlay lp-overlay--bl lp-pill tut-mic" role="alert">
               <TriangleAlert size={15} aria-hidden="true" /> {micMessage}
             </span>
           )}
@@ -185,6 +176,24 @@ export default function Tutorial() {
             </div>
           )}
         </section>
+
+        {phase !== 'done' && (
+          <button type="button" className="lp-overlay lp-overlay--tl lp-pill" onClick={finish}>
+            Skip
+          </button>
+        )}
+        {primary && (
+          <button type="button" className="ob-cta ob-cta--float" onClick={primary.onClick} disabled={primary.disabled}>
+            {primary.label}
+            {primary.icon}
+          </button>
+        )}
+        <CaptionBar
+          className={`cap-card ${solo ? 'cap-card--large' : ''}`}
+          text={narration.caption}
+          paused={narration.paused}
+          onToggle={narration.toggle}
+        />
       </div>
     </OnboardingFrame>
   );

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Mic, ScanFace, Snail, Square, TriangleAlert, Video, VideoOff, Volume2, X } from 'lucide-react';
 import { ResultSheet } from '../components/ResultSheet';
 import { CaptionBar, useNarration } from '../components/Narration';
-import { OnboardingFrame, Segmented, StepHeading, Switch } from '../components/Onboarding';
+import { AccessToggles, OnboardingFrame, Segmented, StepHeading, Switch } from '../components/Onboarding';
 import { AmplitudeMeter, CameraTile, LESSON_STEPS } from '../components/practice';
 import { VowelGraph } from '../components/VowelGraph';
 import { MouthReference, cueForSound, type MouthView } from '../components/MouthReference';
@@ -323,10 +323,9 @@ export default function PracticeStudio() {
       step={stepIndex + 1}
       total={LESSON_STEPS.length}
       progressLabel="Lesson progress"
+      bar="none"
       stageKey="practice"
       className="lp ob-content--full"
-      onClose={{ label: 'Pause or finish', onClick: () => navigate('/summary') }}
-      caption={<CaptionBar text={narration.caption} paused={narration.paused} onToggle={narration.toggle} />}
       footer={
         <>
           <button type="button" className="ob-text-btn lp-listen" onClick={playReference} disabled={busy}>
@@ -368,13 +367,16 @@ export default function PracticeStudio() {
             onReplay={recordingUrl ? replayRecording : undefined}
             onReadAloud={() => coach && speech.speak(`${coach.observation} ${coach.nextCue}`, { force: true })}
             onTryAgain={startRecording}
-            onOnMyOwn={() => navigate('/summary')}
+            onOnMyOwn={() => navigate('/own')}
             onDismiss={resetForSound}
           />
         )
       }
     >
       <div className="lp-head">
+        <button type="button" className="ob-icon-btn" aria-label="Finish session" title="Finish session" onClick={() => navigate('/')}>
+          <X size={22} aria-hidden="true" />
+        </button>
         <StepHeading
           title={
             <>
@@ -400,12 +402,14 @@ export default function PracticeStudio() {
             resetForSound();
           }}
         />
+        <AccessToggles />
       </div>
 
       <div className={`lp-stage ${solo ? 'is-solo' : ''}`}>
         {!compact && graphPane}
         {!solo && sidePane}
         {compact && sidePane}
+        <CaptionBar className="cap-card" text={narration.caption} paused={narration.paused} onToggle={narration.toggle} />
       </div>
     </OnboardingFrame>
   );

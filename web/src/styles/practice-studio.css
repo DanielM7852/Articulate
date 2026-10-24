@@ -5,22 +5,34 @@
  * Results arrive as a floating sheet (result-sheet.css).
  */
 
+/* One short row: finish, the sound's name, the sound chooser and the access toggles.
+ * There is no bar above it; this row is the top of the screen after the tutorial. */
 .lp-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px 24px;
+  gap: 8px 14px;
   flex-wrap: wrap;
-  padding: 2px 24px 12px;
+  padding: 8px 14px 8px 8px;
+}
+.lp-head .ob-heading {
+  flex: 1;
+  min-width: 0;
 }
 .lp-head .ob-title {
-  font-size: clamp(24px, 1.2vw + 16px, 32px);
+  font-size: clamp(20px, 0.9vw + 14px, 26px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lp-head .ob-title .navy {
   font-family: var(--font-serif);
 }
 .lp-sounds {
-  width: 300px;
+  width: 290px;
+}
+.lp-sounds button {
+  height: 34px;
+  font-size: 13px;
 }
 .lp-sounds .serif {
   font-size: 15px;
@@ -29,6 +41,7 @@
 
 /* ---------- Stage ---------- */
 .lp-stage {
+  position: relative;
   flex: 1;
   min-height: 320px;
   display: grid;
@@ -219,9 +232,11 @@ button.lp-pill:active {
 /* ---------- Small screens: one pane, view switcher floats over it ---------- */
 @media (max-width: 720px) {
   .lp-head {
-    padding: 0 16px 10px;
+    padding: 6px 10px 8px 4px;
   }
+  /* finish · name · toggles on one line, the sound chooser full width beneath */
   .lp-sounds {
+    order: 10;
     width: 100%;
   }
   .lp-stage {
@@ -266,4 +281,61 @@ button.lp-pill:active {
 /* The graph pane in practice has pills in its top-left corner; the axis caption sits below them */
 .lp .vg-axis--y {
   top: 56px;
+}
+
+/* ---------- On your own (own-) ----------
+ * No graph, no target: one big word to say, in the same edge-to-edge stage.
+ * Results arrive as the same floating sheet as guided practice.
+ */
+.own-stage {
+  position: relative;
+  flex: 1;
+  min-height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 96px; /* room for the caption textbox beneath the word */
+  border-top: 1px solid var(--color-line);
+  text-align: center;
+}
+.own-word {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(84px, 14vw, 176px);
+  line-height: 1;
+  letter-spacing: -0.025em;
+  color: var(--color-navy);
+  transition: transform 420ms var(--ease-drawer), color 240ms ease;
+}
+.own-stage.is-recording .own-word {
+  transform: scale(1.05);
+  color: var(--color-ink);
+}
+.own-sub {
+  margin-top: 14px;
+  font-size: 18px;
+  color: var(--color-muted);
+}
+.own-sub .serif {
+  color: var(--color-ink);
+}
+.own-stage .cap {
+  text-align: left;
+}
+@media (prefers-reduced-motion: reduce) {
+  .own-word {
+    transition: color 240ms ease;
+  }
+  .own-stage.is-recording .own-word {
+    transform: none;
+  }
+}
+
+/* Phones: the caption textbox sits above the pills that line the bottom of the pane */
+@media (max-width: 720px) {
+  .lp-stage .cap.cap-card,
+  .own-stage .cap.cap-card {
+    bottom: 62px;
+  }
 }

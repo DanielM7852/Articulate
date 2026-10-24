@@ -39,7 +39,10 @@ export function ResultSheet({
   onReadAloud,
   onTryAgain,
   onOnMyOwn,
+  onNextSound,
   onDismiss,
+  mode = 'guided',
+  compare = null,
 }: {
   attempt: Attempt;
   coach: CoachResponse | null;
@@ -50,27 +53,42 @@ export function ResultSheet({
   onReplay?: () => void;
   onReadAloud: () => void;
   onTryAgain: () => void;
-  /** Move on to an attempt without task-specific cues. */
-  onOnMyOwn: () => void;
+  /** Guided mode: move on to an attempt without task-specific cues. */
+  onOnMyOwn?: () => void;
+  /** Independent mode: continue with the next sound, cues back on. */
+  onNextSound?: () => void;
   /** Close the sheet and return to the studio. */
   onDismiss: () => void;
+  /** Independent attempts are reported next to the guided best, never merged with it. */
+  mode?: 'guided' | 'independent';
+  /** Best guided voiced seconds for this sound, shown beside an independent result. */
+  compare?: number | null;
 }) {
   const usable = attempt.quality === 'usable';
+  const independent = mode === 'independent';
   const ref = useRef<HTMLElement>(null);
   const gone = useRef(false);
   const drag = useRef<{ start: number; base: number; hist: { y: number; t: number }[] } | null>(null);
 
   /* ---------- Next step ---------- */
   const action = feeling === 'ready' ? 'reduce-assistance' : feeling === 'too-hard' ? 'simplify' : coach?.nextAction;
-  const advance = usable && (action === 'reduce-assistance' || action === 'next-context');
+  const advance = !independent && usable && (action === 'reduce-assistance' || action === 'next-context') && !!onOnMyOwn;
   const primary = advance
-    ? { label: 'Try on my own', icon: <ArrowRight size={18} aria-hidden="true" />, run: onOnMyOwn }
+    ? { label: 'Try on my own', icon: <ArrowRight size={18} aria-hidden="true" />, run: onOnMyOwn! }
     : { label: usable ? 'Try again' : 'Record again', icon: <Mic size={18} aria-hidden="true" />, run: onTryAgain };
-  const secondary = usable
-    ? advance
-      ? { label: 'Practice once more', run: onTryAgain }
-      : { label: 'Try on my own', run: onOnMyOwn }
-    : null;
+  const secondary = !usable
+    ? null
+    : independent
+      ? onNextSound && { label: 'Next sound', run: onNextSound }
+      : advance
+        ? { label: 'Practice once more', run: onTryAgain }
+        : onOnMyOwn && { label: 'Try on my own', run: onOnMyOwn };
+  const title = usable ? (independent ? 'Got it, on your own' : 'Got it') : 'Let’s try that capture again';
+  const sub = usable
+    ? independent
+      ? 'No cues this time. Describes the sound only, not a score.'
+      : 'Describes the sound only, not a pronunciation score.'
+    : 'That’s a capture issue, not a mistake.';
 
   /* ---------- Motion ---------- */
   const offscreen = () => (ref.current?.offsetHeight ?? 400) + 32;
@@ -153,9 +171,10 @@ export function ResultSheet({
   }
 
   const metrics = [
-    { value: attempt.usableVoicedSec, label: 'of voice' },
+    { value: attempt.usableVoicedSec, label: independent ? 'of voice, on your own' : 'of voice' },
     attempt.timeInTargetSec != null ? { value: attempt.timeInTargetSec, label: 'in target' } : null,
     attempt.longestHoldSec != null ? { value: attempt.longestHoldSec, label: 'longest hold' } : null,
+    independent && compare != null ? { value: compare, label: 'best with cues' } : null,
   ].filter((m): m is { value: number; label: string } => m !== null);
 
   return (
@@ -181,11 +200,9 @@ export function ResultSheet({
           </span>
           <div className="grow">
             <h2 className="lp-sheet-title" id="lp-sheet-title">
-              {usable ? 'Got it' : 'Let’s try that capture again'}
+              {title}
             </h2>
-            <p className="lp-sheet-sub">
-              {usable ? 'Describes the sound only, not a pronunciation score.' : 'That’s a capture issue, not a mistake.'}
-            </p>
+            <p className="lp-sheet-sub">{sub}</p>
           </div>
           <button
             type="button"

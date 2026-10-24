@@ -8,7 +8,7 @@ import Intro from './screens/Intro';
 import Quiz from './screens/Quiz';
 import Tutorial from './screens/Tutorial';
 import PracticeStudio from './screens/PracticeStudio';
-import Summary from './screens/Summary';
+import OnYourOwn from './screens/OnYourOwn';
 
 /**
  * Flow: the guide greets the learner, then the quiz, then a tutorial where the
@@ -32,7 +32,8 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/quiz" element={<Navigate to="/quiz/1" replace />} />
           <Route path="/tutorial" element={<Guard need="quiz"><Tutorial /></Guard>} />
           <Route path="/practice" element={<Guard need="tutorial"><PracticeStudio /></Guard>} />
-          <Route path="/summary" element={<Guard need="tutorial"><Summary /></Guard>} />
+          <Route path="/own" element={<Guard need="tutorial"><OnYourOwn /></Guard>} />
+          <Route path="/summary" element={<Navigate to="/own" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>

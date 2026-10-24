@@ -64,5 +64,18 @@ await page.getByRole('button', { name: 'Skip' }).click();
 await page.waitForTimeout(1500);
 console.log('practice url:', page.url(), '| caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
 await snap('practice');
+// On your own: the same stage without cues, reached by its route.
+await page.goto(base + '/#/own', { waitUntil: 'networkidle' });
+await page.waitForTimeout(1800);
+console.log('own url:', page.url(), '| word:', await page.locator('.own-word').innerText().catch(() => '(none)'), '| caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
+await snap('own');
+await page.getByRole('radio', { name: /Word/ }).click();
+await page.getByRole('button', { name: 'Record' }).click();
+await page.waitForTimeout(2500);
+await page.getByRole('button', { name: /Stop/ }).click();
+await page.locator('.lp-sheet').waitFor({ timeout: 15000 });
+await page.waitForTimeout(1200);
+console.log('own sheet:', (await page.locator('.lp-sheet').innerText()).replace(/\s+/g, ' ').slice(0, 300));
+await snap('own-result');
 console.log('errors:', errors.length ? errors : 'none');
 await browser.close();

@@ -181,3 +181,204 @@
     font-size: 19px;
   }
 }
+
+/* ---------- Caption as a textbox ----------
+ * Over a full-bleed stage the caption is a floating translucent card at the
+ * bottom centre, not a row of its own. The stage keeps its full height and the
+ * guide's words sit on top of what they describe.
+ */
+.cap.cap-card {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 3;
+  transform: translateX(-50%);
+  width: min(620px, calc(100% - 32px));
+  max-width: none;
+  margin: 0;
+  padding: 14px 14px 14px 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(20px) saturate(170%);
+  border: 1px solid rgba(218, 223, 217, 0.9);
+  box-shadow: 0 16px 40px rgba(23, 47, 78, 0.14), 0 2px 6px rgba(23, 47, 78, 0.06);
+  animation: cap-card-in 420ms var(--ease-drawer) both;
+}
+@keyframes cap-card-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+.cap-card--large {
+  width: min(720px, calc(100% - 32px));
+}
+.cap-card--large .cap-text {
+  font-size: 23px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .cap.cap-card {
+    background: var(--color-surface);
+    backdrop-filter: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cap.cap-card {
+    animation: cap-fade 160ms ease both;
+  }
+}
+@keyframes cap-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* With a card at the bottom, the graph's x-axis caption moves to the top edge */
+.tut .vg-axis--x,
+.lp .vg-axis--x {
+  top: 18px;
+  bottom: auto;
+}
+.tut .vg-axis--y {
+  top: 56px;
+}
+.tut .vg-status {
+  top: 52px;
+}
+
+/* ---------- Tutorial without bars ----------
+ * Skip floats top-left, the main button bottom-right; nothing boxes the stage.
+ */
+.tut-stage {
+  position: relative;
+  border-top: 0;
+}
+.ob-cta--float {
+  position: absolute;
+  right: 16px;
+  bottom: 18px;
+  z-index: 3;
+  min-width: 0;
+  box-shadow: 0 4px 0 var(--color-navy-deep), 0 16px 36px rgba(23, 47, 78, 0.18);
+}
+.ob-cta--float:active:not(:disabled) {
+  box-shadow: 0 1px 0 var(--color-navy-deep), 0 8px 20px rgba(23, 47, 78, 0.14);
+}
+.tut-mic {
+  bottom: 18px;
+}
+
+@media (max-width: 720px) {
+  .cap.cap-card {
+    bottom: 14px;
+    padding: 12px 12px 12px 14px;
+  }
+  .cap-card--large .cap-text {
+    font-size: 18px;
+  }
+  .tut-stage.is-solo .cap.cap-card,
+  .tut-stage.has-cta .cap.cap-card,
+  .intro .cap.cap-card {
+    bottom: 84px;
+  }
+  .ob-cta--float {
+    right: 12px;
+    left: 12px;
+    bottom: 14px;
+  }
+  .tut-mic {
+    bottom: 150px;
+  }
+  /* The small guide sits under the Skip pill so the caption keeps the bottom edge */
+  .tut-stage.is-solo .tut-pip {
+    bottom: auto;
+    top: 56px;
+  }
+}
+
+/* ---------- Floating controls, sized to be seen ----------
+ * Over a full-bleed stage the textbox and the main button are the only chrome,
+ * so they are larger and higher-contrast than their in-row counterparts.
+ */
+.cap.cap-card {
+  width: min(760px, calc(100% - 32px));
+  padding: 20px 18px 20px 22px;
+  gap: 14px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1.5px solid rgba(32, 62, 104, 0.14);
+  box-shadow: 0 22px 56px rgba(23, 47, 78, 0.2), 0 3px 10px rgba(23, 47, 78, 0.08);
+}
+.cap.cap-card .cap-text {
+  font-size: 21px;
+  line-height: 1.4;
+}
+.cap.cap-card .cap-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+.cap.cap-card .cap-pause {
+  width: 46px;
+  height: 46px;
+}
+.cap-card--large {
+  width: min(840px, calc(100% - 32px));
+}
+.cap-card--large .cap-text {
+  font-size: 26px;
+}
+.ob-cta--float {
+  height: 60px;
+  padding: 0 36px;
+  font-size: 17px;
+  border-radius: 16px;
+  box-shadow: 0 5px 0 var(--color-navy-deep), 0 20px 44px rgba(23, 47, 78, 0.24);
+}
+.ob-bar--float .ob-pill,
+.tut-stage > .lp-pill,
+.intro-camera.lp-pill {
+  height: 40px;
+  min-width: 48px;
+  padding: 0 14px;
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(32, 62, 104, 0.16);
+  box-shadow: 0 6px 18px rgba(23, 47, 78, 0.12);
+}
+.ob-bar--float .ob-pill[aria-pressed='true'] {
+  background: var(--color-navy-soft);
+  color: var(--color-navy);
+}
+.tut-stage > .lp-pill {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .cap.cap-card {
+    padding: 14px 12px 14px 16px;
+  }
+  .cap.cap-card .cap-text {
+    font-size: 17px;
+  }
+  .cap-card--large .cap-text {
+    font-size: 20px;
+  }
+  .ob-cta--float {
+    height: 56px;
+  }
+}
+
+/* Mid-width windows: with a floating main button, the textbox keeps to the left of it */
+@media (min-width: 721px) and (max-width: 1180px) {
+  .intro .cap.cap-card,
+  .tut-stage.has-cta .cap.cap-card {
+    left: 16px;
+    transform: none;
+    width: min(760px, calc(100% - 280px));
+    animation-name: cap-fade;
+  }
+}

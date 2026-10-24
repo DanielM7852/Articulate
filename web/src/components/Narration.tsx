@@ -155,17 +155,20 @@ export function CaptionBar({
   hint,
   paused,
   onToggle,
+  className = '',
 }: {
   text: string | null;
   hint?: string;
   paused?: boolean;
   onToggle?: () => void;
+  /** `cap-card` floats the caption as a textbox over the stage; `cap-card--large` for solo moments. */
+  className?: string;
 }) {
   const { captions } = useAppState();
   if (!captions || !text) return null;
   const label = paused ? 'Resume' : 'Pause';
   return (
-    <div className="cap" role="status" aria-live="polite">
+    <div className={`cap ${className}`} role="status" aria-live="polite">
       <span className="cap-icon" aria-hidden="true">
         <Captions size={16} />
       </span>
