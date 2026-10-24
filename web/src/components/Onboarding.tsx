@@ -9,9 +9,9 @@ import { useAppState } from '../state/AppState';
  * Top bar (back, progress, access toggles), a centered stage, and a fixed action bar,
  * so the learner never scrolls to find Continue.
  *
- * Step order: welcome (0), quiz 1-3, mic check, first try, plan (6).
+ * Step order: guide intro (0), quiz 1-3, tutorial (4).
  */
-export const ONBOARDING_STEPS = 6;
+export const ONBOARDING_STEPS = 4;
 
 type Direction = 'forward' | 'back';
 type ViewTransitionDocument = Document & { startViewTransition?: (update: () => void) => unknown };
@@ -77,6 +77,7 @@ export function OnboardingFrame({
   primary,
   secondary,
   footer,
+  caption,
   overlay,
   width,
   className = '',
@@ -94,6 +95,8 @@ export function OnboardingFrame({
   secondary?: Action;
   /** Replaces the primary/secondary action bar contents. */
   footer?: ReactNode;
+  /** The guide's caption, rendered between the stage and the action bar. */
+  caption?: ReactNode;
   /** Rendered over the action bar, e.g. a result sheet. */
   overlay?: ReactNode;
   /** Column width in px; 640 by default. */
@@ -160,6 +163,8 @@ export function OnboardingFrame({
           {children}
         </div>
       </main>
+
+      {caption && <div className="ob-caption">{caption}</div>}
 
       <footer className="ob-actions">
         <div className="ob-actions-inner">

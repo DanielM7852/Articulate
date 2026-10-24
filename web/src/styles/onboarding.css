@@ -9,7 +9,7 @@
   height: 100vh;
   height: 100dvh;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   background: var(--color-cream);
 }
 
@@ -440,72 +440,6 @@
   flex-shrink: 0;
 }
 
-/* ---------- Welcome ---------- */
-.ob-welcome {
-  align-items: center;
-  text-align: center;
-}
-.ob-welcome .ob-heading {
-  align-items: center;
-  gap: 12px;
-}
-.ob-welcome .ob-title {
-  font-size: clamp(30px, 2.4vw + 16px, 46px);
-  line-height: 1.12;
-  letter-spacing: -0.02em;
-  max-width: 14em;
-}
-.ob-welcome .ob-hint {
-  font-size: 16px;
-  max-width: 30em;
-}
-.ob-hero {
-  position: relative;
-  width: 112px;
-  height: 112px;
-  border-radius: 32px;
-  background: var(--color-navy);
-  color: var(--color-ivory);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-serif);
-  font-size: 42px;
-  box-shadow: 0 6px 0 var(--color-navy-deep), 0 18px 40px rgba(32, 62, 104, 0.22);
-  overflow: hidden;
-}
-.ob-hero svg {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  opacity: 0.3;
-}
-.ob-hero span {
-  position: relative;
-}
-.ob-chips {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-}
-.ob-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 99px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-ink);
-}
-.ob-chip svg {
-  color: var(--color-navy);
-}
-
 /* ---------- Mic check + first try ---------- */
 .ob-panel {
   background: var(--color-surface);
@@ -625,73 +559,6 @@
   to {
     transform: scale(1.25);
     opacity: 0;
-  }
-}
-
-/* ---------- Plan ---------- */
-.ob-sounds {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-.ob-sound {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 22px 8px 16px;
-  background: var(--color-surface);
-  border: 2px solid var(--color-line);
-  border-radius: 18px;
-  box-shadow: 0 3px 0 var(--color-line);
-  cursor: pointer;
-  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 110ms var(--ease-out),
-    transform 110ms var(--ease-out);
-}
-.ob-sound:active {
-  transform: translateY(2px);
-  box-shadow: 0 1px 0 var(--color-line);
-}
-.ob-sound-ipa {
-  font-family: var(--font-serif);
-  font-size: 34px;
-  line-height: 1.15;
-  color: var(--color-navy);
-  transition: color 180ms ease;
-}
-.ob-sound-word {
-  font-size: 13px;
-  color: var(--color-muted);
-  transition: color 180ms ease;
-}
-.ob-sound-tag {
-  position: absolute;
-  top: -11px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 3px 9px;
-  border-radius: 99px;
-  background: var(--color-success-soft);
-  color: var(--color-success);
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.ob-sound[aria-checked='true'] {
-  background: var(--color-navy);
-  border-color: var(--color-navy);
-  box-shadow: 0 3px 0 var(--color-navy-deep);
-}
-.ob-sound[aria-checked='true'] .ob-sound-ipa {
-  color: var(--color-ivory);
-}
-.ob-sound[aria-checked='true'] .ob-sound-word {
-  color: var(--color-navy-mist);
-}
-@media (hover: hover) and (pointer: fine) {
-  .ob-sound:hover:not([aria-checked='true']) {
-    border-color: var(--color-navy-mist);
   }
 }
 
@@ -895,4 +762,16 @@
   .ob-glyph {
     font-size: 52px;
   }
+}
+
+/* ---------- Full-bleed stages (practice studio, intro, tutorial) ---------- */
+.ob:has(.ob-content--full) .ob-stage {
+  padding: 0;
+}
+.ob-content.ob-content--full {
+  flex: 1;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  gap: 0;
 }

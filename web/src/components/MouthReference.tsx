@@ -4,12 +4,12 @@ import avatarUrl from '@mouth-demo/public/avatars/brunette.glb?url';
 import type { SoundId } from '../state/types';
 
 /**
- * The rotatable 3D mouth reference: the mouth-demo workstream's hologram face,
- * mounted inside a React tile. three.js, the avatar and the choreography load on
- * first use so onboarding never pays for them. The demo loops the cue silently;
- * the practice screen draws its own overlays and controls around it.
+ * The 3D guide: the mouth-demo workstream's hologram face mounted inside React.
+ * three.js, the avatar and the choreography load on first use. The demo loops a
+ * cue silently; screens draw their own captions and controls around it, and can
+ * turn the head toward the learner (`look`) and move the camera closer (`zoom`).
  */
-export type { MouthView };
+export type { MouthCueId, MouthView };
 
 const CUE_FOR_SOUND: Record<SoundId, MouthCueId> = {
   i: 'spread-lips',
@@ -17,9 +17,28 @@ const CUE_FOR_SOUND: Record<SoundId, MouthCueId> = {
   a: 'open-jaw',
 };
 
+export const cueForSound = (sound: SoundId) => CUE_FOR_SOUND[sound];
+
+export type Look = { x: number; y: number };
 type LoadState = 'loading' | 'ready' | 'error';
 
-export function MouthReference({ sound, view, slow }: { sound: SoundId; view: MouthView; slow: boolean }) {
+export function MouthReference({
+  cue,
+  view = 'front',
+  slow = false,
+  look = null,
+  zoom = 1,
+  onReady,
+}: {
+  /** Mouth shape to loop; null rests the face. */
+  cue: MouthCueId | null;
+  view?: MouthView;
+  slow?: boolean;
+  /** Where the learner is, -1 to 1 on each axis; null lets the head rest. */
+  look?: Look | null;
+  zoom?: number;
+  onReady?: () => void;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const demoRef = useRef<MouthDemo | null>(null);
   const [state, setState] = useState<LoadState>('loading');
@@ -51,16 +70,30 @@ export function MouthReference({ sound, view, slow }: { sound: SoundId; view: Mo
     };
   }, []);
 
+  const ready = state === 'ready';
+  useEffect(() => {
+    if (ready) onReady?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
   // Props apply once the demo exists and again whenever they change.
   useEffect(() => {
-    if (state === 'ready') demoRef.current?.showCue(CUE_FOR_SOUND[sound]);
-  }, [sound, state]);
+    if (!ready) return;
+    if (cue) demoRef.current?.showCue(cue);
+    else demoRef.current?.stop();
+  }, [cue, ready]);
   useEffect(() => {
-    if (state === 'ready') void demoRef.current?.setView(view);
-  }, [view, state]);
+    if (ready) void demoRef.current?.setView(view);
+  }, [view, ready]);
   useEffect(() => {
-    if (state === 'ready') demoRef.current?.setSpeed(slow ? 0.5 : 1);
-  }, [slow, state]);
+    if (ready) demoRef.current?.setSpeed(slow ? 0.5 : 1);
+  }, [slow, ready]);
+  useEffect(() => {
+    if (ready) demoRef.current?.lookAt(look);
+  }, [look, ready]);
+  useEffect(() => {
+    if (ready) demoRef.current?.setZoom(zoom);
+  }, [zoom, ready]);
 
   return (
     <div className="mr" data-state={state}>
@@ -68,13 +101,13 @@ export function MouthReference({ sound, view, slow }: { sound: SoundId; view: Mo
       <div className="mr-cover" role="status" aria-live="polite">
         {state === 'error' ? (
           <>
-            <p className="ob-label">The mouth guide couldn’t load</p>
-            <p className="ob-fine">This device may not support 3D here. The written cue still applies.</p>
+            <p className="ob-label">The guide couldn’t load</p>
+            <p className="ob-fine">This device may not support 3D here. The written cues still apply.</p>
           </>
         ) : (
           <>
             <span className="mr-spinner" aria-hidden="true" />
-            <p className="ob-fine">{state === 'loading' ? 'Loading the mouth guide…' : ''}</p>
+            <p className="ob-fine">{state === 'loading' ? 'Loading your guide…' : ''}</p>
           </>
         )}
       </div>

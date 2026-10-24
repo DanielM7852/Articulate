@@ -1,0 +1,110 @@
+/* ---------- The guide's captions, the intro and the tutorial ----------
+ * Captions sit in their own row between the stage and the action bar so the
+ * learner always knows what the guide just said. The intro and tutorial reuse
+ * the full-bleed stage and the floating pills from the practice studio.
+ */
+.ob-caption {
+  padding: 12px 20px 0;
+}
+.cap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: min(900px, 100%);
+  margin: 0 auto;
+}
+.cap-icon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--color-navy-soft);
+  color: var(--color-navy);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cap-text {
+  font-size: 17px;
+  line-height: 1.45;
+  font-weight: 500;
+  color: var(--color-ink);
+  text-wrap: balance;
+  animation: cap-in 320ms var(--ease-out) both;
+}
+@keyframes cap-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.cap-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+/* ---------- Intro ---------- */
+.ob-content.intro {
+  position: relative;
+}
+.intro > .mr {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  border-radius: 0;
+}
+.intro-camera {
+  pointer-events: none;
+}
+
+/* ---------- Tutorial ---------- */
+.tut-stage {
+  flex: 1;
+  min-height: 320px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--color-line);
+  transition: grid-template-columns 700ms var(--ease-drawer);
+}
+.tut-stage.is-solo {
+  grid-template-columns: 0fr 1fr;
+}
+.tut-guide {
+  min-width: 0;
+  transition: opacity 400ms ease;
+}
+.tut-stage.is-solo .tut-guide {
+  opacity: 0;
+  border-right: 0;
+}
+.tut-stage.is-solo .lp-pane + .lp-pane {
+  border-left: 0;
+}
+
+@media (max-width: 720px) {
+  .ob-caption {
+    padding: 10px 16px 0;
+  }
+  .cap-text {
+    font-size: 15px;
+  }
+  .cap-hint {
+    display: none;
+  }
+  .tut-stage {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+    transition: grid-template-rows 700ms var(--ease-drawer);
+  }
+  .tut-stage.is-solo {
+    grid-template-columns: 1fr;
+    grid-template-rows: 0fr 1fr;
+  }
+  .tut-stage .lp-pane + .lp-pane {
+    border-left: 0;
+    border-top: 1px solid var(--color-line);
+  }
+}

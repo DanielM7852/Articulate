@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import {
   AudioLines,
@@ -14,10 +15,16 @@ import {
   Volume2,
   type LucideIcon,
 } from 'lucide-react';
+import { CaptionBar, useNarration } from '../components/Narration';
 import { OnboardingFrame, OptionCard, Segmented, StepHeading, useStepNav } from '../components/Onboarding';
 import { useAppState } from '../state/AppState';
 import type { Goal, Guidance, Pace, Routine, Support } from '../state/types';
 
+/**
+ * Three questions, read aloud by the guide with the text shown underneath.
+ * Nothing is pre-selected and Continue stays off until the learner answers, so
+ * every preference the coach later personalises on is a real choice.
+ */
 const GOALS: { id: Goal; title: string; text: string; icon: LucideIcon }[] = [
   { id: 'conversations', title: 'Everyday conversations', text: 'A hello, a catch-up, ordering your usual.', icon: MessagesSquare },
   { id: 'sounds', title: 'Particular sounds', text: 'Explore a sound that interests you.', icon: AudioLines },
@@ -56,53 +63,82 @@ const GUIDANCE: { id: Guidance; label: string }[] = [
   { id: 'explore', label: 'Room to explore' },
 ];
 
+const QUESTIONS = {
+  1: { title: 'What would you like to feel more comfortable with?', hint: 'Pick as many as you like.' },
+  2: { title: 'Which sounds most like your routine?', hint: 'Then choose a pace that feels comfortable.' },
+  3: { title: 'When a sound feels new, what helps you start?', hint: 'And how much guidance you’d like.' },
+} as const;
+
+type Step = keyof typeof QUESTIONS;
+const isStep = (n: number): n is Step => n === 1 || n === 2 || n === 3;
+
 export default function Quiz() {
   const { step: raw } = useParams();
   const step = Number(raw);
   const go = useStepNav();
-  const { preferences, updatePreferences, updatePlan } = useAppState();
+  const { preferences, updatePreferences, updatePlan, completeQuiz } = useAppState();
+  const narration = useNarration();
 
-  if (![1, 2, 3].includes(step)) return <Navigate to="/quiz/1" replace />;
+  useEffect(() => {
+    if (!isStep(step)) return;
+    narration.say(`${QUESTIONS[step].title} ${QUESTIONS[step].hint}`);
+  }, [step, narration.say]);
+
+  if (!isStep(step)) return <Navigate to="/quiz/1" replace />;
+
+  const answered =
+    step === 1
+      ? preferences.goals.length > 0
+      : step === 2
+        ? preferences.routine !== null && preferences.pace !== null
+        : preferences.support !== null && preferences.guidance !== null;
 
   const next = () => {
     if (step < 3) return go(`/quiz/${step + 1}`);
     updatePlan({
-      pace: preferences.pace,
-      assistance: preferences.guidance === 'guided' ? 'cue-target' : 'target-only',
+      pace: preferences.pace ?? 'unhurried',
+      assistance: preferences.guidance === 'explore' ? 'target-only' : 'cue-target',
     });
-    go('/setup');
+    completeQuiz();
+    go('/tutorial');
   };
-  const back = () => go(step > 1 ? `/quiz/${step - 1}` : '/welcome', 'back');
+  const back = () => go(step > 1 ? `/quiz/${step - 1}` : '/', 'back');
 
   const toggleGoal = (g: Goal) => {
     const has = preferences.goals.includes(g);
     updatePreferences({ goals: has ? preferences.goals.filter((x) => x !== g) : [...preferences.goals, g] });
   };
 
+  const q = QUESTIONS[step];
+
   return (
-    <OnboardingFrame step={step} width={720} onBack={back} primary={{ label: 'Continue', onClick: next }}>
+    <OnboardingFrame
+      step={step}
+      width={720}
+      onBack={back}
+      caption={<CaptionBar text={narration.caption} />}
+      primary={{ label: 'Continue', onClick: next, disabled: !answered }}
+    >
+      <StepHeading title={q.title} hint={q.hint} />
+
       {step === 1 && (
-        <>
-          <StepHeading title="What would you like to feel more comfortable with?" hint="Pick as many as you like." />
-          <div className="ob-options" role="group" aria-label="Goals">
-            {GOALS.map((g) => (
-              <OptionCard
-                key={g.id}
-                multi
-                title={g.title}
-                description={g.text}
-                icon={<g.icon size={22} />}
-                checked={preferences.goals.includes(g.id)}
-                onToggle={() => toggleGoal(g.id)}
-              />
-            ))}
-          </div>
-        </>
+        <div className="ob-options" role="group" aria-label="Goals">
+          {GOALS.map((g) => (
+            <OptionCard
+              key={g.id}
+              multi
+              title={g.title}
+              description={g.text}
+              icon={<g.icon size={22} />}
+              checked={preferences.goals.includes(g.id)}
+              onToggle={() => toggleGoal(g.id)}
+            />
+          ))}
+        </div>
       )}
 
       {step === 2 && (
         <>
-          <StepHeading title="Which sounds most like your routine?" hint="No experience needed. We’ll meet you where you are." />
           <div className="ob-options" role="radiogroup" aria-label="Routine">
             {ROUTINES.map((r) => (
               <OptionCard
@@ -117,9 +153,9 @@ export default function Quiz() {
           </div>
           <div className="stack gap-10">
             <p className="ob-label">A comfortable pace</p>
-            <Segmented label="Pace" options={PACES} value={preferences.pace} onChange={(pace) => updatePreferences({ pace })} />
+            <Segmented label="Pace" options={PACES} value={preferences.pace ?? undefined} onChange={(pace) => updatePreferences({ pace })} />
             <p className="ob-fine ob-hide-short" aria-live="polite">
-              {PACE_NOTES[preferences.pace]}
+              {preferences.pace ? PACE_NOTES[preferences.pace] : 'Choose one to continue.'}
             </p>
           </div>
         </>
@@ -127,7 +163,6 @@ export default function Quiz() {
 
       {step === 3 && (
         <>
-          <StepHeading title="When a sound feels new, what helps you start?" hint="You can try the other ways too." />
           <div className="ob-options" role="radiogroup" aria-label="Support">
             {SUPPORTS.map((s) => (
               <OptionCard
@@ -145,7 +180,7 @@ export default function Quiz() {
             <Segmented
               label="With new sounds, I prefer"
               options={GUIDANCE}
-              value={preferences.guidance}
+              value={preferences.guidance ?? undefined}
               onChange={(guidance) => updatePreferences({ guidance })}
             />
           </div>

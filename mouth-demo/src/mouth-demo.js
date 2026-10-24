@@ -404,6 +404,17 @@ export async function createMouthDemo(container, options = {}) {
       run([tween("reset", 300, { w: 0, vis: 0, show: showTarget() }, d)]);
     },
 
+    // Turn the head toward a point in front of the screen (camera or pointer). Eased in update().
+    lookAt(target) {
+      look = target && Number.isFinite(target.x) && Number.isFinite(target.y)
+        ? { x: Math.max(-1, Math.min(1, target.x)), y: Math.max(-1, Math.min(1, target.y)) }
+        : null;
+    },
+
+    setZoom(z) {
+      views.setZoom(z);
+    },
+
     setStyle(next) {
       if (!STYLES.includes(next)) return;
       style = next;

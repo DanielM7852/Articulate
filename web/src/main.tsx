@@ -4,22 +4,21 @@ import type { ReactNode } from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import './styles/global.css';
 import { AppStateProvider, useAppState } from './state/AppState';
-import SignIn from './screens/SignIn';
-import Welcome from './screens/Welcome';
+import Intro from './screens/Intro';
 import Quiz from './screens/Quiz';
-import Setup from './screens/Setup';
-import Plan from './screens/Plan';
+import Tutorial from './screens/Tutorial';
 import PracticeStudio from './screens/PracticeStudio';
 import Summary from './screens/Summary';
 
 /**
- * Flow guard: every screen past sign-in needs the mock login, and practice
- * screens need onboarding (welcome, quiz, setup, plan) finished this session.
+ * Flow: the guide greets the learner, then the quiz, then a tutorial where the
+ * guide explains the graph, then practice. Progress is session-only, so a reload
+ * returns to the step the learner has reached.
  */
-function Guard({ onboarding, children }: { onboarding?: boolean; children: ReactNode }) {
-  const { learnerName, onboarded } = useAppState();
-  if (!learnerName) return <Navigate to="/" replace />;
-  if (onboarding && !onboarded) return <Navigate to="/welcome" replace />;
+function Guard({ need, children }: { need: 'quiz' | 'tutorial'; children: ReactNode }) {
+  const { quizDone, onboarded } = useAppState();
+  if (!quizDone) return <Navigate to="/" replace />;
+  if (need === 'tutorial' && !onboarded) return <Navigate to="/tutorial" replace />;
   return children;
 }
 
@@ -28,14 +27,12 @@ createRoot(document.getElementById('root')!).render(
     <AppStateProvider>
       <HashRouter>
         <Routes>
-          <Route path="/" element={<SignIn />} />
-          <Route path="/welcome" element={<Guard><Welcome /></Guard>} />
-          <Route path="/quiz/:step" element={<Guard><Quiz /></Guard>} />
+          <Route path="/" element={<Intro />} />
+          <Route path="/quiz/:step" element={<Quiz />} />
           <Route path="/quiz" element={<Navigate to="/quiz/1" replace />} />
-          <Route path="/setup" element={<Guard><Setup /></Guard>} />
-          <Route path="/plan" element={<Guard><Plan /></Guard>} />
-          <Route path="/practice" element={<Guard onboarding><PracticeStudio /></Guard>} />
-          <Route path="/summary" element={<Guard onboarding><Summary /></Guard>} />
+          <Route path="/tutorial" element={<Guard need="quiz"><Tutorial /></Guard>} />
+          <Route path="/practice" element={<Guard need="tutorial"><PracticeStudio /></Guard>} />
+          <Route path="/summary" element={<Guard need="tutorial"><Summary /></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>

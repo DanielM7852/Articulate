@@ -21,7 +21,7 @@ export default function Summary() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, audio, setAudio, signOut } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, audio, setAudio, reset } = useAppState();
   const [envelope, setEnvelope] = useState<number[]>([]);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [coach, setCoach] = useState<CoachResponse | null>(null);
@@ -319,7 +319,7 @@ export default function Summary() {
                 <Button
                   size="sm"
                   onClick={() => {
-                    signOut();
+                    reset();
                     navigate('/');
                   }}
                 >

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Mic, ScanFace, Snail, Square, TriangleAlert, Video, VideoOff, Volume2 } from 'lucide-react';
+import { Mic, ScanFace, Snail, Square, TriangleAlert, Video, VideoOff, Volume2, X } from 'lucide-react';
 import { ResultSheet } from '../components/ResultSheet';
+import { CaptionBar, useNarration } from '../components/Narration';
 import { OnboardingFrame, Segmented, StepHeading, Switch } from '../components/Onboarding';
 import { AmplitudeMeter, CameraTile, LESSON_STEPS } from '../components/practice';
 import { VowelGraph } from '../components/VowelGraph';
-import { MouthReference, type MouthView } from '../components/MouthReference';
+import { MouthReference, cueForSound, type MouthView } from '../components/MouthReference';
 import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
 import { useSpeech } from '../audio/useSpeech';
 import { useVowelTracking, type TrackingStatus } from '../audio/useVowelTracking';
@@ -71,7 +72,7 @@ export default function PracticeStudio() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration: readAloud } = useAppState();
   const [phase, setPhase] = useState<Phase>('ready');
   const [current, setCurrent] = useState<Attempt | null>(null);
   const [coach, setCoach] = useState<CoachResponse | null>(null);
@@ -79,17 +80,28 @@ export default function PracticeStudio() {
   const [referencePlaying, setReferencePlaying] = useState(false);
   const replayRef = useRef<HTMLAudioElement | null>(null);
 
-  // One tile on phones (switch between views), two side by side on wider screens.
+  // The graph is the main view. The 3D guide or the mirror open beside it on request;
+  // on phones there is one pane and a switcher.
   const compact = useMediaQuery('(max-width: 720px)');
-  const [view, setView] = useState<View>(camera ? 'mirror' : 'guide');
+  const [view, setView] = useState<View>('graph');
   const [refView, setRefView] = useState<MouthView>('front');
   const [slow, setSlow] = useState(false);
-  const sideView: View = compact ? view : view === 'graph' ? 'guide' : view;
 
   // Live F1/F2 on the same microphone stream; it runs whenever the mic is open.
   const tracking = useVowelTracking(mic.stream, TARGETS[plan.sound]);
 
   const s = SOUNDS[plan.sound];
+
+  // The guide's instruction for this sound, read aloud when the sound changes
+  // and shown as text while recording (never spoken over the microphone).
+  const narration = useNarration(speech);
+  const phaseRef = useRef<Phase>('ready');
+  phaseRef.current = phase;
+  useEffect(() => {
+    if (phase === 'ready') narration.say(`Say “${s.spelled}” as in “${s.example}”. Hold it for about 3 seconds.`);
+    else if (phase === 'recording') narration.show('Keep a comfortable sound. Stop when you’re ready.');
+    else narration.show(null);
+  }, [phase, s.spelled, s.example, narration.say, narration.show]);
   const history = useMemo(() => attemptsFor(attempts, plan.sound), [attempts, plan.sound]);
   const guidedCount = history.filter((a) => a.kind === 'guided' && a.quality === 'usable').length;
   const stepIndex = phase === 'feedback' ? (guidedCount > 1 ? 3 : 2) : guidedCount > 0 ? 3 : 1;
@@ -148,7 +160,7 @@ export default function PracticeStudio() {
     const response = await analyzeAttempt(attempt, history);
     setCoach(response);
     setPhase('feedback');
-    if (narration) speech.speak(`${response.observation} ${response.nextCue}`);
+    if (readAloud) speech.speak(`${response.observation} ${response.nextCue}`);
   }
 
   function playReference() {
@@ -185,7 +197,7 @@ export default function PracticeStudio() {
         { id: 'guide' as View, label: 'Guide' },
         { id: 'mirror' as View, label: 'Mirror' },
       ]}
-      value={sideView}
+      value={view}
       onChange={setView}
     />
   );
@@ -201,7 +213,18 @@ export default function PracticeStudio() {
         holdSec={tracking.holdSec}
         hidden={!assistanceOn}
       />
-      {compact && <div className="lp-overlay lp-overlay--tl">{viewSwitch}</div>}
+      <div className="lp-overlay lp-overlay--tl lp-pills">
+        {compact ? (
+          viewSwitch
+        ) : (
+          view === 'graph' && (
+            <button type="button" className="lp-pill" onClick={() => setView('guide')}>
+              <ScanFace size={16} aria-hidden="true" />
+              Show guide
+            </button>
+          )
+        )}
+      </div>
       <label className="lp-overlay lp-overlay--br lp-pill lp-target">
         Target
         <Switch label="Show target" checked={assistanceOn} onChange={(on) => updatePlan({ assistance: on ? 'cue-target' : 'none' })} />
@@ -211,15 +234,20 @@ export default function PracticeStudio() {
 
   const guidePane = (
     <section className="lp-pane" aria-label="Mouth guide">
-      <MouthReference sound={plan.sound} view={refView} slow={slow} />
+      <MouthReference cue={cueForSound(plan.sound)} view={refView} slow={slow} />
       <div className="lp-overlay lp-overlay--tl lp-pills">
         {compact ? (
           viewSwitch
         ) : (
-          <button type="button" className="lp-pill" onClick={() => setView('mirror')}>
-            <Video size={16} aria-hidden="true" />
-            Mirror
-          </button>
+          <>
+            <button type="button" className="lp-pill" aria-label="Hide guide" title="Hide guide" onClick={() => setView('graph')}>
+              <X size={16} aria-hidden="true" />
+            </button>
+            <button type="button" className="lp-pill" onClick={() => setView('mirror')}>
+              <Video size={16} aria-hidden="true" />
+              Mirror
+            </button>
+          </>
         )}
         <button type="button" className="lp-pill" aria-pressed={slow} onClick={() => setSlow((v) => !v)}>
           <Snail size={16} aria-hidden="true" />
@@ -263,10 +291,15 @@ export default function PracticeStudio() {
         {compact ? (
           viewSwitch
         ) : (
-          <button type="button" className="lp-pill" onClick={() => setView('guide')}>
-            <ScanFace size={16} aria-hidden="true" />
-            Guide
-          </button>
+          <>
+            <button type="button" className="lp-pill" aria-label="Hide mirror" title="Hide mirror" onClick={() => setView('graph')}>
+              <X size={16} aria-hidden="true" />
+            </button>
+            <button type="button" className="lp-pill" onClick={() => setView('guide')}>
+              <ScanFace size={16} aria-hidden="true" />
+              Guide
+            </button>
+          </>
         )}
         {camera && (
           <button type="button" className="lp-pill" onClick={() => setCamera(false)}>
@@ -279,7 +312,8 @@ export default function PracticeStudio() {
     </section>
   );
 
-  const sidePane = sideView === 'graph' ? graphPane : sideView === 'guide' ? guidePane : mirrorPane;
+  const sidePane = view === 'graph' ? graphPane : view === 'guide' ? guidePane : mirrorPane;
+  const solo = compact || view === 'graph';
 
   const micWarning =
     mic.status === 'denied' ? 'Microphone blocked · allow it in site settings' : mic.status === 'unsupported' ? 'Microphone unsupported in this browser' : null;
@@ -290,8 +324,9 @@ export default function PracticeStudio() {
       total={LESSON_STEPS.length}
       progressLabel="Lesson progress"
       stageKey="practice"
-      className="lp"
+      className="lp ob-content--full"
       onClose={{ label: 'Pause or finish', onClick: () => navigate('/summary') }}
+      caption={<CaptionBar text={narration.caption} />}
       footer={
         <>
           <button type="button" className="ob-text-btn lp-listen" onClick={playReference} disabled={busy}>
@@ -367,9 +402,10 @@ export default function PracticeStudio() {
         />
       </div>
 
-      <div className="lp-stage">
+      <div className={`lp-stage ${solo ? 'is-solo' : ''}`}>
         {!compact && graphPane}
-        {sidePane}
+        {!solo && sidePane}
+        {compact && sidePane}
       </div>
     </OnboardingFrame>
   );

@@ -3,18 +3,20 @@ import type { Attempt, Preferences, Plan, SoundId } from './types';
 
 /**
  * Session-wide learner state. Access settings (captions, audio, narration, camera)
- * live here so they stay consistent on every screen, as the design requires.
- * Preferences and attempts persist to localStorage when available; the app works
- * without it. Sign-in and onboarding progress are session-only, so every visit
- * starts at sign-in and runs through the welcome, quiz, setup and plan screens.
+ * live here so they stay consistent on every screen. Attempt summaries and the
+ * practice plan persist to localStorage when available; the app works without it.
+ *
+ * Quiz answers and progress are session-only: every visit starts with the guide,
+ * runs the quiz with no pre-selected answers, then the tutorial, then practice.
  */
 interface AppState {
-  learnerName: string | null;
-  isReturning: boolean;
-  /** True once the learner has finished onboarding (quiz, setup, plan) this session. */
+  /** True once the quiz is finished this session. */
+  quizDone: boolean;
+  /** True once the tutorial is finished this session; unlocks practice. */
   onboarded: boolean;
   captions: boolean;
   audio: boolean;
+  /** Coach feedback is read aloud (needs audio). */
   narration: boolean;
   camera: boolean;
   preferences: Preferences;
@@ -23,9 +25,10 @@ interface AppState {
 }
 
 interface AppActions {
-  signIn: (name: string, returning: boolean) => void;
-  signOut: () => void;
+  completeQuiz: () => void;
   completeOnboarding: () => void;
+  /** Back to a fresh session. */
+  reset: () => void;
   setCaptions: (on: boolean) => void;
   setAudio: (on: boolean) => void;
   setNarration: (on: boolean) => void;
@@ -37,23 +40,25 @@ interface AppActions {
   clearAttempts: () => void;
 }
 
-const STORAGE_KEY = 'articulate.state.v1';
+const STORAGE_KEY = 'articulate.state.v2';
+
+/** No answer is ever pre-selected: the quiz starts blank so choices are the learner's own. */
+export const EMPTY_PREFERENCES: Preferences = {
+  goals: [],
+  routine: null,
+  pace: null,
+  support: null,
+  guidance: null,
+};
 
 const defaultState: AppState = {
-  learnerName: null,
-  isReturning: false,
+  quizDone: false,
   onboarded: false,
   captions: true,
-  audio: false,
-  narration: false,
+  audio: true,
+  narration: true,
   camera: false,
-  preferences: {
-    goals: ['conversations', 'visual'],
-    routine: 'occasional',
-    pace: 'unhurried',
-    support: 'mouth',
-    guidance: 'guided',
-  },
+  preferences: EMPTY_PREFERENCES,
   plan: {
     pace: 'unhurried',
     assistance: 'cue-target',
@@ -63,7 +68,7 @@ const defaultState: AppState = {
 };
 
 /** Session-only fields: never restored from storage. */
-const SESSION_DEFAULTS = { learnerName: null, isReturning: false, onboarded: false } satisfies Partial<AppState>;
+const SESSION_DEFAULTS = { quizDone: false, onboarded: false, preferences: EMPTY_PREFERENCES } satisfies Partial<AppState>;
 
 function load(): AppState {
   try {
@@ -74,7 +79,6 @@ function load(): AppState {
       ...defaultState,
       ...parsed,
       ...SESSION_DEFAULTS,
-      preferences: { ...defaultState.preferences, ...parsed.preferences },
       plan: { ...defaultState.plan, ...parsed.plan },
     };
   } catch {
@@ -100,9 +104,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const actions: AppActions = useMemo(
     () => ({
-      signIn: (name, returning) => patch({ learnerName: name, isReturning: returning, onboarded: false }),
-      signOut: () => setState(defaultState),
+      completeQuiz: () => patch({ quizDone: true }),
       completeOnboarding: () => patch({ onboarded: true }),
+      reset: () => setState(defaultState),
       setCaptions: (on) => patch({ captions: on }),
       setAudio: (on) => setState((s) => ({ ...s, audio: on, narration: on ? s.narration : false })),
       setNarration: (on) => setState((s) => ({ ...s, narration: on, audio: on ? true : s.audio })),
