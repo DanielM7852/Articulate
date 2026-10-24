@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from './audio/estimator';
 import { VowelPlot } from './components/VowelPlot';
 import { GameMode, type FrameListener } from './game/GameMode';
 import type { GameCalibrations } from './game/lessons';
+import type { VoiceProfile } from './game/targets';
 import { ConsonantCuePreview } from './components/ConsonantCuePreview';
 import { ReferenceCheck } from './reference/ReferenceCheck';
 import { useVowelSession } from './useVowelSession';
@@ -25,6 +26,7 @@ export default function App() {
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ceilingHz }), [ceilingHz]);
   const [mode, setMode] = useState<'map' | 'game' | 'check'>(showCheck ? 'check' : 'map');
   const [gameCalibrations, setGameCalibrations] = useState<GameCalibrations>({ base: null, extra: {} });
+  const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
   const gameFrames = useRef<FrameListener | null>(null);
   const session = useVowelSession(settings, { onFrame: (frame) => gameFrames.current?.(frame) });
   const active = session.phase === 'running' || session.phase === 'requesting';
@@ -62,13 +64,13 @@ export default function App() {
           <h1 id="page-title">Does the reference<br className="mobile-break" /> fit your voice?</h1>
           <p className="intro-copy">About three minutes in each place. Record each word once, then copy the results into the chat.</p>
         </> : <>
-          <p className="eyebrow">Zone game</p>
-          <h1 id="page-title">Glide between<br className="mobile-break" /> the zones you set.</h1>
-          <p className="intro-copy">Set three zones with your own voice, then move between them to say short words. Everything is shown on screen; nothing depends on hearing.</p>
+          <p className="eyebrow">Vowel game</p>
+          <h1 id="page-title">Move your vowels<br className="mobile-break" /> toward the targets.</h1>
+          <p className="intro-copy">A short voice check sizes the targets to your voice. Then hold each vowel and watch which ring you reach. Everything is shown on screen; nothing depends on hearing.</p>
         </>}
       </section>
 
-      {mode === 'game' && <GameMode calibrations={gameCalibrations} setCalibrations={setGameCalibrations} session={session} frames={gameFrames} point={point} tracking={tracking} />}
+      {mode === 'game' && <GameMode calibrations={gameCalibrations} setCalibrations={setGameCalibrations} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} session={session} frames={gameFrames} point={point} tracking={tracking} />}
       {mode === 'check' && <ReferenceCheck session={session} frames={gameFrames} point={point} tracking={tracking} />}
       {mode === 'map' && <div className="workspace">
         <section className="map-panel" aria-labelledby="map-title">

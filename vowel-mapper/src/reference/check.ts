@@ -45,14 +45,19 @@ export function holdValue(points: Formants[]): (Formants & { count: number }) | 
 }
 
 /** One uniform log shift from head/had/heard only, so a target vowel can never move its own reference. */
-export function voiceFactor(holds: Hold[]): number | null {
-  const shifts = holds.flatMap((hold) => {
-    const prompt = PROMPTS[hold.prompt];
-    if (prompt.kind !== 'calibration' || !hold.value) return [];
-    const [m1, m2] = REFERENCE_V1.means[prompt.vowel];
-    return [Math.log(hold.value.f1) - m1, Math.log(hold.value.f2) - m2];
+export function factorFrom(values: { vowel: CalibrationVowel; value: Formants }[]): number | null {
+  const shifts = values.flatMap(({ vowel, value }) => {
+    const [m1, m2] = REFERENCE_V1.means[vowel];
+    return [Math.log(value.f1) - m1, Math.log(value.f2) - m2];
   });
   return shifts.length ? shifts.reduce((a, b) => a + b) / shifts.length : null;
+}
+
+export function voiceFactor(holds: Hold[]): number | null {
+  return factorFrom(holds.flatMap((hold) => {
+    const prompt = PROMPTS[hold.prompt];
+    return prompt.kind === 'calibration' && hold.value ? [{ vowel: prompt.vowel as CalibrationVowel, value: hold.value }] : [];
+  }));
 }
 
 /** Normalised distance from the scaled reference: 1 = one reference radius. */

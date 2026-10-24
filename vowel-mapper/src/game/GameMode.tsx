@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import type { TrackedFrame, VowelPoint } from '../audio/tracker';
 import { VowelPlot } from '../components/VowelPlot';
 import type { useVowelSession } from '../useVowelSession';
@@ -7,6 +7,8 @@ import { WarmUp, type CalibrationProblem, type WarmUpState } from './calibration
 import { GameOverlay } from './GameOverlay';
 import { LESSONS, calibrationKey, lessonAvailability, saveCalibration, zonesForLesson, type GameCalibrations } from './lessons';
 import { GameRun, type GameOptions, type GameSnapshot, type NoteState, type Outcome } from './run';
+import { TargetLesson } from './TargetLesson';
+import type { VoiceProfile } from './targets';
 import { VOWEL_LABEL, VOWELS, type VowelId } from './zones';
 import './game.css';
 
@@ -15,6 +17,8 @@ export type FrameListener = (frame: TrackedFrame) => void;
 interface GameModeProps {
   calibrations: GameCalibrations;
   setCalibrations: (calibrations: GameCalibrations) => void;
+  voiceProfile: VoiceProfile | null;
+  setVoiceProfile: (profile: VoiceProfile) => void;
   session: ReturnType<typeof useVowelSession>;
   frames: MutableRefObject<FrameListener | null>;
   point: VowelPoint | null;
@@ -39,9 +43,29 @@ const sound = (vowel: keyof typeof VOWEL_LABEL) => VOWEL_LABEL[vowel].sound;
 const RECENT_TRACE_MS = 3000;
 const BASE_WARMUP: WarmUpSpec = { key: 'base', vowels: VOWELS };
 
-export function GameMode({ calibrations, setCalibrations, session, frames, point, tracking }: GameModeProps) {
+/** The default lesson: voice-sized reference targets. Every other lesson uses zones set from the player's own voice. */
+const TARGET_LESSON = 'targets';
+
+export function GameMode(props: GameModeProps) {
+  const [lessonId, setLessonId] = useState(TARGET_LESSON);
+  const picker = <LessonPicker value={lessonId} onChange={setLessonId} />;
+  return lessonId === TARGET_LESSON
+    ? <TargetLesson session={props.session} frames={props.frames} point={props.point} tracking={props.tracking} lessonPicker={picker}
+      saved={props.voiceProfile} onChecked={props.setVoiceProfile} />
+    : <RouteGame {...props} lessonId={lessonId} lessonPicker={picker} />;
+}
+
+function LessonPicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  return (
+    <label className="game-lesson">Lesson<select aria-label="Lesson" value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value={TARGET_LESSON}>Reach the targets · eee and ah</option>
+      {LESSONS.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+    </select></label>
+  );
+}
+
+function RouteGame({ calibrations, setCalibrations, session, frames, point, tracking, lessonId, lessonPicker }: GameModeProps & { lessonId: string; lessonPicker: ReactNode }) {
   const [stage, setStage] = useState<Stage>(calibrations.base ? { kind: 'ready' } : { kind: 'intro' });
-  const [lessonId, setLessonId] = useState('starter');
   const [warmUpSpec, setWarmUpSpec] = useState(BASE_WARMUP);
   const [summaries, setSummaries] = useState<Record<string, GameSnapshot['tally']>>({});
   const [pacing, setPacing] = useState<'self' | 'timed'>('self');
@@ -151,6 +175,7 @@ export function GameMode({ calibrations, setCalibrations, session, frames, point
             <p>Hold <strong>eee</strong>, <strong>ah</strong> and <strong>oo</strong> comfortably for about a second each. Each zone comes from your own voice.</p>
           </div>
           <div className="controls"><button type="button" className="button-primary" onClick={() => beginWarmUp()}>Start warm-up</button></div>
+          {lessonPicker}
         </>}
 
         {stage.kind === 'warmup' && <WarmUpPanel vowels={warmUpSpec.vowels} state={stage.state} micOn={micOn} requesting={session.phase === 'requesting'} onCancel={stop} />}
@@ -166,7 +191,7 @@ export function GameMode({ calibrations, setCalibrations, session, frames, point
 
         {stage.kind === 'ready' && <>
           <div className="status-copy game-copy" role="status" aria-live="polite"><h2 data-testid="game-status">Your zones are set</h2><p>Choose a route. Consonant letters are cues only and are never scored.</p></div>
-          <label className="game-lesson">Lesson<select aria-label="Lesson" value={lessonId} onChange={(event) => setLessonId(event.target.value)}>{LESSONS.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+          {lessonPicker}
           <p className="game-description">{lesson.description}</p>
           {lesson.caveat && <p className="game-caveat">{lesson.caveat}</p>}
           {availability.kind === 'locked' && <p className="game-lock" data-testid="lesson-lock" role="note">{availability.reason}</p>}

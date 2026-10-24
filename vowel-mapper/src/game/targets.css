@@ -1,0 +1,42 @@
+/* Voice-sized targets. Colours follow the reference check: teal for ee, amber for ah. */
+.game-workspace { --tg-ee: #0f8f80; --tg-ah: #c46a12; }
+
+.tg-target polygon { fill-opacity: .06; stroke-width: 1; stroke-opacity: .35; transition: fill-opacity .2s ease, stroke-opacity .2s ease; }
+.tg-ee polygon { fill: var(--tg-ee); stroke: var(--tg-ee); }
+.tg-ah polygon { fill: var(--tg-ah); stroke: var(--tg-ah); }
+.tg-target.is-active polygon { fill-opacity: .1; stroke-opacity: .8; stroke-width: 1.4; }
+.tg-target.is-unscored polygon { fill-opacity: .03; stroke-dasharray: 3 4; }
+.tg-target text { font-family: "Avenir Next", "Segoe UI", sans-serif; font-weight: 650; letter-spacing: -.3px; fill: #182c4e; opacity: .65; }
+.tg-target .tg-note { font-weight: 500; font-style: italic; fill: #586b87; }
+.tg-start { fill: white; stroke-width: 2.4; }
+.tg-ee .tg-start, .tg-ee .tg-latest { stroke: var(--tg-ee); }
+.tg-ah .tg-start, .tg-ah .tg-latest { stroke: var(--tg-ah); }
+.tg-ee .tg-latest { fill: var(--tg-ee); }
+.tg-ah .tg-latest { fill: var(--tg-ah); }
+.tg-latest { stroke: white; stroke-width: 1.5; }
+.tg-path { stroke: #586b87; stroke-width: 1.4; stroke-dasharray: 2 5; stroke-linecap: round; }
+
+.tg-start-key { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 2px solid #586b87; background: white; margin-right: 7px; vertical-align: -1px; }
+
+.tg-places { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; background: #f1f5fb; border-radius: 12px; margin-bottom: 12px; }
+.tg-places button { border: 0; background: transparent; border-radius: 9px; padding: 11px; font: inherit; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.tg-places button[aria-pressed='true'] { background: white; color: var(--ink); box-shadow: 0 1px 3px rgb(24 44 78 / 14%); }
+.tg-places button:focus-visible { outline: 3px solid #9db6fb; outline-offset: 2px; }
+
+.tg-reuse { display: grid; gap: 8px; margin: 18px 0 6px; padding: 12px; border-radius: 10px; background: #f6f9ff; font-size: 12px; color: var(--ink); }
+.tg-reuse small { display: block; margin-top: 2px; color: var(--muted); }
+
+.tg-phases strong { font-size: 15px; letter-spacing: -.3px; }
+.tg-phases { grid-template-columns: repeat(auto-fit, minmax(52px, 1fr)); }
+
+.tg-glyph circle { fill: none; stroke: #c4d0e2; stroke-width: 1.2; }
+.tg-glyph circle.is-reached { fill: var(--hit); fill-opacity: .28; stroke: var(--hit); }
+.tg-glyph .tg-unscored { stroke: var(--unheard); }
+.tg-glyph.is-pending .glyph-pending { fill: #c4d0e2; stroke: none; }
+.game-strip li.is-current .tg-glyph .glyph-pending { fill: var(--blue); }
+.tg-glyph .glyph-unheard { stroke: var(--unheard); stroke-dasharray: 2.2 2; }
+
+@media (prefers-reduced-motion: reduce) { .tg-target polygon { transition: none; } }
+.tg-results li { grid-template-columns: 22px minmax(40px, auto) 1fr; column-gap: 8px; }
+.tg-results span { text-align: right; }
+.tg-results small { display: block; margin-top: 2px; font-size: 10px; }

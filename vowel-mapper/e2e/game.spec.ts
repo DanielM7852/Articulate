@@ -4,15 +4,17 @@ import { vowelSignal } from '../tests/signals';
 // Same synthetic vowels as the file-based fixture in setup.ts, but switchable on cue: the warm-up
 // prompts and self-paced notes decide when each sound starts, so a fixed looping file cannot line up.
 const VOWELS = { ee: [300, 2300, 3000], ah: [750, 1200, 2600], oo: [350, 800, 2400], aw: [650, 1050, 2600], ih: [480, 1900, 2900], eh: [680, 1700, 2800], ae: [920, 1550, 2700] };
+// A voice 10% smaller than the pooled reference: head, had, heard, see, spa at reference × 0.9.
+const SCALED = { rEh: [613, 1833, 2600], rAe: [625, 1936, 2700], rEr: [484, 1375, 2300], rIy: [380, 2410, 3000], rAh: [767, 1356, 2500] };
 const screenshotDir = process.env.MAPPER_SCREENSHOTS ?? 'test-results';
-const clips = Object.fromEntries(Object.entries(VOWELS).map(([name, formants]) => {
+const clips = Object.fromEntries(Object.entries({ ...VOWELS, ...SCALED }).map(([name, formants]) => {
   // 0.5 s at 120 Hz pitch is a whole number of periods, so the loop seam is clean.
   const samples = vowelSignal({ formants, sampleRate: 48000, seconds: 0.5 });
   const pcm = Int16Array.from(samples, (value) => Math.round(value * 32767));
   return [name, Buffer.from(pcm.buffer).toString('base64')];
 }));
 
-type Sound = keyof typeof VOWELS | 'noise' | null;
+type Sound = keyof typeof VOWELS | keyof typeof SCALED | 'noise' | null;
 
 async function installSyntheticMicrophone(page: Page) {
   await page.addInitScript((encoded: Record<string, string>) => {
@@ -53,6 +55,8 @@ const say = (page: Page, sound: Sound) => page.evaluate((s) => (window as unknow
 
 async function warmUp(page: Page, screenshot = false) {
   const status = page.getByTestId('game-status');
+  // The game opens on the voice-sized target lesson; the route lessons keep their own warm-up.
+  await page.getByLabel('Lesson', { exact: true }).selectOption('starter');
   await page.getByRole('button', { name: 'Start warm-up' }).click();
   for (const [vowel, label, next] of [['ee', 'eee', 'Next: ah'], ['ah', 'ah', 'Next: oo'], ['oo', 'oo', null]] as const) {
     await expect(status).toHaveText(`Hold ${label}`, { timeout: 15000 });
@@ -78,6 +82,7 @@ test('zone game: warm-up sets personal zones, then hit, miss and "not heard clea
   await page.goto('/');
   await page.getByRole('button', { name: 'Game', exact: true }).click();
   const status = page.getByTestId('game-status');
+  await page.getByLabel('Lesson', { exact: true }).selectOption('starter');
   await expect(status).toHaveText('Set your zones first');
 
   await warmUp(page, true);
@@ -86,6 +91,7 @@ test('zone game: warm-up sets personal zones, then hit, miss and "not heard clea
   const eeShape = await page.getByTestId('zone-ee').locator('polygon').getAttribute('points');
   await page.getByRole('button', { name: 'Map', exact: true }).click();
   await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await page.getByLabel('Lesson', { exact: true }).selectOption('starter');
   await expect(status).toHaveText('Your zones are set');
   await expect(page.getByTestId('zone-ee').locator('polygon')).toHaveAttribute('points', eeShape!);
 
@@ -302,4 +308,71 @@ test('the ready game can release the microphone while retaining its personal zon
   await page.getByRole('button', { name: 'Map', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Finish', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeEnabled();
+});
+
+test('target lesson: noisy-room voice check, voice-sized rings, ee shown but not scored, nothing stored or sent', async ({ page, baseURL }) => {
+  test.setTimeout(150_000);
+  await installSyntheticMicrophone(page);
+  const offDevice: string[] = [];
+  page.on('request', (request) => { if (!request.url().startsWith(baseURL!) && !/^(data|blob):/.test(request.url())) offDevice.push(request.url()); });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  const status = page.getByTestId('game-status');
+  await expect(status).toHaveText('Size the targets to your voice');
+  await expect(page.getByText('Same place as last time?')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Noisy room' }).click();
+  await page.getByRole('button', { name: 'Start voice check' }).click();
+  const prompts = [['head', 'rEh'], ['had', 'rAe'], ['heard', 'rEr'], ['see', 'rIy'], ['spa', 'rAh']] as const;
+  for (const [i, [word, sound]] of prompts.entries()) {
+    await expect(status).toHaveText(new RegExp(`^Say “${word}”`), { timeout: 15000 });
+    await say(page, sound);
+    if (word === 'heard') await page.screenshot({ path: `${screenshotDir}/targets-check.png` });
+    const next = prompts[i + 1];
+    await expect(status).toHaveText(next ? `Next: “${next[0]}”` : 'Your targets are ready', { timeout: 10000 });
+    await say(page, null);
+  }
+  await expect(page.getByTestId('noisy-note')).toBeVisible();
+  for (const sound of ['ee', 'ah']) {
+    await expect(page.getByTestId(`target-${sound}`).locator('polygon')).toHaveCount(3);
+    await expect(page.getByTestId(`start-${sound}`)).toBeVisible();
+  }
+  await expect(page.getByTestId('target-ee')).toHaveClass(/is-unscored/);
+  await expect(page.getByTestId('target-caption')).toContainText('Targets sized to your voice · American English reference');
+  await page.screenshot({ path: `${screenshotDir}/targets-ready.png`, fullPage: true });
+
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  const words = [['ah', 'rAh'], ['see', 'rIy'], ['spa', 'rAh'], ['key', 'rIy'], ['pa', 'rAh'], ['tea', null]] as const;
+  for (const [i, [word, sound]] of words.entries()) {
+    await expect(status).toHaveText(new RegExp(`^Say “${word}”`), { timeout: 15000 });
+    await expect(page.getByRole('button', { name: 'Try this word' })).toBeVisible();
+    // Room noise, not digital silence: a real microphone keeps delivering frames.
+    await say(page, sound ?? 'noise');
+    if (!sound) await page.getByRole('button', { name: 'Try this word' }).click();
+    // The last result appears in the results list: the live word strip closes with the round.
+    const result = i === words.length - 1 ? page.getByTestId(`result-${i}`) : page.getByTestId(`outcome-${i}`);
+    await expect(result).not.toHaveAttribute('data-outcome', '', { timeout: 10000 });
+    if (i === 2) await page.screenshot({ path: `${screenshotDir}/targets-playing.png`, fullPage: true });
+    await say(page, null);
+  }
+  for (const i of [0, 2, 4]) {
+    await expect(page.getByTestId(`result-${i}`)).toHaveAttribute('data-outcome', 'measured');
+    await expect(page.getByTestId(`result-${i}`)).toHaveAttribute('data-ring', /^[123]$/);
+  }
+  for (const i of [1, 3]) await expect(page.getByTestId(`result-${i}`)).toHaveAttribute('data-outcome', 'unscored');
+  await expect(page.getByTestId('result-5')).toHaveAttribute('data-outcome', 'unheard');
+  await expect(status).toHaveText(/of 3 closer than your start$/);
+  await expect(page.getByTestId('result-1')).toContainText('Heard · not scored');
+  await expect(page.getByTestId('result-0')).toContainText(/Ring [123] of 3/);
+  await page.screenshot({ path: `${screenshotDir}/targets-results.png`, fullPage: true });
+
+  // "Same place as last time?" reuses this visit's check without measuring again.
+  await page.getByRole('button', { name: 'Redo voice check' }).click();
+  await expect(page.getByText('Same place as last time?')).toBeVisible();
+  await page.getByRole('button', { name: 'Skip, use last check' }).click();
+  await expect(status).toHaveText('Your targets are ready');
+  await expect(page.getByTestId('noisy-note')).toBeVisible();
+
+  expect(await page.evaluate(() => window.localStorage.length)).toBe(0);
+  expect(offDevice).toEqual([]);
 });
