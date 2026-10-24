@@ -20,10 +20,18 @@ const TARGETS: Record<SoundId, { x: number; y: number }> = {
   a: { x: 55, y: 80 },
 };
 
-export function VowelGraphPlaceholder({ sound, hidden }: { sound: SoundId; hidden?: boolean }) {
+export function VowelGraphPlaceholder({
+  sound,
+  hidden,
+  height = 270,
+}: {
+  sound: SoundId;
+  hidden?: boolean;
+  height?: number | string;
+}) {
   if (hidden) {
     return (
-      <div className="slot" style={{ height: 270 }}>
+      <div className="slot" style={{ height }}>
         <p className="small">Cursor, target, and hold ring are hidden for this attempt.</p>
       </div>
     );
@@ -39,7 +47,7 @@ export function VowelGraphPlaceholder({ sound, hidden }: { sound: SoundId; hidde
   const cursor = trail[trail.length - 1];
 
   return (
-    <div className="slot slot--graph" style={{ height: 270 }} data-slot="vowel-graph">
+    <div className="slot slot--graph" style={{ height }} data-slot="vowel-graph">
       <div className="slot-plot">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {[25, 50, 75].map((g) => (
