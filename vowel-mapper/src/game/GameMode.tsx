@@ -1,19 +1,26 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import type { TrackedFrame, VowelPoint } from '../audio/tracker';
 import { VowelPlot } from '../components/VowelPlot';
 import type { useVowelSession } from '../useVowelSession';
-import { FIRST_BEATMAP, type Step } from './beatmap';
+import type { Step } from './beatmap';
 import { WarmUp, type CalibrationProblem, type WarmUpState } from './calibration';
 import { GameOverlay } from './GameOverlay';
+import { LESSONS, calibrationKey, lessonAvailability, saveCalibration, zonesForLesson, type GameCalibrations } from './lessons';
 import { GameRun, type GameOptions, type GameSnapshot, type NoteState, type Outcome } from './run';
-import { VOWEL_LABEL, VOWELS, type ZoneSet } from './zones';
+import { HeadLesson } from './HeadLesson';
+import { TargetLesson } from './TargetLesson';
+import type { VoiceProfile } from './targets';
+import { VOWEL_LABEL, VOWELS, type VowelId } from './zones';
 import './game.css';
 
 export type FrameListener = (frame: TrackedFrame) => void;
 
 interface GameModeProps {
+  calibrations: GameCalibrations;
+  setCalibrations: (calibrations: GameCalibrations) => void;
+  voiceProfile: VoiceProfile | null;
+  setVoiceProfile: (profile: VoiceProfile) => void;
   session: ReturnType<typeof useVowelSession>;
-  /** App forwards every tracked frame here; see `useVowelSession`'s `onFrame`. */
   frames: MutableRefObject<FrameListener | null>;
   point: VowelPoint | null;
   tracking: boolean;
@@ -27,18 +34,51 @@ type Stage =
   | { kind: 'playing'; snapshot: GameSnapshot; options: GameOptions }
   | { kind: 'finished'; snapshot: GameSnapshot };
 
-type Engine = { kind: 'warmup'; warmUp: WarmUp } | { kind: 'play'; run: GameRun };
+type WarmUpSpec = { key: string; vowels: readonly VowelId[] };
+type Engine =
+  | { kind: 'warmup'; warmUp: WarmUp; spec: WarmUpSpec; saved: GameCalibrations }
+  | { kind: 'play'; run: GameRun; lessonId: string };
 
-const TEMPOS = [{ label: 'Relaxed · 5 s per word', spacingMs: 5000 }, { label: 'Steady · 3.5 s per word', spacingMs: 3500 }];
+const TEMPOS = [{ label: 'Relaxed · at least 5 s per word', spacingMs: 5000 }, { label: 'Steady · at least 3.5 s per word', spacingMs: 3500 }];
 const sound = (vowel: keyof typeof VOWEL_LABEL) => VOWEL_LABEL[vowel].sound;
 const RECENT_TRACE_MS = 3000;
+const BASE_WARMUP: WarmUpSpec = { key: 'base', vowels: VOWELS };
 
-export function GameMode({ session, frames, point, tracking }: GameModeProps) {
-  const [stage, setStage] = useState<Stage>({ kind: 'intro' });
-  const [zones, setZones] = useState<ZoneSet | null>(null);
+/** The default lesson: say "head" like one model voice. The target lesson uses voice-sized reference targets;
+ * every other lesson uses zones set from the player's own voice. */
+const HEAD_LESSON = 'head';
+const TARGET_LESSON = 'targets';
+
+export function GameMode(props: GameModeProps) {
+  const [lessonId, setLessonId] = useState(HEAD_LESSON);
+  const picker = <LessonPicker value={lessonId} onChange={setLessonId} />;
+  const shared = { session: props.session, frames: props.frames, point: props.point, tracking: props.tracking, lessonPicker: picker, saved: props.voiceProfile, onChecked: props.setVoiceProfile };
+  return lessonId === HEAD_LESSON ? <HeadLesson {...shared} />
+    : lessonId === TARGET_LESSON ? <TargetLesson {...shared} />
+    : <RouteGame {...props} lessonId={lessonId} lessonPicker={picker} />;
+}
+
+function LessonPicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  return (
+    <label className="game-lesson">Lesson<select aria-label="Lesson" value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value={HEAD_LESSON}>Say “head” · model voice</option>
+      <option value={TARGET_LESSON}>Reach the targets · eee and ah</option>
+      {LESSONS.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+    </select></label>
+  );
+}
+
+function RouteGame({ calibrations, setCalibrations, session, frames, point, tracking, lessonId, lessonPicker }: GameModeProps & { lessonId: string; lessonPicker: ReactNode }) {
+  const [stage, setStage] = useState<Stage>(calibrations.base ? { kind: 'ready' } : { kind: 'intro' });
+  const [warmUpSpec, setWarmUpSpec] = useState(BASE_WARMUP);
+  const [summaries, setSummaries] = useState<Record<string, GameSnapshot['tally']>>({});
   const [pacing, setPacing] = useState<'self' | 'timed'>('self');
   const [spacingMs, setSpacingMs] = useState(TEMPOS[0].spacingMs);
   const engine = useRef<Engine | null>(null);
+  const lesson = LESSONS.find((item) => item.id === lessonId)!;
+  const steps = lesson.steps;
+  const zones = zonesForLesson(lesson, calibrations);
+  const availability = lessonAvailability(lesson, zones);
 
   const onFrame = useCallback((frame: TrackedFrame) => {
     const current = engine.current;
@@ -47,14 +87,19 @@ export function GameMode({ session, frames, point, tracking }: GameModeProps) {
       const state = current.warmUp.push(frame);
       if (state.kind !== 'done') { setStage({ kind: 'warmup', state }); return; }
       engine.current = null;
-      if (state.result.ok) { setZones(state.result.zones); setStage({ kind: 'ready' }); }
-      else setStage({ kind: 'failed', problems: state.result.problems });
+      if (state.result.ok) {
+        setCalibrations(saveCalibration(current.saved, current.spec.key, state.result.zones));
+        setStage({ kind: 'ready' });
+      } else setStage({ kind: 'failed', problems: state.result.problems });
       return;
     }
     const snapshot = current.run.push(frame);
-    if (snapshot.phase === 'finished') { engine.current = null; setStage({ kind: 'finished', snapshot }); }
-    else setStage({ kind: 'playing', snapshot, options: current.run.options });
-  }, []);
+    if (snapshot.phase === 'finished') {
+      engine.current = null;
+      setSummaries((previous) => ({ ...previous, [current.lessonId]: snapshot.tally }));
+      setStage({ kind: 'finished', snapshot });
+    } else setStage({ kind: 'playing', snapshot, options: current.run.options });
+  }, [setCalibrations]);
 
   useEffect(() => {
     frames.current = onFrame;
@@ -65,121 +110,127 @@ export function GameMode({ session, frames, point, tracking }: GameModeProps) {
   useEffect(() => {
     if ((session.phase === 'finished' || session.phase === 'error') && engine.current) {
       engine.current = null;
-      setStage(zones ? { kind: 'ready' } : { kind: 'intro' });
+      setStage(calibrations.base ? { kind: 'ready' } : { kind: 'intro' });
     }
-  }, [session.phase, zones]);
+  }, [session.phase, calibrations.base]);
 
   const ensureMicrophone = () => {
     if (session.phase !== 'running' && session.phase !== 'requesting') void session.start();
   };
-  const beginWarmUp = () => {
-    engine.current = { kind: 'warmup', warmUp: new WarmUp() };
+  const beginWarmUp = (spec: WarmUpSpec = BASE_WARMUP) => {
+    setWarmUpSpec(spec);
+    engine.current = { kind: 'warmup', warmUp: new WarmUp({ vowels: spec.vowels }), spec, saved: calibrations };
     setStage({ kind: 'warmup', state: null });
     ensureMicrophone();
   };
   const play = () => {
-    if (!zones) return;
-    const run = new GameRun(FIRST_BEATMAP, zones, { pacing: pacing === 'self' ? { kind: 'self' } : { kind: 'timed', spacingMs } });
-    engine.current = { kind: 'play', run };
+    if (availability.kind !== 'ready') return;
+    const run = new GameRun(steps, zones, { pacing: pacing === 'self' ? { kind: 'self' } : { kind: 'timed', spacingMs } });
+    engine.current = { kind: 'play', run, lessonId };
     setStage({ kind: 'playing', snapshot: run.snapshot(), options: run.options });
     ensureMicrophone();
+  };
+  const beginAttempt = () => {
+    const current = engine.current;
+    if (current?.kind === 'play') setStage({ kind: 'playing', snapshot: current.run.beginAttempt(), options: current.run.options });
   };
   const stop = () => {
     engine.current = null;
     session.finish();
-    setStage(zones ? { kind: 'ready' } : { kind: 'intro' });
+    setStage(calibrations.base ? { kind: 'ready' } : { kind: 'intro' });
   };
+  const chooseLesson = () => setStage({ kind: 'ready' });
 
-  const latest = point?.timestampMs ?? 0;
+  const latest = session.frame?.timestampMs ?? 0;
   const trace = session.trace.filter((sample) => sample.timestampMs >= latest - RECENT_TRACE_MS);
   const playing = stage.kind === 'playing' ? stage : null;
   const currentIndex = playing?.snapshot.current ?? null;
-  const step = currentIndex === null ? undefined : FIRST_BEATMAP[currentIndex];
+  const step = currentIndex === null ? undefined : steps[currentIndex];
   const note = currentIndex === null ? undefined : playing?.snapshot.notes[currentIndex];
   const micOn = session.phase === 'running' && !session.stale;
+  const hasZones = Object.keys(zones).length > 0;
+  const previousSummary = summaries[lessonId];
 
   return (
-    <div className="workspace game-workspace">
+    <div className={`workspace game-workspace${playing ? ' is-playing' : ''}`}>
       <section className="map-panel" aria-labelledby="game-map-title">
+        {playing && step && note && <div className="game-live-cue">
+          <div className="session-heading"><span className="eyebrow">{lesson.title}</span><span className="timer" data-testid="game-progress">{(currentIndex ?? 0) + 1} / {steps.length}</span></div>
+          <OutcomeStrip steps={steps} notes={playing.snapshot.notes} current={currentIndex} />
+          <div className="game-current"><WordCard step={step} /><div><NotePrompt step={step} note={note} previous={currentIndex ? playing.snapshot.notes[currentIndex - 1] : undefined} timeMs={playing.snapshot.timeMs} /></div></div>
+          {step.caveat && <p className="game-caveat" role="note">{step.caveat}</p>}
+        </div>}
         <div className="panel-heading">
-          <h2 id="game-map-title">{zones ? 'Your zones' : 'Your vowel space'}</h2>
+          <h2 id="game-map-title">{hasZones ? 'Your zones' : 'Your vowel space'}</h2>
           <span className="trace-key"><i />Last 3 s of your sound</span>
         </div>
-        <VowelPlot
-          trace={trace}
-          point={point}
-          faded={!tracking && session.phase !== 'finished'}
-          live={session.phase === 'running'}
-          overlay={zones ? (textScale) => <GameOverlay zones={zones} textScale={textScale} step={step} note={note} options={playing?.options} timeMs={playing?.snapshot.timeMs} /> : undefined}
-        />
+        <VowelPlot trace={trace} point={point} faded={!tracking && session.phase !== 'finished'} live={session.phase === 'running'}
+          overlay={hasZones ? (textScale) => <GameOverlay zones={zones} textScale={textScale} step={step} note={note} options={playing?.options} timeMs={playing?.snapshot.timeMs} /> : undefined} />
         <div className="map-caption"><span className="legend-dot" />Your sound, over the zones you set in the warm-up</div>
       </section>
 
       <aside className="practice-panel game-panel" aria-label="Zone game">
-        <div className="session-heading">
-          <span className="eyebrow">{stage.kind === 'warmup' || stage.kind === 'failed' || stage.kind === 'intro' ? 'Warm-up' : stage.kind === 'finished' ? 'Results' : 'Zone game'}</span>
-          {playing && <span className="timer" data-testid="game-progress">{Math.min((currentIndex ?? FIRST_BEATMAP.length - 1) + 1, FIRST_BEATMAP.length)} / {FIRST_BEATMAP.length}</span>}
-        </div>
-
+        <div className="session-heading"><span className="eyebrow">{stage.kind === 'warmup' || stage.kind === 'failed' || stage.kind === 'intro' ? '1 · Set personal zones' : stage.kind === 'finished' ? lesson.title : 'Zone game'}</span></div>
         {session.phase === 'error' && session.error && <p className="game-error" role="alert">{session.error}</p>}
 
         {stage.kind === 'intro' && <>
           <div className="status-copy game-copy" role="status" aria-live="polite">
             <h2 data-testid="game-status">Set your zones first</h2>
-            <p>Hold <strong>eee</strong>, <strong>ah</strong> and <strong>oo</strong> for about a second each. Each zone is placed where your own voice lands, so it fits how you speak.</p>
+            <p>Hold <strong>eee</strong>, <strong>ah</strong> and <strong>oo</strong> comfortably for about a second each. Each zone comes from your own voice.</p>
           </div>
-          <div className="controls"><button type="button" className="button-primary" onClick={beginWarmUp}>Start warm-up</button></div>
+          <div className="controls"><button type="button" className="button-primary" onClick={() => beginWarmUp()}>Start warm-up</button></div>
+          {lessonPicker}
         </>}
 
-        {stage.kind === 'warmup' && <WarmUpPanel state={stage.state} micOn={micOn} requesting={session.phase === 'requesting'} onCancel={stop} />}
+        {stage.kind === 'warmup' && <WarmUpPanel vowels={warmUpSpec.vowels} state={stage.state} micOn={micOn} requesting={session.phase === 'requesting'} onCancel={stop} />}
 
         {stage.kind === 'failed' && <>
           <div className="status-copy game-copy" role="status" aria-live="polite">
             <h2 data-testid="game-status">Zones not set</h2>
             <ul className="game-problems">{stage.problems.map((problem) => <li key={problemKey(problem)}>{problemCopy(problem)}</li>)}</ul>
           </div>
-          <div className="controls"><button type="button" className="button-primary" onClick={beginWarmUp}>Redo warm-up</button></div>
-          <p className="control-note">A quieter spot or moving closer to the microphone helps.</p>
+          <div className="controls"><button type="button" className="button-primary" onClick={() => beginWarmUp(warmUpSpec)}>Redo warm-up</button>{calibrations.base && <button type="button" className="button-secondary" onClick={chooseLesson}>Choose lesson</button>}</div>
+          <p className="control-note">Try a quieter spot or move closer to the microphone. Saved zones stay available.</p>
         </>}
 
         {stage.kind === 'ready' && <>
-          <div className="status-copy game-copy" role="status" aria-live="polite">
-            <h2 data-testid="game-status">Your zones are set</h2>
-            <p>Say four short words by moving between your zones. Letters like <strong>h</strong> are shown as cues and never scored.</p>
-          </div>
-          <fieldset className="game-pacing">
+          <div className="status-copy game-copy" role="status" aria-live="polite"><h2 data-testid="game-status">Your zones are set</h2><p>Choose a route. Consonant letters are cues only and are never scored.</p></div>
+          {lessonPicker}
+          <p className="game-description">{lesson.description}</p>
+          {lesson.caveat && <p className="game-caveat">{lesson.caveat}</p>}
+          {availability.kind === 'locked' && <p className="game-lock" data-testid="lesson-lock" role="note">{availability.reason}</p>}
+          {availability.kind === 'calibrate' && <p className="game-calibration-note">Set this lesson’s own {availability.vowels.map(sound).join(' / ')} zones. Your base zones stay unchanged.</p>}
+          {previousSummary && <p className="game-last-result">Last round: {previousSummary.hit} zones hit · {previousSummary.unheard} not heard clearly.</p>}
+          <fieldset className="game-pacing" disabled={availability.kind === 'locked'}>
             <legend>Pace</legend>
             <label><input type="radio" name="pacing" checked={pacing === 'self'} onChange={() => setPacing('self')} />Wait for me</label>
             <label><input type="radio" name="pacing" checked={pacing === 'timed'} onChange={() => setPacing('timed')} />Timed rings</label>
-            {pacing === 'timed' && <select aria-label="Tempo" value={spacingMs} onChange={(event) => setSpacingMs(Number(event.target.value))}>
-              {TEMPOS.map((tempo) => <option key={tempo.spacingMs} value={tempo.spacingMs}>{tempo.label}</option>)}
-            </select>}
+            {pacing === 'timed' && <select aria-label="Tempo" value={spacingMs} onChange={(event) => setSpacingMs(Number(event.target.value))}>{TEMPOS.map((tempo) => <option key={tempo.spacingMs} value={tempo.spacingMs}>{tempo.label}</option>)}</select>}
           </fieldset>
           <div className="controls">
-            <button type="button" className="button-primary" onClick={play}>Play</button>
-            <button type="button" className="button-secondary" onClick={beginWarmUp}>Redo warm-up</button>
+            {availability.kind === 'calibrate' ? <button type="button" className="button-primary" onClick={() => beginWarmUp({ key: calibrationKey(lesson), vowels: availability.vowels })}>Set lesson zones</button> : <button type="button" className="button-primary" onClick={play} disabled={availability.kind === 'locked'}>Play</button>}
           </div>
+          <button type="button" className="game-text-button" onClick={() => beginWarmUp()}>Redo base warm-up</button>
+          <p className="control-note">Zones stay while this page is open. Redoing the base warm-up clears extra lesson zones.</p>
         </>}
 
         {playing && step && note && <>
-          <OutcomeStrip notes={playing.snapshot.notes} current={currentIndex} />
-          <WordCard step={step} />
-          <NotePrompt step={step} note={note} previous={currentIndex ? playing.snapshot.notes[currentIndex - 1] : undefined} timeMs={playing.snapshot.timeMs} />
           <p className={`game-mic ${tracking ? 'is-tracking' : ''}`} data-testid="game-mic">{micOn ? (tracking ? 'Hearing a steady vowel' : 'No clear vowel right now') : session.phase === 'requesting' ? 'Allow microphone access' : session.stale ? 'Audio paused. Return to this tab.' : 'Microphone off'}</p>
-          <div className="controls"><button type="button" className="button-secondary" onClick={stop}>Stop</button></div>
+          <div className="controls">{note.status === 'waiting' && <button type="button" className="button-primary" onClick={beginAttempt}>Try this word</button>}<button type="button" className="button-secondary" onClick={stop}>Stop</button></div>
+          <p className="game-description">{lesson.caveat}</p>
         </>}
 
-        {stage.kind === 'finished' && <Results snapshot={stage.snapshot} onPlay={play} onRedo={beginWarmUp} />}
-
+        {stage.kind === 'finished' && <Results steps={steps} snapshot={stage.snapshot} onPlay={play} onChoose={chooseLesson} />}
+        {session.phase === 'running' && stage.kind !== 'playing' && stage.kind !== 'warmup' && <button type="button" className="game-text-button" onClick={session.finish}>Turn off microphone</button>}
         <p className="game-boundary">A hit means your sound reached a zone you set. It is not a judgement of your speech. Timing is visual only.</p>
       </aside>
     </div>
   );
 }
 
-function WarmUpPanel({ state, micOn, requesting, onCancel }: { state: WarmUpState | null; micOn: boolean; requesting: boolean; onCancel: () => void }) {
-  const active = state?.kind === 'collecting' ? state.vowel : state?.kind === 'rest' ? state.next : 'ee';
-  const index = VOWELS.indexOf(active);
+function WarmUpPanel({ vowels, state, micOn, requesting, onCancel }: { vowels: readonly VowelId[]; state: WarmUpState | null; micOn: boolean; requesting: boolean; onCancel: () => void }) {
+  const active = state?.kind === 'collecting' ? state.vowel : state?.kind === 'rest' ? state.next : vowels[0];
+  const index = vowels.indexOf(active);
   const collecting = state?.kind === 'collecting' ? state : null;
   const [title, hint] = requesting ? ['Allow microphone access', 'Look for your browser’s microphone permission prompt.']
     : !state || !micOn ? ['Starting the microphone', 'The warm-up begins as soon as audio arrives.']
@@ -187,7 +238,7 @@ function WarmUpPanel({ state, micOn, requesting, onCancel }: { state: WarmUpStat
     : [`Next: ${sound(active)}`, 'Take a breath. Start when the prompt changes.'];
   return <>
     <ol className="game-phases" aria-label="Warm-up sounds">
-      {VOWELS.map((vowel, i) => <li key={vowel} className={i < index ? 'is-done' : i === index ? 'is-active' : ''}>
+      {vowels.map((vowel, i) => <li key={vowel} className={i < index ? 'is-done' : i === index ? 'is-active' : ''}>
         <strong>{sound(vowel)}</strong><small>{VOWEL_LABEL[vowel].example}</small>
       </li>)}
     </ol>
@@ -227,7 +278,7 @@ function NotePrompt({ step, note, previous, timeMs }: { step: Step; note: NoteSt
   let hint = detail;
   if (note.status === 'resting' && previous?.outcome) [title, hint] = outcomeCopy(previous.outcome);
   else if (note.status === 'resting') [title, hint] = ['Get ready', `First word: “${step.word}”.`];
-  else if (note.status === 'waiting') hint = `${detail} Start whenever you’re ready.`;
+  else if (note.status === 'waiting') hint = `${detail} Start whenever you’re ready. If no vowel appears, choose “Try this word”.`;
   else if (note.status === 'approaching' || note.status === 'upcoming') [title, hint] = [`Say “${step.word}” as the ring closes`, detail];
   else if (note.status === 'open') [title, hint] = [action, detail];
   const remaining = note.status === 'open' ? Math.max(0, Math.min(1, (note.windowEndMs - timeMs) / (note.windowEndMs - note.windowStartMs))) : null;
@@ -249,13 +300,13 @@ function outcomeCopy(outcome: Outcome): [string, string] {
 
 const OUTCOME_LABEL: Record<Outcome, string> = { hit: 'Hit', miss: 'Missed', unheard: 'Not heard clearly' };
 
-function OutcomeStrip({ notes, current }: { notes: NoteState[]; current: number | null }) {
+function OutcomeStrip({ steps, notes, current }: { steps: Step[]; notes: NoteState[]; current: number | null }) {
   return (
     <ol className="game-strip" aria-label="Words">
       {notes.map((note, i) => (
         <li key={i} className={`${note.outcome ? `is-${note.outcome}` : ''} ${i === current ? 'is-current' : ''}`} data-testid={`outcome-${i}`} data-outcome={note.outcome ?? ''}>
           <OutcomeGlyph outcome={note.outcome} />
-          <span>{FIRST_BEATMAP[i].word}</span>
+          <span>{steps[i].word}</span>
           <span className="sr-only">{note.outcome ? OUTCOME_LABEL[note.outcome] : i === current ? 'Now' : 'Coming up'}</span>
         </li>
       ))}
@@ -274,7 +325,7 @@ function OutcomeGlyph({ outcome }: { outcome?: Outcome }) {
   );
 }
 
-function Results({ snapshot, onPlay, onRedo }: { snapshot: GameSnapshot; onPlay: () => void; onRedo: () => void }) {
+function Results({ steps, snapshot, onPlay, onChoose }: { steps: Step[]; snapshot: GameSnapshot; onPlay: () => void; onChoose: () => void }) {
   const { hit, miss, unheard } = snapshot.tally;
   const judged = hit + miss;
   return <>
@@ -284,12 +335,12 @@ function Results({ snapshot, onPlay, onRedo }: { snapshot: GameSnapshot; onPlay:
     </div>
     <ul className="game-results">
       {snapshot.notes.map((note, i) => (
-        <li key={i} data-testid={`result-${i}`}><OutcomeGlyph outcome={note.outcome} /><b>{FIRST_BEATMAP[i].word}</b><span>{note.outcome ? OUTCOME_LABEL[note.outcome] : ''}</span></li>
+        <li key={i} data-testid={`result-${i}`}><OutcomeGlyph outcome={note.outcome} /><b>{steps[i].word}</b><span>{note.outcome ? OUTCOME_LABEL[note.outcome] : ''}</span></li>
       ))}
     </ul>
     <div className="controls">
       <button type="button" className="button-primary" onClick={onPlay}>Play again</button>
-      <button type="button" className="button-secondary" onClick={onRedo}>Redo warm-up</button>
+      <button type="button" className="button-secondary" onClick={onChoose}>Choose lesson</button>
     </div>
   </>;
 }
@@ -303,5 +354,5 @@ function problemCopy(problem: CalibrationProblem) {
     return `${sound(problem.vowel)}: heard clearly for ${problem.count} of the ${problem.needed} frames needed. Hold it longer and steadier.`;
   }
   const [a, b] = problem.vowels.map(sound);
-  return `${a} and ${b} landed in the same place, so the game can’t tell them apart. Make them more different.`;
+  return `${a} and ${b} landed in the same place, so the game can’t separate these zones. Try again comfortably; this lesson may not fit your voice or microphone.`;
 }

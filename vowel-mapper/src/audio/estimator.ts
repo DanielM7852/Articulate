@@ -20,15 +20,21 @@ export interface EstimatorSettings {
   /** The analysis rate is twice this ceiling, as in standard LPC analysis. */
   ceilingHz: number;
   minimumRms: number;
+  /** Fit the all-pole model to the harmonic peaks after removing the noise floor measured between them. */
+  harmonicEnvelope?: boolean;
 }
+
+/** Pitch limit for the harmonic envelope. */
+export const HARMONIC_MAX_F0 = 170;
 
 export const DEFAULT_SETTINGS: EstimatorSettings = { ceilingHz: 5500, minimumRms: 0.008 };
 
 /** Frames whose autocorrelation peak falls below this are rejected as `unvoiced`. */
 export const VOICING_THRESHOLD = 0.65;
 
-function periodicityOf(samples: Float64Array, rate: number): number {
-  let best = 0;
+/** Peak normalised autocorrelation, and the shortest lag within 10% of it (avoids picking a period multiple). */
+function periodicityOf(samples: Float64Array, rate: number): { periodicity: number; lag: number } {
+  const scores: [number, number][] = [];
   for (let lag = Math.floor(rate / 450); lag <= Math.min(Math.ceil(rate / 65), samples.length / 2); lag++) {
     let correlation = 0;
     let leftEnergy = 0;
@@ -38,9 +44,94 @@ function periodicityOf(samples: Float64Array, rate: number): number {
       leftEnergy += samples[i] ** 2;
       rightEnergy += samples[i - lag] ** 2;
     }
-    best = Math.max(best, correlation / Math.sqrt(leftEnergy * rightEnergy + 1e-20));
+    scores.push([lag, correlation / Math.sqrt(leftEnergy * rightEnergy + 1e-20)]);
   }
-  return best;
+  const periodicity = Math.max(0, ...scores.map(([, score]) => score));
+  const lag = scores.find(([, score], i) => score >= 0.9 * periodicity
+    && score >= (scores[i - 1]?.[1] ?? -1) && score >= (scores[i + 1]?.[1] ?? -1))?.[0] ?? 0;
+  return { periodicity, lag };
+}
+
+function fft(re: Float64Array, im: Float64Array) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let size = 2; size <= n; size <<= 1) {
+    const angle = -2 * Math.PI / size;
+    for (let start = 0; start < n; start += size) {
+      for (let k = 0; k < size / 2; k++) {
+        const wr = Math.cos(angle * k), wi = Math.sin(angle * k);
+        const a = start + k, b = a + size / 2;
+        const tr = re[b] * wr - im[b] * wi, ti = re[b] * wi + im[b] * wr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti;
+        re[a] += tr; im[a] += ti;
+      }
+    }
+  }
+}
+
+/**
+ * Autocorrelation of a noise-reduced spectral envelope. Voiced speech puts its energy at multiples of F0, so the
+ * power midway between harmonics is mostly noise: subtract it at each harmonic peak, then interpolate the peaks
+ * (log power) into a smooth envelope. Steady room noise between F1 and F2 no longer pulls the F1 pole upward.
+ */
+function harmonicAutocorrelation(samples: Float64Array, rate: number, f0: number, order: number): Float64Array | null {
+  const size = 2048;
+  const re = new Float64Array(size), im = new Float64Array(size);
+  re.set(samples.subarray(0, size));
+  fft(re, im);
+  const half = size / 2, bin = rate / size;
+  const power = Float64Array.from({ length: half + 1 }, (_, k) => re[k] ** 2 + im[k] ** 2);
+  const band = (from: number, to: number) => power.subarray(Math.max(1, Math.round(from / bin)), Math.min(half, Math.round(to / bin)) + 1);
+  const floorAt = (centre: number) => {
+    const values = [...band(centre - 0.15 * f0, centre + 0.15 * f0)].sort((a, b) => a - b);
+    return values.length ? values[values.length >> 1] : 0;
+  };
+  const peaks: { frequency: number; logPower: number }[] = [];
+  for (let h = 1; (h + 0.5) * f0 < rate / 2; h++) {
+    const window = band((h - 0.3) * f0, (h + 0.3) * f0);
+    if (!window.length) continue;
+    const peak = Math.max(...window);
+    const noise = h === 1 ? floorAt(1.5 * f0) : (floorAt((h - 0.5) * f0) + floorAt((h + 0.5) * f0)) / 2;
+    // Keep at least 5% of the peak so a harmonic buried in noise flattens the envelope instead of vanishing.
+    peaks.push({ frequency: h * f0, logPower: Math.log(Math.max(peak - noise, 0.05 * peak) + 1e-30) });
+  }
+  if (peaks.length < 4) return null;
+  const envelope = new Float64Array(half + 1);
+  for (let k = 0, p = 0; k <= half; k++) {
+    const f = k * bin;
+    while (p < peaks.length - 2 && peaks[p + 1].frequency < f) p++;
+    const a = peaks[p], b = peaks[p + 1];
+    const t = Math.max(0, Math.min(1, (f - a.frequency) / (b.frequency - a.frequency)));
+    envelope[k] = Math.exp(a.logPower + t * (b.logPower - a.logPower));
+  }
+  const r = new Float64Array(order + 1);
+  for (let lag = 0; lag <= order; lag++) {
+    for (let k = 0; k <= half; k++) r[lag] += (k === 0 || k === half ? 1 : 2) * envelope[k] * Math.cos(2 * Math.PI * k * lag / size);
+  }
+  return r;
+}
+
+/** Levinson–Durbin: prediction-error filter coefficients (leading 1), as burg() returns. */
+function levinson(r: Float64Array, order: number): Float64Array {
+  let coefficients = new Float64Array(order + 1);
+  coefficients[0] = 1;
+  let error = r[0];
+  for (let degree = 1; degree <= order && error > 1e-30; degree++) {
+    let sum = r[degree];
+    for (let i = 1; i < degree; i++) sum += coefficients[i] * r[degree - i];
+    const reflection = Math.max(-0.9999, Math.min(0.9999, -sum / error));
+    const next = coefficients.slice();
+    for (let i = 1; i < degree; i++) next[i] += reflection * coefficients[degree - i];
+    next[degree] = reflection;
+    coefficients = next;
+    error *= 1 - reflection * reflection;
+  }
+  return coefficients;
 }
 
 /** Windowed-sinc antialiasing; each independent frame includes its own margins. */
@@ -161,9 +252,9 @@ export function estimateFormants(
   for (let i = 0; i < samples.length; i++) samples[i] -= mean;
   const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
   // A clipped frame still reports its level and voicing; only its formants are withheld.
-  if (clipped / frame.length > 0.03) return { valid: false, reason: 'clipped', rms, periodicity: periodicityOf(samples, rate) };
+  if (clipped / frame.length > 0.03) return { valid: false, reason: 'clipped', rms, periodicity: periodicityOf(samples, rate).periodicity };
   if (rms < settings.minimumRms) return { valid: false, reason: 'quiet', rms, periodicity: 0 };
-  const periodicity = periodicityOf(samples, rate);
+  const { periodicity, lag } = periodicityOf(samples, rate);
   if (periodicity < VOICING_THRESHOLD) return { valid: false, reason: 'unvoiced', rms, periodicity };
   const emphasized = new Float64Array(samples.length);
   const emphasis = Math.exp(-2 * Math.PI * 50 / rate);
@@ -171,7 +262,9 @@ export function estimateFormants(
     const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (samples.length - 1));
     emphasized[i] = (samples[i] - emphasis * samples[i - 1]) * window;
   }
-  const poles = resonances(burg(emphasized, 10), rate);
+  // Only dense harmonics describe the envelope well: above ~170 Hz pitch the peaks are too sparse (tested on Hillenbrand).
+  const harmonic = settings.harmonicEnvelope && lag > 0 && rate / lag < HARMONIC_MAX_F0 ? harmonicAutocorrelation(emphasized, rate, rate / lag, 10) : null;
+  const poles = resonances(harmonic ? levinson(harmonic, 10) : burg(emphasized, 10), rate);
   const [first, second, third] = poles.filter(({ frequency, bandwidth }) => frequency > 180 && frequency < 5000 && bandwidth > 15 && bandwidth < 600);
   // Noise can broaden the real F1 past the bandwidth limit; relabelling would then report F2 as F1 and F3 as F2.
   const maskedF1 = first && poles.some(({ frequency, bandwidth }) => frequency > 180 && frequency < first.frequency && bandwidth >= 600);

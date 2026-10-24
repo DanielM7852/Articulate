@@ -1,0 +1,43 @@
+{
+ "adopt_two_factor": false,
+ "stage1": {
+  "C1": {
+   "P1": false,
+   "P2": false,
+   "P3": true,
+   "P4": true,
+   "children_hit": 73.04964539007092,
+   "children_nfa": 15.789473684210526,
+   "centralisation_ratio": 0.0673005299567551
+  },
+  "C1b": {
+   "P1": false,
+   "P2": false,
+   "P3": true,
+   "P4": true,
+   "children_hit": 63.829787234042556,
+   "children_nfa": 12.781954887218046,
+   "centralisation_ratio": 0.15191826580655338
+  }
+ },
+ "stage2": {
+  "C1": {
+   "P1": false,
+   "P2": false,
+   "P3": false,
+   "P4": true,
+   "children_hit": 25.555555555555557,
+   "children_nfa": 33.333333333333336,
+   "centralisation_ratio": 0.038049838404986394
+  },
+  "C1b": {
+   "P1": false,
+   "P2": false,
+   "P3": false,
+   "P4": true,
+   "children_hit": 24.444444444444443,
+   "children_nfa": 36.666666666666664,
+   "centralisation_ratio": 0.21545906514863988
+  }
+ }
+}

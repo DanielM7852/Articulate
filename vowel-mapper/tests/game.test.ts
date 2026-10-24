@@ -84,8 +84,8 @@ describe('calibration', () => {
     const near = buildZones({ ee: steady(400, 2400), ah: steady(800, 1300), oo: steady(400, 1700) });
     expect(near.ok).toBe(true);
     if (near.ok) {
-      const d = zoneDistance(near.zones.ee, near.zones.oo);
-      expect(near.zones.ee.radius + near.zones.oo.radius).toBeLessThan(d);
+      const d = zoneDistance(near.zones.ee!, near.zones.oo!);
+      expect(near.zones.ee!.radius + near.zones.oo!.radius).toBeLessThan(d);
     }
     const same = buildZones({ ee: steady(400, 2400), ah: steady(800, 1300), oo: steady(410, 2350) });
     expect(same).toMatchObject({ ok: false });
@@ -114,8 +114,19 @@ describe('warm-up', () => {
     expect(seen).toEqual(['ee', 'ah', 'oo']);
     expect(state.kind).toBe('done');
     if (state.kind !== 'done' || !state.result.ok) throw new Error('calibration failed');
-    expect(state.result.zones.ah.f1).toBeCloseTo(900);
-    expect(state.result.zones.oo.f2).toBeCloseTo(1000);
+    expect(state.result.zones.ah!.f1).toBeCloseTo(900);
+    expect(state.result.zones.oo!.f2).toBeCloseTo(1000);
+  });
+
+  it('collects a separately requested personal zone without inventing the remaining vowels', () => {
+    const warmUp = new WarmUp({ vowels: ['aw'], restMs: 0, settleMs: 0 });
+    let state = warmUp.push(rejected(0, 'quiet'));
+    expect(state).toMatchObject({ kind: 'collecting', vowel: 'aw' });
+    for (let t = 25; state.kind !== 'done' && t < 10000; t += 25) state = warmUp.push(heard(t, 650, 1050));
+    expect(state.kind).toBe('done');
+    if (state.kind !== 'done' || !state.result.ok) throw new Error('personal aw zone not collected');
+    expect(state.result.zones.aw?.f1).toBeCloseTo(650);
+    expect(state.result.zones.ah).toBeUndefined();
   });
 
   it('times out a phase that hears too little and asks for a redo', () => {
@@ -143,6 +154,31 @@ describe('game run: self-paced (default)', () => {
     return snapshot;
   };
 
+  it('rejects a run with missing personal zones before listening', () => {
+    expect(() => new GameRun([we], { ee: zones.ee })).toThrow('Missing personal zone: oo');
+  });
+
+  it('keeps waiting through room noise until an accepted vowel or an explicit attempt', () => {
+    const run = new GameRun([we], zones);
+    let snapshot = play(run, span(0, 30000, (t) => rejected(t, 'unvoiced')));
+    expect(snapshot.notes[0].status).toBe('waiting');
+    expect(snapshot.notes[0].outcome).toBeUndefined();
+    run.beginAttempt(30000);
+    snapshot = play(run, span(30025, 34000, (t) => rejected(t, 'unvoiced')));
+    expect(snapshot.notes[0].outcome).toBe('unheard');
+  });
+
+  it('never awards a hit before the required amount of accepted audio, even if both endpoints were visited', () => {
+    const run = new GameRun([we], zones, { minHeardPoints: 5 });
+    const snapshot = play(run, [
+      ...span(0, 1000, (t) => rejected(t, 'quiet')),
+      heard(1000, 430, 1000), heard(1025, 430, 1000),
+      heard(1050, 420, 2800), heard(1075, 420, 2800),
+      ...span(1100, 5000, (t) => rejected(t, 'quiet')),
+    ]);
+    expect(snapshot.notes[0].outcome).toBe('unheard');
+  });
+
   it('scores a glide that visits the start zone and then the end zone as a hit', () => {
     const run = new GameRun([we], zones);
     const snapshot = play(run, [
@@ -169,10 +205,9 @@ describe('game run: self-paced (default)', () => {
 
   it('never counts rejected frames as a miss: no accepted points means "not heard clearly"', () => {
     const run = new GameRun([we], zones);
-    const snapshot = play(run, [
-      ...span(0, 1000, (t) => rejected(t, 'quiet')),
-      ...span(1000, 8000, (t) => rejected(t, t % 50 ? 'unvoiced' : 'uncertain')),
-    ]);
+    play(run, span(0, 1000, (t) => rejected(t, 'quiet')));
+    run.beginAttempt(1000);
+    const snapshot = play(run, span(1000, 8000, (t) => rejected(t, t % 50 ? 'unvoiced' : 'uncertain')));
     expect(snapshot.notes[0].outcome).toBe('unheard');
     expect(snapshot.tally).toEqual({ hit: 0, miss: 0, unheard: 1 });
   });
@@ -191,7 +226,7 @@ describe('game run: self-paced (default)', () => {
     let snapshot = play(run, span(0, 30000, (t) => rejected(t, 'quiet')));
     expect(snapshot.notes[0].outcome).toBeUndefined();
     expect(snapshot.notes[0].status).toBe('waiting');
-    snapshot = play(run, [rejected(30000, 'unvoiced')]);
+    snapshot = play(run, [heard(30000, 430, 1000)]);
     expect(snapshot.notes[0]).toMatchObject({ status: 'open', windowStartMs: 30000 });
     expect(snapshot.notes[0].windowEndMs).toBeGreaterThan(30000 + 2000);
   });
@@ -222,10 +257,9 @@ describe('game run: self-paced (default)', () => {
     ]);
     expect(snapshot.current).toBe(1);
     expect(snapshot.notes[1].status).toBe('resting');
-    snapshot = play(run, [
-      ...span(1800, 3500, (t) => rejected(t, 'quiet')),
-      ...span(3500, 9000, (t) => rejected(t)),
-    ]);
+    play(run, span(1800, 3500, (t) => rejected(t, 'quiet')));
+    run.beginAttempt(3500);
+    snapshot = play(run, span(3500, 9000, (t) => rejected(t)));
     expect(snapshot.phase).toBe('finished');
     expect(snapshot.tally).toEqual({ hit: 1, miss: 0, unheard: 1 });
   });
@@ -249,6 +283,28 @@ describe('game run: timed', () => {
     for (let t = end - 300; t < end + 150; t += HOP) snapshot = run.push(heard(t, 430, 1000));
     for (let t = end + 150; t < end + 250; t += HOP) snapshot = run.push(heard(t, 420, 2800));
     expect(snapshot.notes[0].outcome).toBe('hit');
+  });
+
+  it('always gives the next visible note a full approach, even after a late result at the faster tempo', () => {
+    const run = new GameRun([hold, we], zones, { pacing: { kind: 'timed', spacingMs: 3500 } });
+    let snapshot = run.push(rejected(0, 'quiet'));
+    const end = snapshot.notes[0].windowEndMs;
+    for (let t = 25; t <= end + 25; t += 25) snapshot = run.push(rejected(t, 'quiet'));
+    expect(snapshot.notes[0].outcome).toBe('unheard');
+    expect(snapshot.notes[1].targetMs - snapshot.timeMs).toBeGreaterThanOrEqual(run.options.approachMs);
+    expect(snapshot.notes[1].heardPoints).toBe(0);
+  });
+
+  it('preserves the chosen minimum spacing after a delayed note followed by an early hit', () => {
+    const run = new GameRun([hold, hold, hold], zones, { pacing: { kind: 'timed', spacingMs: 3500 } });
+    let snapshot = run.push(rejected(0, 'quiet'));
+    const firstEnd = snapshot.notes[0].windowEndMs;
+    for (let t = 25; t <= firstEnd + 25; t += 25) snapshot = run.push(rejected(t, 'quiet'));
+    const secondStart = snapshot.notes[1].windowStartMs;
+    for (let t = firstEnd + 50; t < secondStart; t += 25) snapshot = run.push(rejected(t, 'quiet'));
+    for (let t = secondStart; t <= secondStart + 700; t += 25) snapshot = run.push(heard(t, 900, 1450));
+    expect(snapshot.notes[1].outcome).toBe('hit');
+    expect(snapshot.notes[2].targetMs - snapshot.notes[1].targetMs).toBeGreaterThanOrEqual(3500);
   });
 
   it('gives each note its own slot at the chosen spacing', () => {
