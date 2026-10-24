@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Check } from 'lucide-react';
+import type { LipTrackingStatus } from '../vision/useLipTracking';
+import '../vision/lipStatus.css';
 
 /* ---------- Amplitude meter (capture quality only) ---------- */
 export function AmplitudeMeter({ levels, active }: { levels: number[]; active?: boolean }) {
@@ -38,8 +40,29 @@ export function LessonSteps({ current }: { current: number }) {
 }
 
 /* ---------- Optional lip camera ---------- */
-export function CameraTile({ enabled }: { enabled: boolean }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+const LIP_STATUS_LABEL: Partial<Record<LipTrackingStatus, string>> = {
+  loading: 'Loading lip tracking',
+  tracking: 'Lip tracking on',
+  'no-face': 'Face not found',
+  error: 'Lip tracking unavailable',
+};
+
+export function CameraTile({
+  enabled,
+  onVideoElement,
+  lipStatus,
+}: {
+  enabled: boolean;
+  onVideoElement?: (el: HTMLVideoElement | null) => void;
+  lipStatus?: LipTrackingStatus;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const onVideoRef = useRef(onVideoElement);
+  onVideoRef.current = onVideoElement;
+  const setVideo = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    onVideoRef.current?.(el);
+  }, []);
   const [error, setError] = useState(false);
 
   useEffect(() => {
@@ -64,7 +87,7 @@ export function CameraTile({ enabled }: { enabled: boolean }) {
   return (
     <div className="camera-tile" aria-label={enabled ? 'Lip camera preview' : 'Camera off'}>
       {enabled && !error ? (
-        <video ref={videoRef} autoPlay muted playsInline />
+        <video ref={setVideo} autoPlay muted playsInline />
       ) : (
         <div className="stack gap-8" style={{ alignItems: 'center' }}>
           <span
@@ -82,6 +105,11 @@ export function CameraTile({ enabled }: { enabled: boolean }) {
           </span>
           {error && <span className="fine">Camera unavailable</span>}
         </div>
+      )}
+      {enabled && !error && lipStatus && LIP_STATUS_LABEL[lipStatus] && (
+        <span className="lip-status" data-state={lipStatus} role="status">
+          {LIP_STATUS_LABEL[lipStatus]}
+        </span>
       )}
     </div>
   );
