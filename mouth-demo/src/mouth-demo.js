@@ -22,7 +22,9 @@ const SWING_MS = 1200;
 // the way a person tracks someone close by. Radians (head) and blend-shape weight (eyes)
 // at full deflection; `ease` is the per-frame lerp toward the target.
 const LOOK = { yaw: 0.14, pitch: 0.09, ease: 0.07 };
-const GAZE = { yaw: 0.8, pitch: 0.55 };
+// `rest` is a slight downward cast (the model's neutral pose has eyesLookDown 0.1); without
+// it the eyes sit noticeably high whenever the look target is level.
+const GAZE = { yaw: 0.8, pitch: 0.4, rest: -0.12 };
 const GAZE_SHAPES = ["eyeLookOutLeft", "eyeLookInLeft", "eyeLookOutRight", "eyeLookInRight", "eyesLookUp", "eyesLookDown"];
 const NOTE = "Mouth demonstrations are illustrative and would be reviewed by speech therapists before real use.";
 const DRIVERS = ["auto", "talkinghead", "three"];
@@ -513,7 +515,7 @@ export async function createMouthDemo(container, options = {}) {
       // Eyes: ARKit look shapes. A positive yaw is the viewer's right, which is the avatar's
       // left eye looking out and the right eye looking in.
       const ey = lookNow.x * GAZE.yaw;
-      const ex = lookNow.y * GAZE.pitch;
+      const ex = lookNow.y * GAZE.pitch + GAZE.rest;
       driver.setShape("eyeLookOutLeft", Math.max(0, ey));
       driver.setShape("eyeLookInRight", Math.max(0, ey));
       driver.setShape("eyeLookInLeft", Math.max(0, -ey));

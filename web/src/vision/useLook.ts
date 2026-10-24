@@ -32,7 +32,7 @@ const SMOOTH = 0.35;
 const REFERENCE_DRIFT = 0.006; // per detection, about a 10 s time constant at 15 Hz
 const DEAD_ZONE = 0.08; // face widths; detector jitter below this is ignored
 const GAIN = { x: 0.5, y: 0.55 }; // look units per face width of offset
-const Y_BIAS = 0.1; // small lift: a camera above the screen sees the face a little from above
+const Y_BIAS = 0; // the resting reference already absorbs where the camera sits; keep the gaze level
 
 export function useFaceTracking(enabled: boolean) {
   const [status, setStatus] = useState<FaceStatus>('idle');
