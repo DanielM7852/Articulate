@@ -25,6 +25,16 @@ await page.waitForTimeout(4500);
 console.log('caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
 console.log('camera pill:', await page.locator('.intro-camera').innerText().catch(() => '(none)'));
 await snap('intro');
+// Pointer fallback: the guide should glance toward the pointer with its eyes and a slight head turn.
+const eyes = { x: 380, y: 150, width: 520, height: 220 };
+await page.mouse.move(1260, 120);
+await page.waitForTimeout(1800);
+await page.screenshot({ path: `${process.env.SMOKE_OUT ?? 'smoke-out'}/eyes-right-up.png`, clip: eyes });
+await page.mouse.move(20, 760);
+await page.waitForTimeout(1800);
+await page.screenshot({ path: `${process.env.SMOKE_OUT ?? 'smoke-out'}/eyes-left-down.png`, clip: eyes });
+await page.mouse.move(640, 400);
+await page.waitForTimeout(800);
 
 await page.getByRole('button', { name: /begin/i }).click();
 await page.waitForTimeout(1200);

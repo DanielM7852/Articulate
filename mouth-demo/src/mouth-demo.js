@@ -18,7 +18,12 @@ import { createLipSync } from "./lipsync.js";
 const DEFAULT_AVATAR = "/avatars/brunette.glb";
 const TH_TIMEOUT_MS = 10000;
 const SWING_MS = 1200;
-const LOOK = { yaw: 0.45, pitch: 0.28, ease: 0.08 }; // radians at full deflection, per-frame lerp
+// Looking at the learner: the eyes do most of the work and the head follows a little,
+// the way a person tracks someone close by. Radians (head) and blend-shape weight (eyes)
+// at full deflection; `ease` is the per-frame lerp toward the target.
+const LOOK = { yaw: 0.14, pitch: 0.09, ease: 0.07 };
+const GAZE = { yaw: 0.8, pitch: 0.55 };
+const GAZE_SHAPES = ["eyeLookOutLeft", "eyeLookInLeft", "eyeLookOutRight", "eyeLookInRight", "eyesLookUp", "eyesLookDown"];
 const NOTE = "Mouth demonstrations are illustrative and would be reviewed by speech therapists before real use.";
 const DRIVERS = ["auto", "talkinghead", "three"];
 const STYLES = ["hologram", "porcelain", "hybrid", "solid"];
@@ -146,6 +151,7 @@ export async function createMouthDemo(container, options = {}) {
   let look = null; // { x, y } in [-1, 1], +x = viewer's right, +y = up; null releases the head
   const lookNow = { x: 0, y: 0 };
   let headRest = null;
+  let gazing = false; // eye shapes are being driven by the look target
 
   const renderDebug = () => {
     if (debugEl) debugEl.textContent = `driver: ${driver?.name ?? "-"} | style: ${style} | ${NOTE}`;
@@ -504,6 +510,20 @@ export async function createMouthDemo(container, options = {}) {
         driver.headBone.rotation.y += lookNow.x * LOOK.yaw;
         driver.headBone.rotation.x -= lookNow.y * LOOK.pitch;
       }
+      // Eyes: ARKit look shapes. A positive yaw is the viewer's right, which is the avatar's
+      // left eye looking out and the right eye looking in.
+      const ey = lookNow.x * GAZE.yaw;
+      const ex = lookNow.y * GAZE.pitch;
+      driver.setShape("eyeLookOutLeft", Math.max(0, ey));
+      driver.setShape("eyeLookInRight", Math.max(0, ey));
+      driver.setShape("eyeLookInLeft", Math.max(0, -ey));
+      driver.setShape("eyeLookOutRight", Math.max(0, -ey));
+      driver.setShape("eyesLookUp", Math.max(0, ex));
+      driver.setShape("eyesLookDown", Math.max(0, -ex));
+      gazing = true;
+    } else if (gazing) {
+      gazing = false;
+      driver.releaseShapes(GAZE_SHAPES);
     }
     views.update(scaled);
     highlight.update(scaled);

@@ -71,7 +71,7 @@ export default function Intro() {
       <MouthReference
         cue={beat === 'loading' ? null : 'spread-lips'}
         look={look}
-        zoom={beat === 'loading' ? 1 : 0.82}
+        zoom={beat === 'loading' ? 1.2 : 1.12}
         paused={narration.paused}
         onReady={() => setGuideReady(true)}
         onError={() => setGuideReady(true)}

@@ -152,7 +152,7 @@ export default function Tutorial() {
         {/* Full-size guide while explaining; once the learner takes over it shrinks into a corner of the graph. */}
         {!solo && (
           <section className="lp-pane tut-guide" aria-label="Mouth guide">
-            <MouthReference cue="spread-lips" zoom={phase === 'watch' ? 0.8 : 1} paused={narration.paused} />
+            <MouthReference cue="spread-lips" zoom={phase === 'watch' ? 1.02 : 1.18} paused={narration.paused} />
           </section>
         )}
         <section className="lp-pane" aria-label="Your sound">
@@ -172,7 +172,7 @@ export default function Tutorial() {
           )}
           {solo && (
             <div className="tut-pip" aria-label="Mouth guide, small">
-              <MouthReference cue="spread-lips" zoom={0.75} paused={narration.paused} />
+              <MouthReference cue="spread-lips" zoom={0.92} paused={narration.paused} />
             </div>
           )}
         </section>
