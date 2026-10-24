@@ -120,6 +120,9 @@ test('stalled audio fades the old cursor and changes the visible tracking status
   });
   await expect(page.getByTestId('tracking-status')).toHaveText('Audio paused');
   await expect(page.getByTestId('cursor')).toHaveClass(/is-faded/);
+  // No new worker packets are needed to age out either the ribbon or head.
+  await expect(page.locator('.vowel-trail')).toHaveCount(0, { timeout: 5000 });
+  await expect(page.getByTestId('cursor')).toHaveCount(0);
   await page.evaluate(async () => {
     const contexts = (window as unknown as { testContexts: AudioContext[] }).testContexts;
     await Promise.all(contexts.map((context) => context.resume()));

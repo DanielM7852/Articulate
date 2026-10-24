@@ -47,9 +47,9 @@ export default function App() {
         <section className="map-panel" aria-labelledby="map-title">
           <div className="panel-heading">
             <h2 id="map-title">Your vowel space</h2>
-            <span className="trace-key"><i />Recent trace · up to 18s</span>
+            <span className="trace-key"><i />{session.phase === 'finished' ? 'Held trace · up to 18s' : 'Live trail · 3s'}</span>
           </div>
-          <VowelPlot trace={session.trace} point={point} faded={!tracking && session.phase !== 'finished'} />
+          <VowelPlot trace={session.trace} point={point} faded={!tracking && session.phase !== 'finished'} live={session.phase === 'running'} />
           <div className="map-caption"><span className="legend-dot" />Your latest reliable position <span className="caption-divider">/</span> Fades when tracking is uncertain</div>
         </section>
 
