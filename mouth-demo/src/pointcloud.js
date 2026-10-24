@@ -24,7 +24,7 @@ const MAX_DOTS = 320000;
 // if no accepted dot lies within SPACING / sqrt(density) of them (dart throwing).
 const OVERSAMPLE = 4;
 const SPACING = 0.82;
-const DOT = { radius: 0.00068, mouthSwell: 0.3, holdSwell: 0.25, rimSwell: 0.12, minPx: 1.5 }; // metres
+const DOT = { radius: 0.00068, mouthSwell: 0.3, holdSwell: 0.25, rimSwell: 0.12, minPx: 1.5, maxPx: 7 }; // metres; px limits in CSS pixels
 const KIND = { head: 0, hair: 1, eyes: 2, teeth: 3 };
 const SIZE_MUL = { full: 1, hair: 0.85, eyes: 0.8, teeth: 0.8 };
 const MOUTH_RADIUS_MUL = 1.6;
@@ -32,11 +32,34 @@ const BOTTOM_FADE = 0.06; // metres of soft fade at the lowest part of the head
 const HAIR_FADE = 0.08; // metres above the head bottom: the long hair fades out
 // thin the fringe in front of the forehead so the face reads (same shape as the hologram style)
 const FRINGE = { zStartFrac: 0.62, band: 0.07, sideFrac: 0.75, sideSoft: 0.03, yDrop: 0.05, ySoft: 0.03, strength: 0.9 };
-// pointer scatter: a spring per dot (k, c per second), pushed by an acceleration inside `radius` of the ray
-const SCATTER = { radius: 0.03, push: 6, lift: 0.7, k: 70, c: 9, maxOffset: 0.05, settle: 2e-4 }; // lift: share of the push aimed back at the viewer
+/**
+ * Pointer interaction: a displacement field, not a hole. Each dot near the pointer's
+ * ray has a target displacement that falls off as a Gaussian of its distance to the
+ * ray (so there is no hard edge): outward from the ray, a little toward the viewer,
+ * and along the pointer's own motion so a sweep leaves a wake. A spring (k, c per
+ * second, lightly underdamped) chases that target and returns home when the pointer
+ * leaves; displaced dots also swirl slightly so the cloud reads as a fluid.
+ */
+const SCATTER = {
+  radius: 0.03, // metres: Gaussian width of the field
+  reach: 2.0, // dots farther than reach * radius from the ray are left alone (the field is under 2% there)
+  outward: 0.011, // metres of radial displacement at the centre: a thinning, not a hole (keep below radius)
+  lift: 0.007, // metres toward the viewer at the centre
+  drag: 0.5, // seconds: how much of the pointer's velocity becomes displacement (the wake)
+  swirl: 0.45, // m/s of curl-like drift per metre of displacement
+  k: 90,
+  c: 11,
+  maxOffset: 0.06,
+  settle: 1.5e-4
+};
 const PREPASS_OFFSET = { factor: 2, units: 4 };
 // dot size from the skin texture: darker texels (lips, brows, nostrils) get bigger dots, like the hologram style
 const TEX = { l0: 0.25, l1: 1.0, dark: 1.5, bright: 0.65, max: 1024 };
+// Tone and curvature also raise the dot *density* (stippling: tone is density as much as size),
+// so brows, lips, nostrils and the eye sockets gather more dots. Factors add to 1.
+const DENSITY_WEIGHT = { tone: 1.4, curvature: 1.6, curvatureRad: 0.5 }; // curvatureRad: normal spread (radians) that counts as fully curved
+// lighting by surface orientation: shadowed dots larger and darker, lit dots smaller and brighter (tone -> size)
+const LIGHT = { sizeShadow: 1.22, sizeLit: 0.82, shadeShadow: 0.78, shadeLit: 1.08 };
 
 /** Luminance lookup into a mesh's colour map, or null when there is none. */
 function makeLumSampler(mesh) {
@@ -71,25 +94,35 @@ const VERT = /* glsl */ `
 attribute vec3 aNormal;
 attribute vec4 aInfo; // x: size multiplier, y: kind, z: mouth weight, w: alpha
 uniform float uProj; // device pixels per metre at one metre
+uniform float uDpr;
 uniform float uRadius;
 uniform float uHold;
 varying float vRim;
 varying float vKind;
 varying float vMouth;
 varying float vAlpha;
+varying float vLit;
 
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vec3 n = normalize(normalMatrix * aNormal);
-  float facing = abs(dot(n, normalize(-mv.xyz)));
+  vec3 toEye = normalize(-mv.xyz);
+  float facing = abs(dot(n, toEye));
   float rim = pow(1.0 - clamp(facing, 0.0, 1.0), 2.0);
-  float r = uRadius * aInfo.x * (1.0 + ${DOT.mouthSwell.toFixed(2)} * aInfo.z + uHold * ${DOT.holdSwell.toFixed(2)} * aInfo.z + ${DOT.rimSwell.toFixed(2)} * rim);
-  gl_PointSize = max(${DOT.minPx.toFixed(1)}, 2.0 * r * uProj / -mv.z);
+  // key light from the upper left, in view space; hair cards are two-sided, so take the lit side
+  float lambert = dot(n, normalize(vec3(-0.45, 0.6, 0.75)));
+  if (vKind > 0.5 && vKind < 1.5) lambert = abs(lambert);
+  float lit = smoothstep(-0.15, 0.85, lambert);
+  float sizeLight = mix(${LIGHT.sizeShadow.toFixed(2)}, ${LIGHT.sizeLit.toFixed(2)}, lit);
+  float r = uRadius * aInfo.x * sizeLight * (1.0 + ${DOT.mouthSwell.toFixed(2)} * aInfo.z + uHold * ${DOT.holdSwell.toFixed(2)} * aInfo.z + ${DOT.rimSwell.toFixed(2)} * rim);
+  // capped so a dot lifted toward the camera does not balloon
+  gl_PointSize = clamp(2.0 * r * uProj / -mv.z, ${DOT.minPx.toFixed(1)}, ${DOT.maxPx.toFixed(1)} * uDpr);
   gl_Position = projectionMatrix * mv;
   vRim = rim;
   vKind = aInfo.y;
   vMouth = aInfo.z;
   vAlpha = aInfo.w;
+  vLit = lit;
 }
 `;
 
@@ -101,17 +134,18 @@ varying float vRim;
 varying float vKind;
 varying float vMouth;
 varying float vAlpha;
+varying float vLit;
 
 void main() {
   vec2 q = gl_PointCoord * 2.0 - 1.0;
   float d = length(q);
   float cov = 1.0 - smoothstep(0.82, 1.0, d);
   if (cov < 0.02) discard;
-  // each dot shaded as a tiny sphere lit from the upper left, like the hologram style
+  // each dot is a tiny sphere lit from the upper left; the surface's own lighting (vLit) sets its overall tone
   vec3 sn = vec3(q, sqrt(max(1.0 - d * d, 0.0)));
   float lit = clamp(dot(sn, normalize(vec3(-0.45, 0.55, 0.7))), 0.0, 1.0);
-  float shade = mix(0.55, 1.15, lit);
-  float spec = 0.35 * pow(lit, 10.0);
+  float shade = mix(0.55, 1.15, lit) * mix(${LIGHT.shadeShadow.toFixed(2)}, ${LIGHT.shadeLit.toFixed(2)}, vLit);
+  float spec = 0.35 * pow(lit, 10.0) * (0.4 + 0.6 * vLit);
   vec3 base = uColNavy;
   if (vKind > 2.5) base = mix(uColGrey, uColNavy, 0.25);
   else if (vKind > 1.5) base = uColNavy * 0.75;
@@ -121,6 +155,13 @@ void main() {
   #include <colorspace_fragment>
 }
 `;
+
+// coarse sine table for the swirl: thousands of calls per frame, precision irrelevant
+const SIN_N = 1024;
+const SIN_T = new Float32Array(SIN_N);
+for (let i = 0; i < SIN_N; i++) SIN_T[i] = Math.sin((i / SIN_N) * Math.PI * 2);
+const SIN_K = SIN_N / (Math.PI * 2);
+const sinT = (x) => SIN_T[((x * SIN_K) | 0) & (SIN_N - 1)];
 
 function halton(i, b) {
   let f = 1;
@@ -292,7 +333,11 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   const budget = cores <= 4 ? 0.45 : 1;
   const scale = Math.min(1, (MAX_DOTS * budget) / Math.max(1, total)) * budget;
 
-  const tri = []; // [entryIndex, ia, ib, ic] flattened
+  // Dots reference a table of unique triangles, so each triangle's deformed frame and
+  // normal are computed once per frame and shared by every dot on it.
+  const uniq = []; // [entryIndex, ia, ib, ic] flattened, one record per triangle that carries dots
+  const uniqIndex = new Map(); // numeric key (entry, directed edge a->b) -> record index
+  const dotTri = []; // record index per dot
   const bary = [];
   const info = [];
   const P = new THREE.Vector3();
@@ -311,17 +356,42 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     const c = new THREE.Vector3();
     const uv = g.attributes.uv;
     const lum = e.cls === "hair" || !uv ? null : makeLumSampler(e.mesh);
+    const nrm = g.attributes.normal;
+    const na = new THREE.Vector3();
+    const nb = new THREE.Vector3();
+    const ncv = new THREE.Vector3();
+    const weighted = e.cls !== "hair";
 
-    // 1. candidates, several per final dot, in a random order so acceptance is unbiased
-    const cand = []; // [ia, ib, ic, w0, w1, w2, x, y, z] flattened
+    // 1. candidates, several per final dot, in a random order so acceptance is unbiased.
+    // Each triangle's density is raised by the darkness of its texture and by its curvature
+    // (how much the vertex normals disagree), so features gather dots; each candidate
+    // carries its own minimum spacing for the dart throwing below.
+    const cand = []; // [ia, ib, ic, w0, w1, w2, x, y, z, rMin] flattened
+    const rBase = SPACING / Math.sqrt(density);
     for (let t = 0; t < triArea.length; t++) {
-      const expected = triArea[t] * density * OVERSAMPLE;
-      let n = Math.floor(expected);
-      if (Math.random() < expected - n) n++;
-      if (!n) continue;
       const ia = idx ? idx.getX(t * 3) : t * 3;
       const ib = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
       const ic = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+      let factor = 1;
+      if (weighted) {
+        if (nrm) {
+          na.fromBufferAttribute(nrm, ia).normalize();
+          nb.fromBufferAttribute(nrm, ib).normalize();
+          ncv.fromBufferAttribute(nrm, ic).normalize();
+          const spread = Math.max(na.angleTo(nb), nb.angleTo(ncv), na.angleTo(ncv));
+          factor += DENSITY_WEIGHT.curvature * Math.min(1, spread / DENSITY_WEIGHT.curvatureRad);
+        }
+        if (lum && uv) {
+          const u = (uv.getX(ia) + uv.getX(ib) + uv.getX(ic)) / 3;
+          const v = (uv.getY(ia) + uv.getY(ib) + uv.getY(ic)) / 3;
+          factor += DENSITY_WEIGHT.tone * (1 - smooth(TEX.l0, TEX.l1, lum(u, v)));
+        }
+      }
+      const expected = triArea[t] * density * factor * OVERSAMPLE;
+      let n = Math.floor(expected);
+      if (Math.random() < expected - n) n++;
+      if (!n) continue;
+      const rMin = rBase / Math.sqrt(factor);
       a.fromBufferAttribute(pos, ia);
       b.fromBufferAttribute(pos, ib);
       c.fromBufferAttribute(pos, ic);
@@ -334,10 +404,11 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         const w0 = 1 - s;
         const w1 = s * (1 - r2);
         const w2 = s * r2;
-        cand.push(ia, ib, ic, w0, w1, w2, w0 * a.x + w1 * b.x + w2 * c.x, w0 * a.y + w1 * b.y + w2 * c.y, w0 * a.z + w1 * b.z + w2 * c.z);
+        cand.push(ia, ib, ic, w0, w1, w2, w0 * a.x + w1 * b.x + w2 * c.x, w0 * a.y + w1 * b.y + w2 * c.y, w0 * a.z + w1 * b.z + w2 * c.z, rMin);
       }
     }
-    const nc = cand.length / 9;
+    const STRIDE = 10;
+    const nc = cand.length / STRIDE;
     const order = new Uint32Array(nc);
     for (let i = 0; i < nc; i++) order[i] = i;
     for (let i = nc - 1; i > 0; i--) {
@@ -347,18 +418,18 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       order[j] = tmp;
     }
 
-    // 2. dart throwing on a hash grid: keep a candidate only if nothing accepted is within rMin
-    const rMin = SPACING / Math.sqrt(density);
-    const r2min = rMin * rMin;
-    const cell = rMin;
-    const grid = new Map(); // numeric cell hash -> flat xyz list; a hash collision only costs an extra distance check
+    // 2. dart throwing on a hash grid: keep a candidate only if no accepted dot is closer than the
+    // mean of the two dots' own minimum spacings (adaptive Poisson disk). Cells are the largest spacing.
+    const cell = rBase;
+    const grid = new Map(); // numeric cell hash -> flat [x, y, z, rMin] list; a hash collision only costs an extra distance check
     const hash = (gx, gy, gz) => ((gx * 73856093) ^ (gy * 19349663) ^ (gz * 83492791)) | 0;
     let kept = 0;
     for (let oi = 0; oi < nc; oi++) {
-      const i = order[oi] * 9;
+      const i = order[oi] * STRIDE;
       const x = cand[i + 6];
       const y = cand[i + 7];
       const z = cand[i + 8];
+      const rm = cand[i + 9];
       const cx = Math.floor(x / cell);
       const cy = Math.floor(y / cell);
       const cz = Math.floor(z / cell);
@@ -368,11 +439,12 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
           for (let gz = cz - 1; gz <= cz + 1 && free; gz++) {
             const list = grid.get(hash(gx, gy, gz));
             if (!list) continue;
-            for (let q = 0; q < list.length; q += 3) {
+            for (let q = 0; q < list.length; q += 4) {
               const ddx = list[q] - x;
               const ddy = list[q + 1] - y;
               const ddz = list[q + 2] - z;
-              if (ddx * ddx + ddy * ddy + ddz * ddz < r2min) {
+              const lim = 0.5 * (rm + list[q + 3]);
+              if (ddx * ddx + ddy * ddy + ddz * ddz < lim * lim) {
                 free = false;
                 break;
               }
@@ -384,7 +456,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       const k = hash(cx, cy, cz);
       let list = grid.get(k);
       if (!list) grid.set(k, (list = []));
-      list.push(x, y, z);
+      list.push(x, y, z, rm);
 
       P.set(x, y, z);
       let alpha = smooth(minY, minY + BOTTOM_FADE, P.y);
@@ -413,7 +485,14 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         const l = smooth(TEX.l0, TEX.l1, lum(u, v));
         size *= TEX.dark + (TEX.bright - TEX.dark) * l;
       }
-      tri.push(ei, cand[i], cand[i + 1], cand[i + 2]);
+      const tkey = `${ei}:${cand[i]}:${cand[i + 1]}`; // a directed edge belongs to one triangle in a consistently wound mesh
+      let tid = uniqIndex.get(tkey);
+      if (tid === undefined) {
+        tid = uniq.length / 4;
+        uniqIndex.set(tkey, tid);
+        uniq.push(ei, cand[i], cand[i + 1], cand[i + 2]);
+      }
+      dotTri.push(tid);
       bary.push(cand[i + 3], cand[i + 4], cand[i + 5]);
       info.push(size, kind, mouth, alpha);
       kept++;
@@ -422,7 +501,11 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   }
   console.info("[pointcloud] sampling", perClass);
   const count = bary.length / 3;
-  const triA = new Uint32Array(tri);
+  const uniqA = new Uint32Array(uniq);
+  const dotTriA = new Uint32Array(dotTri);
+  const triCountU = uniqA.length / 4;
+  const triFrame = new Float32Array(triCountU * 12); // per triangle: a, u = b - a, v = c - a, unit normal
+  console.info(`[pointcloud] ${triCountU} triangles carry dots`);
   const baryA = new Float32Array(bary);
   const positions = new Float32Array(count * 3);
   const normals = new Float32Array(count * 3);
@@ -446,6 +529,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   geometry.setAttribute("aInfo", new THREE.BufferAttribute(new Float32Array(info), 4));
   const uniforms = {
     uProj: { value: 1000 },
+    uDpr: { value: 1 },
     uRadius: { value: DOT.radius },
     uHold: { value: 0 },
     uColNavy: { value: new THREE.Color(COLOR_NAVY) },
@@ -506,17 +590,27 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   }
 
   // ---- pointer ----
-  const pointer = { x: 0, y: 0, on: false };
+  const pointer = { x: 0, y: 0, on: false, fresh: false };
   const onMove = (ev) => {
     const r = canvas.getBoundingClientRect();
     if (!r.width || !r.height) return;
     pointer.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
     pointer.y = -(((ev.clientY - r.top) / r.height) * 2 - 1);
+    if (!pointer.on) pointer.fresh = true; // first sample after entering: no velocity yet
     pointer.on = true;
   };
   const onLeave = () => {
     pointer.on = false;
   };
+  const target = new Float32Array(count * 3); // where each displaced dot is being pulled to, relative to home
+  const touched = new Uint32Array(count); // frame stamp of the last target set
+  const pointerVel = new THREE.Vector3();
+  const rayHit = new THREE.Vector3();
+  const prevHit = new THREE.Vector3();
+  const FOCUS = 0.55; // metres along the ray where the pointer's motion is measured (about the head's distance)
+  const bound = { x: 0, y: 0, z: 0, r: 0 }; // rough bounding sphere of the cloud, refreshed now and then
+  let frameId = 0;
+  let clock = 0;
   canvas.addEventListener("pointermove", onMove, { passive: true });
   canvas.addEventListener("pointerdown", onMove, { passive: true });
   canvas.addEventListener("pointerleave", onLeave);
@@ -535,19 +629,74 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     activeIdx[activeCount++] = i;
   }
 
+  /** Set each nearby dot's target displacement from the pointer's ray and motion. */
   function scatter(dtSec) {
+    frameId++;
     if (!pointer.on || reduced) return;
     rayO.setFromMatrixPosition(camera.matrixWorld);
     rayD.set(pointer.x, pointer.y, 0.5).unproject(camera).sub(rayO).normalize();
+    rayHit.copy(rayD).multiplyScalar(FOCUS).add(rayO);
+    if (pointer.fresh || dtSec <= 0) {
+      pointerVel.set(0, 0, 0);
+      pointer.fresh = false;
+    } else {
+      // smoothed pointer velocity in world units, so a sweep drags dots along with it
+      const vx = (rayHit.x - prevHit.x) / dtSec;
+      const vy = (rayHit.y - prevHit.y) / dtSec;
+      const vz = (rayHit.z - prevHit.z) / dtSec;
+      pointerVel.x += (vx - pointerVel.x) * 0.35;
+      pointerVel.y += (vy - pointerVel.y) * 0.35;
+      pointerVel.z += (vz - pointerVel.z) * 0.35;
+    }
+    prevHit.copy(rayHit);
     const R = SCATTER.radius;
-    const R2 = R * R;
-    const push = SCATTER.push * dtSec;
+    const reach2 = (R * SCATTER.reach) ** 2;
+    const inv = 1 / (R * R);
+    // whole-cloud test first: a pointer that misses the head costs nothing per dot
+    if (frameId % 30 === 1 || bound.r === 0) {
+      let cx = 0;
+      let cy = 0;
+      let cz = 0;
+      let n = 0;
+      for (let i = 0; i < count; i += 97) {
+        cx += positions[i * 3];
+        cy += positions[i * 3 + 1];
+        cz += positions[i * 3 + 2];
+        n++;
+      }
+      bound.x = cx / n;
+      bound.y = cy / n;
+      bound.z = cz / n;
+      let r2 = 0;
+      for (let i = 0; i < count; i += 97) {
+        const ex = positions[i * 3] - bound.x;
+        const ey = positions[i * 3 + 1] - bound.y;
+        const ez = positions[i * 3 + 2] - bound.z;
+        r2 = Math.max(r2, ex * ex + ey * ey + ez * ez);
+      }
+      bound.r = Math.sqrt(r2) * 1.1 + 0.02;
+    }
+    {
+      const bx = bound.x - rayO.x;
+      const by = bound.y - rayO.y;
+      const bz = bound.z - rayO.z;
+      const t = bx * rayD.x + by * rayD.y + bz * rayD.z;
+      const qx = bx - t * rayD.x;
+      const qy = by - t * rayD.y;
+      const qz = bz - t * rayD.z;
+      const lim = bound.r + R * SCATTER.reach;
+      if (qx * qx + qy * qy + qz * qz > lim * lim) return;
+    }
     const ox = rayO.x;
     const oy = rayO.y;
     const oz = rayO.z;
     const dx = rayD.x;
     const dy = rayD.y;
     const dz = rayD.z;
+    const drag = SCATTER.drag;
+    const wx = pointerVel.x * drag;
+    const wy = pointerVel.y * drag;
+    const wz = pointerVel.z * drag;
     for (let i = 0; i < count; i++) {
       const hx = positions[i * 3] - offset[i * 3] - ox;
       const hy = positions[i * 3 + 1] - offset[i * 3 + 1] - oy;
@@ -558,38 +707,58 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       const py = hy - t * dy;
       const pz = hz - t * dz;
       const d2 = px * px + py * py + pz * pz;
-      if (d2 >= R2) continue;
+      if (d2 >= reach2) continue;
+      const g = Math.exp(-d2 * inv); // Gaussian falloff: no edge
       const d = Math.sqrt(d2);
-      const f = 1 - d / R;
-      const g = (push * f * f) / Math.max(d, 1e-4);
-      const lift = push * f * f * SCATTER.lift;
-      // outward from the ray, and back toward the viewer so the burst reads in depth
-      vel[i * 3] += px * g - dx * lift;
-      vel[i * 3 + 1] += py * g - dy * lift;
-      vel[i * 3 + 2] += pz * g - dz * lift;
+      const radial = (SCATTER.outward * g) / Math.max(d, 1e-4);
+      const lift = SCATTER.lift * g;
+      target[i * 3] = px * radial - dx * lift + wx * g;
+      target[i * 3 + 1] = py * radial - dy * lift + wy * g;
+      target[i * 3 + 2] = pz * radial - dz * lift + wz * g;
+      touched[i] = frameId;
       activate(i);
     }
   }
 
+  /** Spring every displaced dot toward its target (home once the pointer has moved on), with a light swirl. */
   function springs(dtSec) {
     if (!activeCount) return;
+    clock += dtSec;
     const k = SCATTER.k;
     const c = SCATTER.c;
     const max = SCATTER.maxOffset;
+    const swirl = SCATTER.swirl;
+    const f = 90; // swirl wavelength about 7 cm
+    const t1 = clock * 2.1;
+    const t2 = clock * 2.7;
+    const t3 = clock * 1.6;
     let w = 0;
     for (let a = 0; a < activeCount; a++) {
       const i = activeIdx[a];
+      if (touched[i] !== frameId) target[i * 3] = target[i * 3 + 1] = target[i * 3 + 2] = 0;
+      const hx = positions[i * 3] - offset[i * 3];
+      const hy = positions[i * 3 + 1] - offset[i * 3 + 1];
+      const hz = positions[i * 3 + 2] - offset[i * 3 + 2];
+      const ox = offset[i * 3];
+      const oy = offset[i * 3 + 1];
+      const oz = offset[i * 3 + 2];
+      const amp = swirl * Math.sqrt(ox * ox + oy * oy + oz * oz);
+      // a divergence-free-looking drift: each axis driven by the next axis's phase
+      const sx = sinT(hy * f + t1) * amp;
+      const sy = sinT(hz * f + t2) * amp;
+      const sz = sinT(hx * f + t3) * amp;
       let settled = true;
       for (let j = 0; j < 3; j++) {
         const o = offset[i * 3 + j];
+        const tg = target[i * 3 + j];
         let v = vel[i * 3 + j];
-        v += (-k * o - c * v) * dtSec;
+        v += (k * (tg - o) - c * v) * dtSec + (j === 0 ? sx : j === 1 ? sy : sz) * dtSec;
         let no = o + v * dtSec;
         if (no > max) no = max;
         else if (no < -max) no = -max;
         offset[i * 3 + j] = no;
         vel[i * 3 + j] = v;
-        if (Math.abs(no) > SCATTER.settle || Math.abs(v) > SCATTER.settle * 20) settled = false;
+        if (Math.abs(no) > SCATTER.settle || Math.abs(v) > SCATTER.settle * 20 || Math.abs(tg) > SCATTER.settle) settled = false;
       }
       if (settled) {
         offset[i * 3] = offset[i * 3 + 1] = offset[i * 3 + 2] = 0;
@@ -603,15 +772,12 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   }
 
   function place() {
-    for (let i = 0; i < count; i++) {
-      const ei = triA[i * 4];
-      const out = entries[ei].deformer.out;
-      const ia = triA[i * 4 + 1] * 3;
-      const ib = triA[i * 4 + 2] * 3;
-      const ic = triA[i * 4 + 3] * 3;
-      const w0 = baryA[i * 3];
-      const w1 = baryA[i * 3 + 1];
-      const w2 = baryA[i * 3 + 2];
+    // 1. each triangle's deformed frame and normal, once
+    for (let t = 0; t < triCountU; t++) {
+      const out = entries[uniqA[t * 4]].deformer.out;
+      const ia = uniqA[t * 4 + 1] * 3;
+      const ib = uniqA[t * 4 + 2] * 3;
+      const ic = uniqA[t * 4 + 3] * 3;
       const ax = out[ia];
       const ay = out[ia + 1];
       const az = out[ia + 2];
@@ -621,18 +787,35 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       const vx = out[ic] - ax;
       const vy = out[ic + 1] - ay;
       const vz = out[ic + 2] - az;
-      positions[i * 3] = ax + w1 * ux + w2 * vx + offset[i * 3];
-      positions[i * 3 + 1] = ay + w1 * uy + w2 * vy + offset[i * 3 + 1];
-      positions[i * 3 + 2] = az + w1 * uz + w2 * vz + offset[i * 3 + 2];
-      // face normal of the deformed triangle
-      let nx = uy * vz - uz * vy;
-      let ny = uz * vx - ux * vz;
-      let nz = ux * vy - uy * vx;
-      const len = Math.hypot(nx, ny, nz) || 1;
-      normals[i * 3] = nx / len;
-      normals[i * 3 + 1] = ny / len;
-      normals[i * 3 + 2] = nz / len;
-      void w0;
+      const nx = uy * vz - uz * vy;
+      const ny = uz * vx - ux * vz;
+      const nz = ux * vy - uy * vx;
+      const inv = 1 / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1);
+      const o = t * 12;
+      triFrame[o] = ax;
+      triFrame[o + 1] = ay;
+      triFrame[o + 2] = az;
+      triFrame[o + 3] = ux;
+      triFrame[o + 4] = uy;
+      triFrame[o + 5] = uz;
+      triFrame[o + 6] = vx;
+      triFrame[o + 7] = vy;
+      triFrame[o + 8] = vz;
+      triFrame[o + 9] = nx * inv;
+      triFrame[o + 10] = ny * inv;
+      triFrame[o + 11] = nz * inv;
+    }
+    // 2. every dot from its triangle's frame
+    for (let i = 0; i < count; i++) {
+      const o = dotTriA[i] * 12;
+      const w1 = baryA[i * 3 + 1];
+      const w2 = baryA[i * 3 + 2];
+      positions[i * 3] = triFrame[o] + w1 * triFrame[o + 3] + w2 * triFrame[o + 6] + offset[i * 3];
+      positions[i * 3 + 1] = triFrame[o + 1] + w1 * triFrame[o + 4] + w2 * triFrame[o + 7] + offset[i * 3 + 1];
+      positions[i * 3 + 2] = triFrame[o + 2] + w1 * triFrame[o + 5] + w2 * triFrame[o + 8] + offset[i * 3 + 2];
+      normals[i * 3] = triFrame[o + 9];
+      normals[i * 3 + 1] = triFrame[o + 10];
+      normals[i * 3 + 2] = triFrame[o + 11];
     }
     posAttr.needsUpdate = true;
     nrmAttr.needsUpdate = true;
@@ -697,6 +880,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       place();
       renderer.getDrawingBufferSize(size);
       uniforms.uProj.value = size.y / 2 / Math.tan(THREE.MathUtils.degToRad((camera.fov || 30) / 2));
+      uniforms.uDpr.value = renderer.getPixelRatio();
       // one-off cost report after the first few seconds
       stats.ms += performance.now() - t0;
       if (++stats.frames === 240) console.info(`[pointcloud] cpu ${(stats.ms / stats.frames).toFixed(2)} ms/frame for ${count} dots`);
