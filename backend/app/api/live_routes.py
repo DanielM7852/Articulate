@@ -1,16 +1,19 @@
 """POST /v1/live/coach, /notes, /articulation, /session/start and /session/turn.
 
+Local coaching, or authenticated durable jobs when shared coordination is enabled.
 Provider failures never surface as 500s.
 """
 
 import asyncio
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from app.live import insight
 from app.live.articulation import annotate_attempts, extract_features
+from app.live.coordination import Coordination
+from app.live.identity import authorize_profile, issue_identity, read_identity
 from app.live.notes import update_notes
 from app.live.orchestrator import LiveDeps, coach_attempt
 from app.live.runtime import get_runtime
@@ -36,6 +39,53 @@ ARTICULATION_MIN_BYTES = 44
 _WAV_TYPES = ("audio/wav", "audio/x-wav")
 INSIGHT_RETRY_DELAY_S = 2.0
 
+health_router = APIRouter(prefix="/health")
+
+
+@health_router.get("/live")
+async def liveness() -> dict:
+    return {"status": "live"}
+
+
+@health_router.get("/ready")
+async def readiness(request: Request) -> dict:
+    if request.app.state.settings.live_coordination == "spacetime":
+        try:
+            client = _coordination(request).client
+            # Fail readiness if the module is unpublished or the private tables are inaccessible.
+            await client.sql("SELECT id FROM live_job LIMIT 1")
+            await client.sql("SELECT id FROM live_session LIMIT 1")
+        except Exception as exc:  # noqa: BLE001 - no provider details in a public health response
+            raise HTTPException(503, "coordination_unavailable") from exc
+    return {"status": "ready", "coordination": request.app.state.settings.live_coordination}
+
+
+def _coordination(request: Request) -> Coordination:
+    client = get_runtime(request.app).spacetime(getattr(request.app.state, "live_spacetime_transport", None))
+    if client is None:
+        raise HTTPException(503, "coordination_unavailable")
+    return Coordination(request.app.state.settings, client)
+
+
+def _shared(request: Request, profile_id: str) -> bool:
+    authorize_profile(request, profile_id)
+    return request.app.state.settings.live_coordination == "spacetime"
+
+
+@router.get("/identity")
+async def live_identity(request: Request, response: Response) -> dict:
+    return issue_identity(request, response)
+
+
+@router.get("/jobs/{job_id}")
+async def live_job(job_id: str, request: Request) -> JSONResponse:
+    if request.app.state.settings.live_coordination != "spacetime":
+        raise HTTPException(404, "shared_coordination_disabled")
+    profile = read_identity(request)
+    if profile is None:
+        raise HTTPException(401, "identity_required")
+    return await _coordination(request).response(job_id, profile)
+
 
 def _deps(request: Request) -> LiveDeps:
     state = request.app.state
@@ -50,24 +100,35 @@ def _deps(request: Request) -> LiveDeps:
     )
 
 
-@router.post("/coach", response_model=LiveCoachResponse)
+ACCEPTED = {202: {"description": "Durable job accepted; poll the returned statusUrl for the typed result."}}
+
+
+@router.post("/coach", response_model=LiveCoachResponse, responses=ACCEPTED)
 async def live_coach(body: LiveCoachRequest, request: Request, background: BackgroundTasks) -> LiveCoachResponse:
+    if _shared(request, body.profileId):
+        return await _coordination(request).submit("attempt.coach", body.model_dump())
     return await coach_attempt(_deps(request), body, background.add_task)
 
 
-@router.post("/notes", response_model=LearnerNotes)
+@router.post("/notes", response_model=LearnerNotes, responses=ACCEPTED)
 async def live_notes(body: NotesRequest, request: Request) -> LearnerNotes:
+    if _shared(request, body.profileId):
+        return await _coordination(request).submit("notes.update", body.model_dump(), request.headers.get("Idempotency-Key"))
     return await update_notes(_deps(request), body.profileId)
 
 
-@router.post("/session/start", response_model=SessionTurn)
+@router.post("/session/start", response_model=SessionTurn, responses=ACCEPTED)
 async def live_session_start(body: SessionStartRequest, request: Request) -> SessionTurn:
+    if _shared(request, body.profileId):
+        return await _coordination(request).submit("session.start", body.model_dump(), request.headers.get("Idempotency-Key"))
     deps = _deps(request)
     return await start_session(deps, get_store(deps, request.app), body)
 
 
-@router.post("/session/turn", response_model=SessionTurn)
+@router.post("/session/turn", response_model=SessionTurn, responses=ACCEPTED)
 async def live_session_turn(body: SessionTurnRequest, request: Request) -> SessionTurn:
+    if _shared(request, body.profileId):
+        return await _coordination(request).submit("session.turn", body.model_dump(), request.headers.get("Idempotency-Key"))
     deps = _deps(request)
     return await take_turn(deps, get_store(deps, request.app), body, get_runtime(request.app))
 

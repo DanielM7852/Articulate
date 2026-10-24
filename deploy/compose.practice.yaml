@@ -1,0 +1,33 @@
+# Local deployment topology; terminate HTTPS before the web service in production.
+# Run: docker compose -f deploy/compose.practice.yaml up --build --scale practice-api=2 --scale practice-worker=2
+services:
+  practice-api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.practice-api
+    env_file: [../backend/.env, ../backend/.env.secrets]
+    environment:
+      LIVE_COORDINATION: spacetime
+    restart: unless-stopped
+    stop_grace_period: 30s
+  practice-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.practice-api
+    env_file: [../backend/.env, ../backend/.env.secrets]
+    environment:
+      LIVE_COORDINATION: spacetime
+    command: [python, -m, app.live.worker]
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+  practice-web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.practice-web
+    ports: ["127.0.0.1:8080:80"]
+    depends_on:
+      practice-api:
+        condition: service_healthy
+    restart: unless-stopped

@@ -319,7 +319,9 @@ def _heuristic_intent(text: str) -> str:
 # ---- start ----
 
 
-async def start_session(deps: LiveDeps, store: SessionStore, req: SessionStartRequest) -> SessionTurn:
+async def start_session(
+    deps: LiveDeps, store: SessionStore, req: SessionStartRequest, *, session_id: str | None = None
+) -> SessionTurn:
     started = time.perf_counter()
     try:
         context = await deps.get_history().load(req.profileId, SESSION_HISTORY_ATTEMPTS)
@@ -327,7 +329,7 @@ async def start_session(deps: LiveDeps, store: SessionStore, req: SessionStartRe
         logger.warning("session history load failed: %s", type(exc).__name__)
         context = LearnerContext()
     state = SessionState(
-        session_id=str(uuid.uuid4()),
+        session_id=session_id or str(uuid.uuid4()),
         profile_id=req.profileId,
         first_name=first_name(req.displayName),
         plan=build_plan(req.sounds, context),

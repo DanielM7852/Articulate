@@ -22,7 +22,9 @@ _PROFILE = re.compile(r"^[A-Za-z0-9_.:@-]{1,64}$")
 
 
 class SpacetimeError(RuntimeError):
-    pass
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 def sql_literal(value: str) -> str:
@@ -136,11 +138,15 @@ class SpacetimeClient:
             raise SpacetimeError("sql returned invalid JSON") from exc
 
     async def call(self, reducer: str, args: list[Any]) -> None:
-        url, content, headers = f"{self._base}/call/{reducer}", json.dumps(args), {"Content-Type": "application/json"}
+        url, content, headers = f"{self._base}/call/{reducer}?confirmed=true", json.dumps(args), {"Content-Type": "application/json"}
         if self._http is not None:
             response = await self._http.post(url, content=content, headers=headers)
         else:
             async with self._client() as client:
                 response = await client.post(url, content=content, headers=headers)
         if response.status_code >= 300:
-            raise SpacetimeError(f"reducer {reducer} failed: HTTP {response.status_code}")
+            # Only expose known policy errors, never an arbitrary provider body or credentials.
+            known = ("queue full", "revision conflict", "session not found", "profile mismatch",
+                     "idempotency conflict", "attempt already exists", "stale lease", "session busy", "job already leased")
+            code = next((value for value in known if value in response.text.lower()), None)
+            raise SpacetimeError(f"reducer {reducer} failed: HTTP {response.status_code}", code)

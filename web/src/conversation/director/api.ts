@@ -1,7 +1,8 @@
 import type { CueId } from '../../live/liveCoach';
 import type { SoundId } from '../../state/types';
+import { livePost } from '../../live/transport';
 
-/** Typed client for the conversational session endpoints. Every call throws on failure (incl. 20 s timeout). */
+/** Typed client for local turns or durable shared jobs. Calls throw on errors or the transport deadline. */
 export type TurnAction = 'demonstrate' | 'prompt_attempt' | 'await_reply' | 'next_sound' | 'end_session';
 
 export interface SessionTurn {
@@ -13,6 +14,7 @@ export interface SessionTurn {
   showSideView: boolean;
   source: 'agent' | 'fallback' | 'scripted';
   timingsMs: { llm: number; total: number } | null;
+  revision?: number | null;
 }
 
 export type SessionStart = SessionTurn;
@@ -34,33 +36,14 @@ export type SessionEvent =
   | { kind: 'silence'; seconds: number }
   | { kind: 'analysis_ready'; attemptId: string; currentSound: SoundId };
 
-const TIMEOUT_MS = 20_000;
 const ACTIONS: TurnAction[] = ['demonstrate', 'prompt_attempt', 'await_reply', 'next_sound', 'end_session'];
-
-async function post<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
-  const onAbort = () => ctl.abort();
-  signal?.addEventListener('abort', onAbort);
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: ctl.signal,
-    });
-    if (!res.ok) throw new Error(`${url} failed (${res.status})`);
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener('abort', onAbort);
-  }
-}
+const revisions = new Map<string, number>();
 
 function checkTurn(t: SessionTurn): SessionTurn {
   if (!t || typeof t.say !== 'string' || !ACTIONS.includes(t.action) || typeof t.sessionId !== 'string') {
     throw new Error('Malformed session turn');
   }
+  if (t.revision != null) revisions.set(t.sessionId, t.revision);
   return t;
 }
 
@@ -68,7 +51,7 @@ export function startSession(
   req: { profileId: string; displayName: string; sounds: SoundId[] | null },
   signal?: AbortSignal,
 ): Promise<SessionStart> {
-  return post<SessionStart>('/v1/live/session/start', req, signal).then(checkTurn);
+  return livePost<SessionStart>('/v1/live/session/start', req, signal).then(checkTurn);
 }
 
 export type ArticulationStatus = 'pending' | 'ready' | 'none' | 'delivered' | 'unknown';
@@ -103,5 +86,7 @@ export function sendTurn(
   req: { sessionId: string; profileId: string; event: SessionEvent },
   signal?: AbortSignal,
 ): Promise<SessionTurn> {
-  return post<SessionTurn>('/v1/live/session/turn', req, signal).then(checkTurn);
+  return livePost<SessionTurn>('/v1/live/session/turn', {
+    ...req, expectedRevision: revisions.get(req.sessionId),
+  }, signal).then(checkTurn);
 }
