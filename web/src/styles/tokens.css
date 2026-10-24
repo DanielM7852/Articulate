@@ -1,0 +1,43 @@
+/* Design tokens taken from the Articulate Figma file (CalHacks / Design page). */
+:root {
+  /* Color */
+  --color-navy: #203e68;
+  --color-navy-deep: #172f4e;
+  --color-navy-soft: #edf2f7;
+  --color-navy-mist: #cbd7e6;
+  --color-cream: #faf9f6;
+  --color-ivory: #f7f5ee;
+  --color-surface: #ffffff;
+  --color-ink: #232923;
+  --color-muted: #626c6c;
+  --color-line: #dadfd9;
+  --color-success: #356455;
+  --color-success-soft: #eef4ef;
+  --color-success-tint: #f4f7f4;
+  --color-warn: #815b29;
+  --color-warn-soft: #f8f1e5;
+  --color-rule-on-navy: rgba(255, 255, 255, 0.19);
+
+  /* Type */
+  --font-serif: 'Libre Baskerville', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-control: 6px;
+  --radius-tile: 8px;
+  --radius-media: 10px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+  --radius-hero: 24px;
+  --radius-pill: 100px;
+
+  /* Layout */
+  --nav-height: 88px;
+  --footer-height: 64px;
+  --page-gutter: 48px;
+  --content-max: 1440px;
+
+  --shadow-panel: 0 12px 28px rgba(32, 62, 104, 0.1);
+  --focus-ring: 0 0 0 3px rgba(32, 62, 104, 0.35);
+}
