@@ -90,5 +90,5 @@ if (root/'third-pole.frames.json.gz').exists():
   a=[x for x in rows if x['split']=='heldout' and x['group']==group];e=sorted(x['errorF3'] for x in a if 'errorF3' in x)
   lines.append(f'| {group} | {len(a)} | {len(e)} | {statistics.median(e):.1f} | {e[int(len(e)*.9)]:.1f} | {100*sum(v>300 for v in e)/len(e):.1f}% |')
  lines+=['','The long error tail and absent r/w-specific truth do not support shipping an F3 display or a universal r threshold.','']
-(out/'decision.md').write_text('\n'.join(lines)+'\n')
+(out/'decision.md').write_text('\n'.join(lines).rstrip()+'\n')
 print('Wrote',out/'decision.md')

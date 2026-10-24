@@ -30,7 +30,7 @@ For the explicit-licence primary corpus alone, add `--corpus librispeech` to `ru
 
 ## Selection and splits
 
-No speaker occurs in both splits. Selection precedes acoustic analysis and uses identifiers, not tracking success. This is a small convenience sample; it is not population-representative.
+Prepared speech totals 166.291 s / 15,986,382 WAV bytes for H95 and 407.725 s / 39,145,278 WAV bytes for LibriSpeech. No speaker occurs in both splits. Selection precedes acoustic analysis and uses identifiers, not tracking success. This is a small convenience sample; it is not population-representative.
 
 | Corpus | Selection | Development | Held-out |
 |---|---|---|---|
