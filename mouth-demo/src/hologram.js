@@ -58,7 +58,7 @@ const HAIR_MODE = (() => {
   } catch (e) {
     /* no location */
   }
-  return "cap";
+  return "full";
 })();
 const HAIR_CAP = {
   hairlineDrop: 0.085, // metres below the crown (note: GLB accessor bounds are stale; measured head bounds are 1.394..1.782): forehead hairline about 4 cm above the brows
@@ -66,6 +66,16 @@ const HAIR_CAP = {
   temple: 0.045, // metres the hairline drops at the temples (|x| from 0.045 to 0.085), to just above/in front of the ears
   nape: 0.17, // metres the hairline drops behind the ears, down to the nape
   fill: 0.8 // minimum dot coverage inside the cap (near-merging, full navy)
+};
+// "full" mode fringe thinning: a wide soft attenuation (no cut) of the hair in front of the forehead
+const HAIR_FRINGE = {
+  zStartFrac: 0.62, // thinning begins this fraction of the way from the head's back to its front (rest-space z)
+  band: 0.07, // metres over which thinning ramps up toward the front (tips of the fringe thin the most)
+  sideFrac: 0.75, // |x| < this * head half-width (soft edge); hair framing the face stays
+  sideSoft: 0.03, // metres of soft edge at the sides
+  yDrop: 0.05, // metres below the crown: fringe region is below this line (hair above stays over the top of the head)
+  ySoft: 0.03, // metres of soft edge on the y line
+  strength: 0.9 // maximum attenuation at the tips (keep -> 1 - strength)
 };
 const HAIR_FULL = { fadeLo: 0.0, fadeHi: 0.08 }; // metres above the head mesh bottom (end of the visible neck): soft fade of the long hair
 const PREPASS_ORDER = -10;
@@ -110,6 +120,8 @@ varying float vLip;
 // hair cut/trim mask in rest space (shared by the hologram and the hair depth prepass)
 const HAIR_FN = /* glsl */ `
 uniform vec4 uHairCut; // zFront, xSide, yLine, soft
+uniform vec4 uFringe; // zStart, xHalf, yLine, strength
+uniform vec3 uFringeW; // z band, x soft, y soft
 uniform vec2 uHairLen; // y where hair is gone, y where hair is fully visible
 uniform vec4 uCap; // hairline y at the forehead centre, soft, temple drop, nape drop
 // scalp cap: the head mesh itself is drawn as dense dark hair dots above a soft hairline (dropping at the temples and behind the ears)
@@ -124,7 +136,11 @@ float hairKeep(vec3 p) {
   float front = smoothstep(uHairCut.x - s, uHairCut.x + s, p.z)
     * (1.0 - smoothstep(uHairCut.y - s, uHairCut.y + s, abs(p.x)))
     * (1.0 - smoothstep(uHairCut.z - s, uHairCut.z + s, p.y));
-  return (1.0 - front) * smoothstep(uHairLen.x, uHairLen.y, p.y);
+  // wide soft thinning of the fringe in front of the forehead (no hard edge)
+  float fr = smoothstep(uFringe.x, uFringe.x + uFringeW.x, p.z)
+    * (1.0 - smoothstep(uFringe.y - uFringeW.y, uFringe.y + uFringeW.y, abs(p.x)))
+    * (1.0 - smoothstep(uFringe.z - uFringeW.z, uFringe.z + uFringeW.z, p.y));
+  return (1.0 - front) * (1.0 - uFringe.w * fr) * smoothstep(uHairLen.x, uHairLen.y, p.y);
 }
 `;
 
@@ -445,6 +461,8 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
     uHold: { value: 0 },
     uCylC: { value: new THREE.Vector2(0, 0) },
     uHairCut: { value: new THREE.Vector4(1e3, 1e3, -1e3, HAIR_CUT.soft) },
+    uFringe: { value: new THREE.Vector4(1e3, 1e3, -1e3, 0) },
+    uFringeW: { value: new THREE.Vector3(HAIR_FRINGE.band, HAIR_FRINGE.sideSoft, HAIR_FRINGE.ySoft) },
     uHairLen: { value: new THREE.Vector2(-1e3, -1e3) },
     uCap: { value: new THREE.Vector4(1e3, 0.01, 0, 0) },
     uColNavy: { value: new THREE.Color(COLOR_NAVY) },
@@ -536,6 +554,12 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
       } else if (HAIR_MODE === "full") {
         // no fringe/face cut; only a soft fade of the long hair at the end of the visible neck
         shared.uHairLen.value.set(b.min.y + HAIR_FULL.fadeLo, b.min.y + HAIR_FULL.fadeHi);
+        shared.uFringe.value.set(
+          b.min.z + (b.max.z - b.min.z) * HAIR_FRINGE.zStartFrac,
+          hw * HAIR_FRINGE.sideFrac,
+          b.max.y - HAIR_FRINGE.yDrop,
+          HAIR_FRINGE.strength
+        );
       } else {
         shared.uCap.value.set(b.max.y - HAIR_CAP.hairlineDrop, HAIR_CAP.soft, HAIR_CAP.temple, HAIR_CAP.nape);
       }
