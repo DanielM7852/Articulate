@@ -18,6 +18,7 @@ from app.reasoning.learner_progress import (
     LessonPlan,
     LessonProgress,
     ProgressStore,
+    ProgressUnavailable,
     apply_attempt,
     build_progress_store,
     counts_for,
@@ -245,7 +246,14 @@ async def coach_attempt(
 ) -> VowelCoachResponse:
     store = progress_store if progress_store is not None else build_progress_store(settings)
     current = body.plan or LessonPlan(sound=body.attempt.sound, pace="unhurried", assistance=body.attempt.assistance)
-    stored = await store.load(body.learnerId) if body.learnerId else None
+    stored = None
+    readable = True
+    if body.learnerId:
+        try:
+            stored = await store.load(body.learnerId)
+        except ProgressUnavailable as exc:
+            readable = False  # never overwrite a record that could not be read
+            logger.warning("learner progress unavailable, not saving: %s", type(exc).__name__)
     already = stored is not None and body.attempt.attemptId in stored.counted_attempt_ids and stored.plan is not None
     progress = stored or empty_progress(body.learnerId or "anonymous")
     if stored is None:
@@ -278,7 +286,7 @@ async def coach_attempt(
             )
         except Exception as exc:  # noqa: BLE001 - any model failure keeps the screen's own wording
             logger.warning("vowel coach kept the local wording: %s", type(exc).__name__)
-    if body.learnerId and not already:
+    if body.learnerId and readable and not already:
         updated = apply_attempt(stored, body.learnerId, body.attempt, options[choice], body.history)
         await store.save(updated)
     return grounded

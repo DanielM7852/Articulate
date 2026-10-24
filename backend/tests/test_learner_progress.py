@@ -5,10 +5,12 @@ import json
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from app.reasoning.learner_progress import (
     LessonPlan,
     LocalProgressStore,
+    ProgressUnavailable,
     SpacetimeProgressStore,
     apply_attempt,
     build_progress_store,
@@ -112,10 +114,20 @@ def test_spacetime_store_failures_return_none_or_false(tmp_path):
 
     progress = empty_progress("kid-1")
     store = _spacetime_store(tmp_path, down)
-    assert asyncio.run(store.load("kid-1")) is None and asyncio.run(store.save(progress)) is False
-    assert asyncio.run(_spacetime_store(tmp_path, empty).load("kid-1")) is None
-    assert asyncio.run(_spacetime_store(tmp_path, garbage).load("kid-1")) is None
+    assert asyncio.run(store.save(progress)) is False
     assert asyncio.run(_spacetime_store(tmp_path, refused).save(progress)) is False
+    assert asyncio.run(_spacetime_store(tmp_path, empty).load("kid-1")) is None
+    for handler in (down, refused, garbage):
+        with pytest.raises(ProgressUnavailable):
+            asyncio.run(_spacetime_store(tmp_path, handler).load("kid-1"))
+
+
+def test_local_store_corrupt_file_is_unavailable_not_missing(tmp_path):
+    path = tmp_path / "learner_progress" / "kid-1.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ProgressUnavailable):
+        asyncio.run(LocalProgressStore(str(tmp_path)).load("kid-1"))
 
 
 def test_spacetime_store_skips_ids_the_module_would_reject_without_calling_the_network(tmp_path):
@@ -155,6 +167,17 @@ def test_coach_attempt_advances_with_a_fake_store_and_saves_once_per_new_attempt
     assert len(store.saves) == 2 and store.progress.sounds["i"].usable == 2
     replay = asyncio.run(coach_attempt(settings, _request("attempt-2", plan=first.plan.model_dump()), progress_store=store))
     assert replay.plan == second.plan and len(store.saves) == 2
+
+
+def test_coach_attempt_skips_the_save_when_the_read_failed(tmp_path):
+    class Unreadable(FakeStore):
+        async def load(self, learner_id):
+            raise ProgressUnavailable("down")
+
+    store = Unreadable()
+    response = asyncio.run(coach_attempt(make_settings(tmp_path), _request(), progress_store=store))
+    assert response.plan is not None and response.nextAction == "reduce-assistance"
+    assert store.saves == []
 
 
 def test_coach_attempt_without_a_learner_id_touches_no_store(tmp_path):

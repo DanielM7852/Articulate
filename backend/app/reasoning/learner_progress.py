@@ -93,6 +93,10 @@ def _path(store_dir: str, learner_id: str) -> Path | None:
     return Path(store_dir) / "learner_progress" / f"{learner_id.lower()}.json"
 
 
+class ProgressUnavailable(Exception):
+    """The stored record could not be read, so "no record" would be a guess."""
+
+
 class ProgressStore(Protocol):
     async def load(self, learner_id: str) -> LessonProgress | None: ...
 
@@ -121,8 +125,7 @@ class LocalProgressStore:
         try:
             return await asyncio.to_thread(self._read, path)
         except (OSError, ValueError) as exc:
-            logger.warning("local progress read failed: %s", type(exc).__name__)
-            return None
+            raise ProgressUnavailable(type(exc).__name__) from exc
 
     async def save(self, progress: LessonProgress) -> bool:
         path = _path(self._store_dir, progress.learner_id)
@@ -148,13 +151,14 @@ class SpacetimeProgressStore:
             rows = await self._client.sql(
                 f"SELECT * FROM learner_progress WHERE profile_id = {profile_literal(learner_id)}"
             )
-            text = unwrap(rows[0].get("progress")) if rows else None
-            if not isinstance(text, str) or not text:
+            if not rows:
                 return None
+            text = unwrap(rows[0].get("progress"))
+            if not isinstance(text, str) or not text:
+                raise ValueError("empty progress")
             return LessonProgress.model_validate_json(text)
-        except Exception as exc:  # noqa: BLE001 - storage failures never reach the route
-            logger.warning("learner progress read failed: %s", type(exc).__name__)
-            return None
+        except Exception as exc:  # noqa: BLE001 - reported as unavailable, never as "no record"
+            raise ProgressUnavailable(type(exc).__name__) from exc
 
     async def save(self, progress: LessonProgress) -> bool:
         if not _PROFILE.fullmatch(progress.learner_id or ""):
