@@ -12,10 +12,10 @@ from app.paths import BACKEND_ROOT
 from app.audio.content import RejectingContentVerifier
 from app.audio.gateway import FIXTURE_SCENARIOS, fixture_wav
 from app.errors import ArticulateError, StaleAttemptError
-from app.integrations.cartesia import cached_speech_wav
+from app.integrations.cartesia import cached_speech_wav, mint_tts_token
 from app.reasoning.orchestrate import ComparisonJob
 from app.reasoning.vowel_coach import VowelCoachRequest, VowelCoachResponse, coach_attempt
-from app.schemas import ComparisonResult, ErrorBody, HealthResponse, ReferenceView
+from app.schemas import ComparisonResult, ErrorBody, HealthResponse, ReferenceView, SpeechTokenResponse
 
 router = APIRouter()
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
@@ -72,6 +72,20 @@ def speak_line(body: SpeechRequest, request: Request) -> Response:
     except ArticulateError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return Response(content=wav, media_type="audio/wav")
+
+
+@router.post("/v1/speech/token", response_model=SpeechTokenResponse)
+def speech_token(request: Request) -> SpeechTokenResponse:
+    """Short-lived Cartesia token so the browser can stream speech with word timestamps."""
+
+    settings = request.app.state.settings
+    if not settings.cartesia_configured:
+        raise HTTPException(status_code=503, detail="cartesia_not_configured")
+    try:
+        data = mint_tts_token(settings, client=getattr(request.app.state, "cartesia_client", None))
+    except ArticulateError as exc:
+        raise HTTPException(status_code=502, detail="cartesia_token_failed") from exc
+    return SpeechTokenResponse(**data)
 
 
 @router.get("/health", response_model=HealthResponse)

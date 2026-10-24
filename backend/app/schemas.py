@@ -222,6 +222,17 @@ class HealthResponse(BaseModel):
     audio_retained_by_default: bool = False
 
 
+class SpeechTokenResponse(BaseModel):
+    token: str
+    expires_at: str
+    ws_url: str = "wss://api.cartesia.ai/tts/websocket"
+    cartesia_version: str
+    model_id: str
+    voice_id: str
+    sample_rate: int = 24000
+    encoding: str = "pcm_f32le"
+
+
 class Cue(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

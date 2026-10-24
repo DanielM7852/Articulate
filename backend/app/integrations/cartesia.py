@@ -7,6 +7,7 @@ handoff remains a request example: this module does not send that transcript.
 
 import hashlib
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -16,6 +17,11 @@ from app.errors import ArticulateError
 from app.schemas import CartesiaHandoff
 
 TTS_BYTES_URL = "https://api.cartesia.ai/tts/bytes"
+ACCESS_TOKEN_URL = "https://api.cartesia.ai/access-token"
+TTS_WEBSOCKET_URL = "wss://api.cartesia.ai/tts/websocket"
+STREAM_SAMPLE_RATE_HZ = 24000
+STREAM_TOKEN_TTL_S = 120
+TOKEN_TIMEOUT_S = 10.0
 REFERENCE_SAMPLE_RATE_HZ = 44100
 
 _LIMITATION_TEXT = {
@@ -164,3 +170,47 @@ def cached_speech_wav(settings: Settings, text: str, *, speed: float | None = No
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_bytes(wav)
     return wav
+
+
+def mint_tts_token(
+    settings: Settings,
+    *,
+    expires_in: int = STREAM_TOKEN_TTL_S,
+    client: httpx.Client | None = None,
+) -> dict:
+    """Mint a short-lived browser token for Cartesia's TTS WebSocket. The API key stays on the server."""
+
+    headers = {
+        "Authorization": f"Bearer {settings.cartesia_api_key or ''}",
+        "Cartesia-Version": settings.cartesia_version,
+        "Content-Type": "application/json",
+    }
+    body = {"grants": {"tts": True}, "expires_in": expires_in}
+    failure = ArticulateError("cartesia_token_failed", "Cartesia did not return a token.", status_code=502)
+    owns_client = client is None
+    active = client or httpx.Client(timeout=TOKEN_TIMEOUT_S)
+    try:
+        try:
+            response = active.post(ACCESS_TOKEN_URL, headers=headers, json=body, timeout=TOKEN_TIMEOUT_S)
+            payload = response.json() if response.status_code == 200 else None
+        except (httpx.HTTPError, ValueError) as exc:
+            raise failure from exc
+    finally:
+        if owns_client:
+            active.close()
+    token = None
+    if isinstance(payload, dict):
+        token = payload.get("token") or payload.get("access_token")
+    if not isinstance(token, str) or not token:
+        raise failure
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    return {
+        "token": token,
+        "expires_at": expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ws_url": TTS_WEBSOCKET_URL,
+        "cartesia_version": settings.cartesia_version,
+        "model_id": settings.cartesia_model_id,
+        "voice_id": settings.resolved_cartesia_voice_id or "",
+        "sample_rate": STREAM_SAMPLE_RATE_HZ,
+        "encoding": "pcm_f32le",
+    }

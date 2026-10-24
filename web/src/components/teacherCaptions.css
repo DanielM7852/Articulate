@@ -1,0 +1,41 @@
+.teacher-captions {
+  font-family: var(--font-sans);
+  font-size: clamp(1.5rem, 2.4vw, 2.25rem);
+  line-height: 1.5;
+  color: var(--color-navy);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: 20px 24px;
+  margin: 0;
+}
+
+.teacher-captions__word {
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+  transition: background-color var(--dur-press) var(--ease-out), color var(--dur-press) var(--ease-out);
+}
+
+.teacher-captions__word--upcoming {
+  color: var(--color-muted);
+}
+
+.teacher-captions__word--current {
+  background: var(--color-navy);
+  color: var(--color-surface);
+}
+
+.teacher-captions__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .teacher-captions__word {
+    transition: none;
+  }
+}
