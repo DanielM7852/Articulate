@@ -296,6 +296,7 @@ class SessionTurnRequest(BaseModel):
     sessionId: str
     profileId: str
     event: TalkEvent
+    expectedRevision: int | None = Field(default=None, ge=1)
 
     @field_validator("sessionId")
     @classmethod
@@ -321,6 +322,7 @@ class SessionTurn(BaseModel):
     showSideView: bool = False
     source: TurnSource
     timingsMs: dict[str, int] | None = None
+    revision: int | None = None
 
 
 class TalkDraft(BaseModel):

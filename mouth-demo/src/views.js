@@ -24,6 +24,7 @@ export function createViews({ camera, controls, canvas }) {
   let reduced = false;
   let timers = [];
   let pendingResolve = null;
+  let zoom = 1; // camera distance multiplier: below 1 moves closer
 
   function updateGoal() {
     if (!anchorObj) return false;
@@ -43,7 +44,11 @@ export function createViews({ camera, controls, canvas }) {
   }
 
   function distanceFor() {
-    return 0.55 * Math.max(1, 0.9 / camera.aspect);
+    return 0.55 * Math.max(1, 0.9 / camera.aspect) * zoom;
+  }
+
+  function setZoom(z) {
+    zoom = Number.isFinite(z) ? Math.min(1.6, Math.max(0.5, z)) : 1;
   }
 
   function applyLimits(settled) {
@@ -213,6 +218,7 @@ export function createViews({ camera, controls, canvas }) {
     setAnchor,
     snap,
     setView,
+    setZoom,
     get view() { return currentView; },
     get isAnimating() { return !!anim || !!pendingResolve; },
     update,

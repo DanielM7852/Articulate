@@ -213,7 +213,14 @@
 
 @media (max-width: 720px) {
   .vg-plot {
-    inset: 40px 16px 32px 36px;
+    inset: 56px 16px 32px 36px;
+  }
+  /* The floating view switcher takes the top-left corner on phones */
+  .vg-axis--y {
+    top: 52px;
+  }
+  .vg-status {
+    top: 52px;
   }
   .vg-label {
     font-size: 14px;

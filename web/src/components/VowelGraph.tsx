@@ -21,6 +21,7 @@ export function VowelGraph({
   holdSec,
   hidden,
   live = false,
+  emptyHint,
 }: {
   sound: SoundId;
   point: VowelPoint | null;
@@ -33,6 +34,8 @@ export function VowelGraph({
   hidden?: boolean;
   /** Ink fades over 3 s while true; false keeps the whole supplied trace at full strength. */
   live?: boolean;
+  /** Second line of the empty state; defaults to the recording hint. */
+  emptyHint?: string;
 }) {
   const id = useId();
   const plotRef = useRef<HTMLDivElement>(null);
@@ -163,7 +166,7 @@ export function VowelGraph({
 
         <div className={`vg-empty ${cursor ? 'is-hidden' : ''}`} aria-hidden="true">
           <p className="ob-label">Your sound appears here</p>
-          <p className="ob-fine">When Ava invites you, hold “{SOUNDS[sound].spelled}” steadily.</p>
+          <p className="ob-fine">{emptyHint ?? `Record, then hold “${SOUNDS[sound].spelled}” steadily.`}</p>
         </div>
       </div>
 

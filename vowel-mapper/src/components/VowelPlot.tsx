@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { VowelPoint } from '../audio/tracker';
 import { PLOT, projectVowel } from './plot';
 import { buildTrail, sampleKey, trailOpacity } from './trail';
@@ -10,10 +10,15 @@ export interface VowelPlotProps {
   faded: boolean;
   /** Live ink evaporates; false preserves the complete supplied trace on Finish. */
   live?: boolean;
+  /**
+   * Optional SVG drawn in plot coordinates (use `projectVowel`), under the trail and cursor.
+   * A function receives the label scale that keeps text at its CSS-pixel size.
+   */
+  overlay?: ReactNode | ((textScale: number) => ReactNode);
 }
 
 /** Display-only component: owns neither a microphone nor session controls. */
-export function VowelPlot({ trace, point, faded, live = false }: VowelPlotProps) {
+export function VowelPlot({ trace, point, faded, live = false, overlay }: VowelPlotProps) {
   const id = useId();
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
@@ -70,6 +75,7 @@ export function VowelPlot({ trace, point, faded, live = false }: VowelPlotProps)
         <text className="axis-unit" x="8" y="48" style={{ fontSize: 10 * textScale }}>F1 · Hz</text>
         <text className="axis-unit" x="798" y="480" textAnchor="end" style={{ fontSize: 10 * textScale }}>F2 · Hz</text>
         <g clipPath={`url(#${id}-clip)`}>
+          {typeof overlay === 'function' ? overlay(textScale) : overlay}
           {strokes.map((stroke) => <path
             key={stroke.key}
             d={stroke.d}
@@ -84,7 +90,7 @@ export function VowelPlot({ trace, point, faded, live = false }: VowelPlotProps)
             <circle r="2" fill="white" />
           </g>}
         </g>
-        {!cursor && <g className="plot-empty">
+        {!cursor && !overlay && <g className="plot-empty">
           <g transform={`translate(398 ${250 - 35 * textScale})`}>
             <circle r="19" fill="#e6edff" />
             <path d="M-9 0h4l3-9 5 18 3-9h4" fill="none" stroke="#3764d9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />

@@ -1,6 +1,6 @@
-import { schema, table, t } from "spacetimedb/server";
+import { schema, table, t, type ReducerCtx } from "spacetimedb/server";
 
-// No public tables. All browser access goes through the scoped Python session gateway.
+// No public tables. Browsers call owned metric reducers or the authenticated Python gateway.
 const backend = table(
   { name: "backend", public: false },
   { id: t.u32().primaryKey(), identity: t.identity() },
@@ -99,6 +99,42 @@ const learnerProgress = table(
     updated_at: t.timestamp(),
   },
 );
+// Backend-only coordination for horizontally replicated Python APIs/workers.
+const liveSession = table(
+  { name: "live_session", public: false },
+  {
+    id: t.string().primaryKey(), profile_id: t.string().index(),
+    state_json: t.string(), revision: t.u32(), expires_at: t.u32().index(),
+    active_job: t.string(),
+  },
+);
+const liveJob = table(
+  { name: "live_job", public: false },
+  {
+    id: t.string().primaryKey(), profile_id: t.string().index(),
+    session_id: t.string(), kind: t.string(), request_json: t.string(), request_hash: t.string(),
+    expected_revision: t.u32(), status: t.string().index(),
+    worker_id: t.string(), lease_token: t.string(), lease_until: t.f64(), attempts: t.u32(),
+    result_json: t.string(), error_code: t.string(),
+    created_at: t.f64(), expires_at: t.u32().index(),
+  },
+);
+const liveQueue = table(
+  { name: "live_queue", public: false },
+  { id: t.u32().primaryKey(), active: t.u32(), running: t.u32() },
+);
+const liveQuota = table(
+  { name: "live_quota", public: false },
+  { profile_id: t.string().primaryKey(), active: t.u32() },
+);
+const liveInsight = table(
+  { name: "live_insight", public: false },
+  {
+    attempt_id: t.string().primaryKey(), profile_id: t.string().index(),
+    sound: t.string(), status: t.string(), say: t.string(), source: t.string(),
+    created_at: t.u32(), expires_at: t.u32().index(),
+  },
+);
 const db = schema({
   backend,
   sessions,
@@ -113,6 +149,11 @@ const db = schema({
   learnerNote,
   learnerProgress,
   learnerArticulation,
+  liveSession,
+  liveJob,
+  liveQueue,
+  liveQuota,
+  liveInsight,
 });
 export default db;
 
@@ -261,6 +302,8 @@ function parseJsonObject(text: string, what: string): void {
 export const register_learner = db.reducer(
   { profile_id: t.string(), display_name: t.string() },
   (ctx, { profile_id, display_name }) => {
+    // Signed API guest profiles are reserved; only the backend can create their attempts.
+    if (/^p_[0-9a-f]{32}$/.test(profile_id)) throw new Error("reserved profile_id");
     if (!profileIdRe.test(profile_id))
       throw new Error("invalid profile_id: 1-64 chars of [A-Za-z0-9_.:@-]");
     if (display_name.length > 80)
@@ -442,5 +485,249 @@ export const set_learner_progress = db.reducer(
     if (ctx.db.learnerProgress.profile_id.find(profile_id))
       ctx.db.learnerProgress.profile_id.update(row);
     else ctx.db.learnerProgress.insert(row);
+  },
+);
+
+type LiveContext = ReducerCtx<typeof db.schemaType>;
+
+function requireBackend(ctx: LiveContext): void {
+  const principal = ctx.db.backend.id.find(0);
+  if (!principal || !ctx.sender.isEqual(principal.identity)) throw new Error("backend only");
+}
+
+const nowSeconds = (ctx: LiveContext) => Math.floor(Number(ctx.timestamp.microsSinceUnixEpoch) / 1_000_000);
+
+function releaseLiveJob(ctx: LiveContext, job: typeof liveJob.rowType.type): void {
+  const queue = ctx.db.liveQueue.id.find(0)!;
+  ctx.db.liveQueue.id.update({ ...queue, active: queue.active - 1,
+    running: queue.running - (job.status === "running" ? 1 : 0) });
+  const quota = ctx.db.liveQuota.profile_id.find(job.profile_id)!;
+  if (quota.active === 1) ctx.db.liveQuota.profile_id.delete(job.profile_id);
+  else ctx.db.liveQuota.profile_id.update({ ...quota, active: quota.active - 1 });
+  const session = ctx.db.liveSession.id.find(job.session_id);
+  if (session?.active_job === job.id) ctx.db.liveSession.id.update({ ...session, active_job: "" });
+}
+
+export const enqueue_live_job = db.reducer(
+  {
+    job_id: t.string(), profile_id: t.string(), session_id: t.string(), kind: t.string(),
+    request_json: t.string(), request_hash: t.string(), expected_revision: t.u32(),
+    queue_limit: t.u32(), profile_limit: t.u32(), retention_s: t.u32(),
+  },
+  (ctx, p) => {
+    requireBackend(ctx);
+    if (!uuid.test(p.job_id) || !/^p_[0-9a-f]{32}$/.test(p.profile_id)) throw new Error("invalid IDs");
+    if (!["session.start", "session.turn", "attempt.coach", "notes.update"].includes(p.kind))
+      throw new Error("invalid job kind");
+    if (!/^[0-9a-f]{64}$/.test(p.request_hash) || byteLength(p.request_json) > 524288)
+      throw new Error("invalid request");
+    const request = JSON.parse(p.request_json);
+    if (request.profileId !== p.profile_id) throw new Error("profile mismatch");
+    const previous = ctx.db.liveJob.id.find(p.job_id);
+    if (previous) {
+      if (previous.profile_id !== p.profile_id || previous.request_hash !== p.request_hash ||
+          previous.kind !== p.kind || previous.session_id !== p.session_id)
+        throw new Error("idempotency conflict");
+      return;
+    }
+    if (p.queue_limit < 1 || p.queue_limit > 10000 || p.profile_limit < 1 || p.profile_limit > 16 ||
+        p.retention_s < 300 || p.retention_s > 86400) throw new Error("invalid queue limits");
+    const now = nowSeconds(ctx);
+    if (p.kind === "session.start") {
+      if (p.session_id !== p.job_id || p.expected_revision !== 0) throw new Error("invalid session start");
+    } else if (p.kind === "session.turn") {
+      const session = ctx.db.liveSession.id.find(p.session_id);
+      if (!session || session.expires_at <= now) throw new Error("session not found");
+      if (session.profile_id !== p.profile_id) throw new Error("profile mismatch");
+      if (p.expected_revision !== session.revision) throw new Error("revision conflict");
+    } else if (p.session_id !== "") throw new Error("unexpected session");
+    const queue = ctx.db.liveQueue.id.find(0) ?? ctx.db.liveQueue.insert({ id: 0, active: 0, running: 0 });
+    const quota = ctx.db.liveQuota.profile_id.find(p.profile_id);
+    if (queue.active >= p.queue_limit || (quota?.active ?? 0) >= p.profile_limit)
+      throw new Error("queue full");
+    if (p.kind === "attempt.coach") {
+      if (!uuid.test(request.attemptId) || !["i", "u", "a"].includes(request.sound) ||
+          request.metricsSource !== "inline") throw new Error("invalid attempt");
+      const attempt = ctx.db.learnerAttempt.attempt_id.find(request.attemptId);
+      if (attempt) throw new Error("attempt already exists");
+      ctx.db.learnerAttempt.insert({
+        attempt_id: request.attemptId, learner: ctx.sender, profile_id: p.profile_id,
+        sound: request.sound, status: "ended", started_at: ctx.timestamp,
+        ended_at: ctx.timestamp, summary: "",
+      });
+    }
+    ctx.db.liveQueue.id.update({ ...queue, active: queue.active + 1 });
+    const nextQuota = { profile_id: p.profile_id, active: (quota?.active ?? 0) + 1 };
+    if (quota) ctx.db.liveQuota.profile_id.update(nextQuota);
+    else ctx.db.liveQuota.insert(nextQuota);
+    ctx.db.liveJob.insert({
+      id: p.job_id, profile_id: p.profile_id, session_id: p.session_id, kind: p.kind,
+      request_json: p.request_json, request_hash: p.request_hash, expected_revision: p.expected_revision,
+      status: "queued", worker_id: "", lease_token: "", lease_until: 0, attempts: 0,
+      result_json: "", error_code: "", created_at: now, expires_at: now + p.retention_s,
+    });
+  },
+);
+
+export const claim_live_job = db.reducer(
+  { job_id: t.string(), worker_id: t.string(), lease_token: t.string(), lease_s: t.u32(), concurrency_limit: t.u32() },
+  (ctx, { job_id, worker_id, lease_token, lease_s, concurrency_limit }) => {
+    requireBackend(ctx);
+    if (!uuid.test(worker_id) || !uuid.test(lease_token) || lease_s < 30 || lease_s > 300)
+      throw new Error("invalid lease");
+    const job = ctx.db.liveJob.id.find(job_id);
+    const now = nowSeconds(ctx);
+    if (!job || !["queued", "running"].includes(job.status) || job.expires_at <= now)
+      throw new Error("job not available");
+    if (job.status === "running" && job.lease_until > now) throw new Error("job already leased");
+    const session = ctx.db.liveSession.id.find(job.session_id);
+    if (session?.active_job && session.active_job !== job.id) {
+      const active = ctx.db.liveJob.id.find(session.active_job);
+      if (active && active.status === "running" && active.lease_until > now)
+        throw new Error("session busy");
+    }
+    let error = job.attempts >= 3 ? "retry_limit" : "";
+    if (job.kind === "session.turn" && (!session || session.expires_at <= now)) error = "session_not_found";
+    if (job.kind === "session.turn" && session && session.revision !== job.expected_revision) error = "revision_conflict";
+    if (error) {
+      releaseLiveJob(ctx, job);
+      ctx.db.liveJob.id.update({ ...job, status: "failed", error_code: error, request_json: "" });
+      return;
+    }
+    if (concurrency_limit < 1 || concurrency_limit > 1000) throw new Error("invalid concurrency limit");
+    const queue = ctx.db.liveQueue.id.find(0)!;
+    if (job.status === "queued") {
+      if (queue.running >= concurrency_limit) throw new Error("workers full");
+      ctx.db.liveQueue.id.update({ ...queue, running: queue.running + 1 });
+    }
+    if (session) ctx.db.liveSession.id.update({ ...session, active_job: job.id });
+    ctx.db.liveJob.id.update({
+      ...job, status: "running", worker_id, lease_token, lease_until: now + lease_s, attempts: job.attempts + 1,
+    });
+  },
+);
+
+export const renew_live_job = db.reducer(
+  { job_id: t.string(), lease_token: t.string(), lease_s: t.u32() },
+  (ctx, { job_id, lease_token, lease_s }) => {
+    requireBackend(ctx);
+    const job = ctx.db.liveJob.id.find(job_id);
+    const now = nowSeconds(ctx);
+    if (!job || job.status !== "running" || job.lease_token !== lease_token || job.lease_until <= now)
+      throw new Error("stale lease");
+    if (lease_s < 30 || lease_s > 300) throw new Error("invalid lease");
+    ctx.db.liveJob.id.update({ ...job, lease_until: now + lease_s });
+  },
+);
+
+export const finish_live_job = db.reducer(
+  {
+    job_id: t.string(), lease_token: t.string(), result_json: t.string(), state_json: t.string(),
+    summary_json: t.string(), decision_json: t.string(), notes_json: t.string(), session_ttl_s: t.u32(),
+    delivered_attempt_id: t.string(),
+  },
+  (ctx, p) => {
+    requireBackend(ctx);
+    const job = ctx.db.liveJob.id.find(p.job_id);
+    const now = nowSeconds(ctx);
+    // Retried completion of the same lease is harmless after a lost HTTP response.
+    if (job?.status === "done" && job.lease_token === p.lease_token) return;
+    if (!job || job.status !== "running" || job.lease_token !== p.lease_token || job.lease_until <= now)
+      throw new Error("stale lease");
+    // Delivery is committed with the turn that speaks the insight; any failure rolls both back.
+    const delivered = p.delivered_attempt_id ? ctx.db.liveInsight.attempt_id.find(p.delivered_attempt_id) : null;
+    if (p.delivered_attempt_id && (job.kind !== "session.turn" || !delivered ||
+        delivered.profile_id !== job.profile_id || delivered.status !== "ready"))
+      throw new Error("insight conflict");
+    parseJsonObject(p.result_json, "result_json");
+    if (job.kind.startsWith("session.")) {
+      parseJsonObject(p.state_json, "state_json");
+      if (p.session_ttl_s < 1 || p.session_ttl_s > 86400) throw new Error("invalid session TTL");
+      const state = JSON.parse(p.state_json);
+      const session = ctx.db.liveSession.id.find(job.session_id);
+      if (state.session_id !== job.session_id || state.profile_id !== job.profile_id ||
+          (session?.revision ?? 0) !== job.expected_revision ||
+          (session && session.active_job !== job.id)) throw new Error("revision conflict");
+      const row = { id: job.session_id, profile_id: job.profile_id, state_json: p.state_json,
+        revision: job.expected_revision + 1, expires_at: now + p.session_ttl_s, active_job: "" };
+      if (session) ctx.db.liveSession.id.update(row);
+      else ctx.db.liveSession.insert(row);
+    } else if (p.state_json) throw new Error("unexpected state");
+    if (job.kind === "attempt.coach") {
+      const request = JSON.parse(job.request_json);
+      const attempt = ctx.db.learnerAttempt.attempt_id.find(request.attemptId);
+      if (!attempt || attempt.profile_id !== job.profile_id) throw new Error("profile mismatch");
+      record_coach_turn(ctx, { attempt_id: request.attemptId, summary_json: p.summary_json, decision_json: p.decision_json });
+    } else if (p.summary_json || p.decision_json) throw new Error("unexpected attempt");
+    if (p.notes_json) {
+      if (job.kind !== "notes.update") throw new Error("unexpected notes");
+      set_learner_note(ctx, { profile_id: job.profile_id, notes_json: p.notes_json });
+    }
+    if (delivered) ctx.db.liveInsight.attempt_id.update({ ...delivered, status: "delivered" });
+    releaseLiveJob(ctx, job);
+    ctx.db.liveJob.id.update({ ...job, status: "done", result_json: p.result_json, request_json: "" });
+  },
+);
+
+export const set_live_insight = db.reducer(
+  {
+    attempt_id: t.string(), profile_id: t.string(), sound: t.string(), status: t.string(),
+    say: t.string(), source: t.string(), ttl_s: t.u32(),
+  },
+  (ctx, p) => {
+    requireBackend(ctx);
+    const ready = p.status === "ready";
+    if (!uuid.test(p.attempt_id) || !profileIdRe.test(p.profile_id) || !["i", "u", "a"].includes(p.sound) ||
+        !["pending", "ready", "none"].includes(p.status) || p.ttl_s < 60 || p.ttl_s > 86400 ||
+        (ready ? p.say.length < 1 || p.say.length > 600 || !["agent", "fallback"].includes(p.source)
+          : p.say !== "" || p.source !== "")) throw new Error("invalid insight");
+    const previous = ctx.db.liveInsight.attempt_id.find(p.attempt_id);
+    if (previous && previous.profile_id !== p.profile_id) throw new Error("profile mismatch");
+    if (previous?.status === "delivered") return;
+    const now = nowSeconds(ctx);
+    const row = { attempt_id: p.attempt_id, profile_id: p.profile_id, sound: p.sound, status: p.status,
+      say: p.say, source: p.source, created_at: previous?.created_at ?? now, expires_at: now + p.ttl_s };
+    if (previous) ctx.db.liveInsight.attempt_id.update(row);
+    else ctx.db.liveInsight.insert(row);
+  },
+);
+
+export const fail_live_job = db.reducer(
+  { job_id: t.string(), lease_token: t.string() },
+  (ctx, { job_id, lease_token }) => {
+    requireBackend(ctx);
+    const job = ctx.db.liveJob.id.find(job_id);
+    if (!job || job.status !== "running" || job.lease_token !== lease_token || job.lease_until <= nowSeconds(ctx))
+      throw new Error("stale lease");
+    releaseLiveJob(ctx, job);
+    ctx.db.liveJob.id.update({ ...job, status: "failed", error_code: "processing_failed", request_json: "" });
+  },
+);
+
+// Workers select bounded batches with the expiry indexes; recheck every deletion transactionally.
+export const cleanup_live_state = db.reducer(
+  { job_ids: t.array(t.string()), session_ids: t.array(t.string()), insight_ids: t.array(t.string()) },
+  (ctx, { job_ids, session_ids, insight_ids }) => {
+    requireBackend(ctx);
+    if (job_ids.length + session_ids.length + insight_ids.length > 300) throw new Error("invalid cleanup limit");
+    const now = nowSeconds(ctx);
+    for (const id of job_ids) {
+      const job = ctx.db.liveJob.id.find(id);
+      if (!job || job.expires_at > now) continue;
+      if (job.status === "running" && job.lease_until > now) continue;
+      if (["queued", "running"].includes(job.status)) releaseLiveJob(ctx, job);
+      ctx.db.liveJob.id.delete(job.id);
+    }
+    for (const id of session_ids) {
+      const session = ctx.db.liveSession.id.find(id);
+      if (!session || session.expires_at > now) continue;
+      const active = ctx.db.liveJob.id.find(session.active_job);
+      if (active?.status === "running" && active.lease_until > now) continue;
+      ctx.db.liveSession.id.delete(session.id);
+    }
+    for (const id of insight_ids) {
+      const insight = ctx.db.liveInsight.attempt_id.find(id);
+      if (insight && insight.expires_at <= now) ctx.db.liveInsight.attempt_id.delete(id);
+    }
   },
 );

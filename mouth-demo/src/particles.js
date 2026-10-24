@@ -3,13 +3,13 @@ import * as THREE from "three";
 // ---- tuning knobs -------------------------------------------------------
 const Z_MIN = -4;
 const Z_MAX = -2;
-const RISE_SPEED = 0.045; // NDC units per second
-const SWAY_AMOUNT = 0.03;
+const RISE_SPEED = 0.016; // NDC units per second: a slow lift, not a stream
+const SWAY_AMOUNT = 0.01;
 const SWING_DRIFT = 0.5; // NDC units per second at full swing
 const SWING_EASE_MS = 400;
 const REDUCED_DRIFT = 0.12; // drift scale under reduced motion
 const SIZE_PX = [2, 4.5];
-const ALPHA = [0.15, 0.35];
+const ALPHA = [0.12, 0.26];
 const MOUTH_HOLE = { cx: 0, cy: -0.35, rx: 0.5, ry: 0.6 }; // NDC ellipse kept empty
 
 const VERT = /* glsl */ `
@@ -37,7 +37,7 @@ void main() {
   float hole = smoothstep(1.0, 1.4, e);
   float upper = mix(0.35, 1.0, smoothstep(-0.6, 0.8, ny));
   float side = mix(0.5, 1.0, smoothstep(0.2, 0.8, abs(nx)));
-  float tw = 1.0 - uTwinkle * (0.35 + 0.35 * sin(uTime * (1.5 + aSeed.z * 0.3) + aSeed.z * 6.2831));
+  float tw = 1.0 - uTwinkle * (0.12 + 0.12 * sin(uTime * (1.5 + aSeed.z * 0.3) + aSeed.z * 6.2831));
   vAlpha = aProps.y * hole * upper * side * tw;
   vAlpha *= 1.0 - smoothstep(0.85, 1.0, abs(ny));
   vTint = aProps.z;
@@ -62,7 +62,7 @@ void main() {
 }
 `;
 
-export function createParticles({ camera, count = 300, reducedMotion = false }) {
+export function createParticles({ camera, count = 180, reducedMotion = false }) {
   let reduced = !!reducedMotion;
   const positions = new Float32Array(count * 3);
   const seeds = new Float32Array(count * 3);

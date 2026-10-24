@@ -3,6 +3,8 @@
  * Fire-and-forget: never throws, never rejects, never affects the coaching session.
  */
 
+import { getLiveIdentity } from './transport';
+
 const SAMPLE_RATE = 16000;
 const MIN_SAMPLES = SAMPLE_RATE / 2; // 0.5 s
 const MAX_SAMPLES = Math.round(SAMPLE_RATE * 8.5);
@@ -55,9 +57,14 @@ export async function uploadArticulation(args: ArticulationUploadArgs): Promise<
       pcm = pcm.subarray(drop);
       startMs += (drop / SAMPLE_RATE) * 1000; // keep the start time aligned with the first kept sample
     }
+    let profileId = args.profileId;
+    try {
+      const principal = await getLiveIdentity();
+      if (principal.shared && principal.profileId) profileId = principal.profileId;
+    } catch { /* identity unavailable: keep the caller's profile */ }
     const q = new URLSearchParams({
       attemptId: args.attemptId,
-      profileId: args.profileId,
+      profileId,
       sound: args.sound,
       captureStartMonotonicMs: String(startMs),
       timeOriginUnixMs: String(args.timeOriginUnixMs),
@@ -71,7 +78,7 @@ export async function uploadArticulation(args: ArticulationUploadArgs): Promise<
     }
     try {
       const res = await fetch(`/v1/live/articulation?${q.toString()}`, {
-        method: 'POST',
+        method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'audio/wav' },
         body: encodePcm16Wav(pcm),
         signal: ctl.signal,

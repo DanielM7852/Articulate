@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { DEFAULT_SETTINGS } from './audio/estimator';
 import { VowelPlot } from './components/VowelPlot';
+import { GameMode, type FrameListener } from './game/GameMode';
 import { useVowelSession } from './useVowelSession';
 
 const trackingCopy = {
@@ -16,7 +17,9 @@ const trackingCopy = {
 export default function App() {
   const [ceilingHz, setCeilingHz] = useState(DEFAULT_SETTINGS.ceilingHz);
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ceilingHz }), [ceilingHz]);
-  const session = useVowelSession(settings);
+  const [mode, setMode] = useState<'map' | 'game'>('map');
+  const gameFrames = useRef<FrameListener | null>(null);
+  const session = useVowelSession(settings, { onFrame: (frame) => gameFrames.current?.(frame) });
   const active = session.phase === 'running' || session.phase === 'requesting';
   const point = session.frame?.point ?? session.trace.at(-1) ?? null;
   const tracking = session.phase === 'running' && !session.stale && session.frame?.status === 'tracking';
@@ -38,12 +41,23 @@ export default function App() {
       </header>
 
       <section className="intro" aria-labelledby="page-title">
-        <p className="eyebrow">Vowel explorer</p>
-        <h1 id="page-title">See your voice<br className="mobile-break" /> take shape.</h1>
-        <p className="intro-copy">Hold a vowel. Watch its position change as you move between sounds.</p>
+        <div className="mode-switch" role="group" aria-label="Mode">
+          <button type="button" aria-pressed={mode === 'map'} onClick={() => setMode('map')}>Map</button>
+          <button type="button" aria-pressed={mode === 'game'} onClick={() => setMode('game')}>Game</button>
+        </div>
+        {mode === 'map' ? <>
+          <p className="eyebrow">Vowel explorer</p>
+          <h1 id="page-title">See your voice<br className="mobile-break" /> take shape.</h1>
+          <p className="intro-copy">Hold a vowel. Watch its position change as you move between sounds.</p>
+        </> : <>
+          <p className="eyebrow">Zone game</p>
+          <h1 id="page-title">Glide between<br className="mobile-break" /> the zones you set.</h1>
+          <p className="intro-copy">Set three zones with your own voice, then move between them to say short words. Everything is shown on screen; nothing depends on hearing.</p>
+        </>}
       </section>
 
-      <div className="workspace">
+      {mode === 'game' && <GameMode session={session} frames={gameFrames} point={point} tracking={tracking} />}
+      {mode === 'map' && <div className="workspace">
         <section className="map-panel" aria-labelledby="map-title">
           <div className="panel-heading">
             <h2 id="map-title">Your vowel space</h2>
@@ -72,7 +86,7 @@ export default function App() {
             <p>Use a comfortable voice. A quieter spot helps the microphone follow you.</p>
           </div>
         </aside>
-      </div>
+      </div>}
 
       <details className="diagnostics">
         <summary>Tracking details <span>For testing & tuning</span></summary>
@@ -82,9 +96,12 @@ export default function App() {
           <div><span>Accepted frames</span><strong data-testid="accepted-frames">{session.accepted}</strong></div>
           <div><span>Analyzed frames</span><strong>{session.frames}</strong></div>
           <div><span>Input sample rate</span><strong>{session.sampleRate ? session.sampleRate / 1000 : '—'}<small> kHz</small></strong></div>
+          <div><span>Low vs mid · nasal cue</span><strong data-testid="cue-low-mid">{session.cues ? session.cues.lowVsMidDb.toFixed(1) : '—'}<small> dB</small></strong></div>
+          <div><span>Low vs high · nasal cue</span><strong data-testid="cue-low-high">{session.cues ? session.cues.lowVsHighDb.toFixed(1) : '—'}<small> dB</small></strong></div>
+          <div><span>Loudness vs loudest (3 s)</span><strong data-testid="cue-loudness">{session.cues ? session.cues.loudnessDb.toFixed(1) : '—'}<small> dB</small></strong></div>
           <label className="ceiling-control">Analysis ceiling<select aria-label="Analysis ceiling" value={ceilingHz} disabled={active} onChange={(event) => setCeilingHz(Number(event.target.value))}><option value="5000">5,000 Hz</option><option value="5500">5,500 Hz · default</option><option value="6000">6,000 Hz</option></select></label>
         </div>
-        <p>Changing the ceiling can help different voices. These measurements are experimental; accepted frames are not a pronunciation score. Unreliable frames are excluded.</p>
+        <p>Changing the ceiling can help different voices. These measurements are experimental; accepted frames are not a pronunciation score. Unreliable frames are excluded. Nasal cues are experimental half-second medians over voiced frames (bands 80–400, 400–1,200, 1,200–3,000 Hz); they do not affect tracking.</p>
       </details>
       <footer><span>Articulate / 2D mapper prototype</span><p>This maps vowel acoustics, not exact tongue position. No audio is saved or uploaded.</p></footer>
     </main>

@@ -8,6 +8,7 @@ import { computeMouthAnchor } from "./mouth-anchor.js";
 import { createHighlight } from "./highlight.js";
 import { createHologram } from "./hologram.js";
 import { createParticles } from "./particles.js";
+import { createPointCloud } from "./pointcloud.js";
 import { createTalkingHeadDriver } from "./drivers/talkinghead.js";
 import { createThreeDriver } from "./drivers/three.js";
 import { CUES } from "./cues.js";
@@ -18,9 +19,17 @@ import { createLipSync } from "./lipsync.js";
 const DEFAULT_AVATAR = "/avatars/brunette.glb";
 const TH_TIMEOUT_MS = 10000;
 const SWING_MS = 1200;
+// Looking at the learner: the eyes do most of the work and the head follows a little,
+// the way a person tracks someone close by. Radians (head) and blend-shape weight (eyes)
+// at full deflection; `ease` is the per-frame lerp toward the target.
+const LOOK = { yaw: 0.14, pitch: 0.09, ease: 0.07 };
+// `rest` is a slight downward cast (the model's neutral pose has eyesLookDown 0.1); without
+// it the eyes sit noticeably high whenever the look target is level.
+const GAZE = { yaw: 0.8, pitch: 0.4, rest: -0.12 };
+const GAZE_SHAPES = ["eyeLookOutLeft", "eyeLookInLeft", "eyeLookOutRight", "eyeLookInRight", "eyesLookUp", "eyesLookDown"];
 const NOTE = "Mouth demonstrations are illustrative and would be reviewed by speech therapists before real use.";
 const DRIVERS = ["auto", "talkinghead", "three"];
-const STYLES = ["hologram", "porcelain", "hybrid", "solid"];
+const STYLES = ["hologram", "particles", "porcelain", "hybrid", "solid"];
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -138,10 +147,15 @@ export async function createMouthDemo(container, options = {}) {
   let scene = null;
   let hologram = null;
   let particles = null;
+  let cloud = null;
   let highlight = null;
   let views = null;
   let cutaway = null;
   let style = opts.style;
+  let look = null; // { x, y } in [-1, 1], +x = viewer's right, +y = up; null releases the head
+  const lookNow = { x: 0, y: 0 };
+  let headRest = null;
+  let gazing = false; // eye shapes are being driven by the look target
 
   const renderDebug = () => {
     if (debugEl) debugEl.textContent = `driver: ${driver?.name ?? "-"} | style: ${style} | ${NOTE}`;
@@ -163,6 +177,7 @@ export async function createMouthDemo(container, options = {}) {
     });
     disposers.push(() => driver.dispose());
 
+    headRest = driver.headBone.rotation.clone();
     const anchor = computeMouthAnchor(driver);
     highlight = createHighlight({ headBone: driver.headBone, camera: scene.camera, anchor });
     if (!highlight.mesh.parent) driver.headBone.add(highlight.mesh);
@@ -183,14 +198,23 @@ export async function createMouthDemo(container, options = {}) {
 
     particles = createParticles({ camera: scene.camera, reducedMotion: mq.matches });
     if (!particles.points.parent) scene.scene.add(particles.points);
-    particles.setVisible(style === "hologram");
+    particles.setVisible(style === "hologram" || style === "particles");
     disposers.push(() => particles.dispose());
+
+    // The particle head: a sibling of the hologram style, sampled from the same meshes.
+    cloud = createPointCloud({
+      renderer: scene.renderer, scene: scene.scene, camera: scene.camera, canvas: scene.canvas,
+      root: driver.root, anchor, reducedMotion: mq.matches,
+    });
+    disposers.push(() => cloud.dispose());
+    if (style === "particles") cloud.setActive(true);
     if (params.debug) window.__mouthDemo = { scene, driver, anchor, highlight, views, hologram, particles };
 
     const onMotion = (e) => {
       views.setReducedMotion(e.matches);
       hologram.setReducedMotion(e.matches);
       particles.setReducedMotion(e.matches);
+      cloud.setReducedMotion(e.matches);
     };
     views.setReducedMotion(mq.matches);
     mq.addEventListener("change", onMotion);
@@ -411,13 +435,39 @@ export async function createMouthDemo(container, options = {}) {
       run([tween("reset", 300, { w: 0, vis: 0, show: showTarget() }, d)]);
     },
 
+    // Turn the head toward a point in front of the screen (camera or pointer). Eased in the render loop.
+    lookAt(target) {
+      look = target && Number.isFinite(target.x) && Number.isFinite(target.y)
+        ? { x: Math.max(-1, Math.min(1, target.x)), y: Math.max(-1, Math.min(1, target.y)) }
+        : null;
+    },
+
+    setZoom(z) {
+      views.setZoom(z);
+    },
+
+    // Freeze everything (face, camera, effects, choreography clock) without losing state.
+    pause() {
+      if (!disposed) scene.stopLoop();
+    },
+
+    resume() {
+      if (!disposed) scene.startLoop(frame);
+    },
+
     setStyle(next) {
       if (!STYLES.includes(next)) return;
       style = next;
       root.dataset.style = next;
-      hologram.setStyle(next);
+      if (next === "particles") {
+        hologram.setStyle("solid"); // restores the meshes; the cloud then hides them behind its depth prepass
+        cloud.setActive(true);
+      } else {
+        cloud.setActive(false);
+        hologram.setStyle(next);
+      }
       scene.setSolidLighting(next === "solid");
-      particles.setVisible(next === "hologram");
+      particles.setVisible(next === "hologram" || next === "particles");
       renderDebug();
     },
 
@@ -456,7 +506,8 @@ export async function createMouthDemo(container, options = {}) {
   syncButtons();
   renderDebug();
 
-  scene.startLoop((dt) => {
+  // One frame of the demo; also the resume target for pause()/resume().
+  function frame(dt) {
     if (pendingSize) {
       scene.setSize(pendingSize.w, pendingSize.h);
       hologram.setSize(pendingSize.w, pendingSize.h);
@@ -467,13 +518,42 @@ export async function createMouthDemo(container, options = {}) {
     timeline.update(step);
     lipsync.update(step);
     driver.update(step);
+    if (look || Math.abs(lookNow.x) > 1e-3 || Math.abs(lookNow.y) > 1e-3) {
+      const goal = look ?? { x: 0, y: 0 };
+      const k = Math.min(1, LOOK.ease * (step / 16.7));
+      lookNow.x += (goal.x - lookNow.x) * k;
+      lookNow.y += (goal.y - lookNow.y) * k;
+      if (headRest) {
+        // Override the driver's head pose for this frame; +y rotation turns toward world +x, the viewer's right.
+        driver.headBone.rotation.copy(headRest);
+        driver.headBone.rotation.y += lookNow.x * LOOK.yaw;
+        driver.headBone.rotation.x -= lookNow.y * LOOK.pitch;
+      }
+      // Eyes: ARKit look shapes. A positive yaw is the viewer's right, which is the avatar's
+      // left eye looking out and the right eye looking in.
+      const ey = lookNow.x * GAZE.yaw;
+      const ex = lookNow.y * GAZE.pitch + GAZE.rest;
+      driver.setShape("eyeLookOutLeft", Math.max(0, ey));
+      driver.setShape("eyeLookInRight", Math.max(0, ey));
+      driver.setShape("eyeLookInLeft", Math.max(0, -ey));
+      driver.setShape("eyeLookOutRight", Math.max(0, -ey));
+      driver.setShape("eyesLookUp", Math.max(0, ex));
+      driver.setShape("eyesLookDown", Math.max(0, -ex));
+      gazing = true;
+    } else if (gazing) {
+      gazing = false;
+      driver.releaseShapes(GAZE_SHAPES);
+    }
     views.update(scaled);
     highlight.update(scaled);
     hologram.setHold(highlight.pulseValue);
+    cloud.setHold(highlight.pulseValue);
     hologram.update(scaled);
+    cloud.update(step);
     particles.update(scaled);
     hologram.render();
-  });
+  }
+  scene.startLoop(frame);
 
   setTimeout(() => {
     if (!disposed) container.dispatchEvent(new CustomEvent("demo:ready", { bubbles: true, detail: { driver: driver.name } }));
