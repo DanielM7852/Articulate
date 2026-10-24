@@ -1,0 +1,175 @@
+"""Learner history: SpacetimeDB when configured, otherwise JSON files under the local store."""
+
+import asyncio
+import hashlib
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Protocol
+
+from app.config import Settings
+from app.integrations.spacetime import SpacetimeClient, profile_literal, timestamp_micros, unwrap
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LearnerContext:
+    attempts: list[dict[str, Any]] = field(default_factory=list)  # newest first, compact
+    notes: dict[str, Any] | None = None
+
+
+class LearnerHistory(Protocol):
+    async def load(self, profile_id: str, limit: int) -> LearnerContext: ...
+
+    async def record(self, profile_id: str, attempt_id: str, summary: dict, decision: dict) -> bool: ...
+
+    async def save_notes(self, profile_id: str, notes: dict) -> bool: ...
+
+
+def compact_attempt(summary: dict, decision: dict | None = None) -> dict[str, Any]:
+    """Small, model-friendly view of one past attempt."""
+    audio = summary.get("audio") or {}
+    video = summary.get("video") or {}
+    decision = decision or {}
+    return {
+        "attemptId": summary.get("attemptId"),
+        "sound": summary.get("sound"),
+        "audioVerdict": audio.get("verdict"),
+        "f1Offset": audio.get("f1Offset"),
+        "f2Offset": audio.get("f2Offset"),
+        "inTargetFraction": audio.get("inTargetFraction"),
+        "videoVerdict": video.get("verdict") if video else None,
+        "cueId": summary.get("cueId", decision.get("cueId")),
+        "nextAction": summary.get("nextAction", decision.get("nextAction")),
+    }
+
+
+def _safe_name(profile_id: str) -> str:
+    base = re.sub(r"[^A-Za-z0-9_-]", "_", profile_id)[:40]
+    return f"{base}-{hashlib.sha256(profile_id.encode()).hexdigest()[:8]}"
+
+
+class LocalHistory:
+    def __init__(self, settings: Settings) -> None:
+        self._dir = Path(settings.store_dir) / "learners"
+
+    def _path(self, profile_id: str) -> Path:
+        return self._dir / f"{_safe_name(profile_id)}.json"
+
+    def _read(self, profile_id: str) -> dict[str, Any]:
+        try:
+            data = json.loads(self._path(profile_id).read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _write(self, profile_id: str, data: dict[str, Any]) -> None:
+        self._dir.mkdir(parents=True, exist_ok=True)
+        path = self._path(profile_id)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        tmp.replace(path)
+
+    async def load(self, profile_id: str, limit: int) -> LearnerContext:
+        data = await asyncio.to_thread(self._read, profile_id)
+        turns = [t for t in data.get("attempts", []) if isinstance(t, dict)]
+        recent = list(reversed(turns))[:limit]
+        return LearnerContext(
+            attempts=[compact_attempt(t.get("summary") or {}, t.get("decision")) for t in recent],
+            notes=data.get("notes") if isinstance(data.get("notes"), dict) else None,
+        )
+
+    async def record(self, profile_id: str, attempt_id: str, summary: dict, decision: dict) -> bool:
+        def work() -> None:
+            data = self._read(profile_id)
+            attempts = [t for t in data.get("attempts", []) if (t.get("summary") or {}).get("attemptId") != attempt_id]
+            attempts.append({"summary": summary, "decision": decision})
+            data["attempts"] = attempts[-200:]
+            self._write(profile_id, data)
+
+        try:
+            await asyncio.to_thread(work)
+            return True
+        except OSError as exc:
+            logger.warning("local history write failed: %s", type(exc).__name__)
+            return False
+
+    async def save_notes(self, profile_id: str, notes: dict) -> bool:
+        def work() -> None:
+            data = self._read(profile_id)
+            data["notes"] = notes
+            self._write(profile_id, data)
+
+        try:
+            await asyncio.to_thread(work)
+            return True
+        except OSError as exc:
+            logger.warning("local notes write failed: %s", type(exc).__name__)
+            return False
+
+
+def _loads(text: Any) -> dict[str, Any]:
+    text = unwrap(text)
+    if not isinstance(text, str) or not text:
+        return {}
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+class SpacetimeHistory:
+    def __init__(self, client: SpacetimeClient) -> None:
+        self._client = client
+
+    async def load(self, profile_id: str, limit: int) -> LearnerContext:
+        lit = profile_literal(profile_id)
+        rows = await self._client.sql(f"SELECT * FROM learner_attempt WHERE profile_id = {lit}")
+        rows.sort(key=lambda r: timestamp_micros(r.get("started_at")), reverse=True)
+        attempts = []
+        for row in rows:
+            summary = _loads(row.get("summary"))
+            if not summary:
+                continue
+            summary.setdefault("attemptId", unwrap(row.get("attempt_id")))
+            summary.setdefault("sound", unwrap(row.get("sound")))
+            attempts.append(compact_attempt(summary))
+            if len(attempts) >= limit:
+                break
+        notes = None
+        try:
+            note_rows = await self._client.sql(f"SELECT * FROM learner_note WHERE profile_id = {lit}")
+            if note_rows:
+                notes = _loads(note_rows[0].get("notes")) or None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("learner note read failed: %s", type(exc).__name__)
+        return LearnerContext(attempts=attempts, notes=notes)
+
+    async def record(self, profile_id: str, attempt_id: str, summary: dict, decision: dict) -> bool:
+        try:
+            await self._client.call(
+                "record_coach_turn",
+                [attempt_id, json.dumps(summary, separators=(",", ":")), json.dumps(decision, separators=(",", ":"))],
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("record_coach_turn failed: %s", type(exc).__name__)
+            return False
+
+    async def save_notes(self, profile_id: str, notes: dict) -> bool:
+        try:
+            await self._client.call("set_learner_note", [profile_id, json.dumps(notes, separators=(",", ":"))])
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("set_learner_note failed: %s", type(exc).__name__)
+            return False
+
+
+def build_history(settings: Settings, transport=None) -> LearnerHistory:
+    if settings.spacetime_configured:
+        return SpacetimeHistory(SpacetimeClient(settings, transport))
+    return LocalHistory(settings)

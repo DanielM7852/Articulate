@@ -8,6 +8,7 @@ Run from the backend directory:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.live_routes import router as live_router
 from app.api.routes import router
 from app.config import Settings, get_settings
 from app.runtime import build_orchestrator
@@ -29,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = active
     app.state.orchestrator = build_orchestrator(active)
     app.include_router(router)
+    app.include_router(live_router)
     return app
 
 

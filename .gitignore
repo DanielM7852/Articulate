@@ -15,5 +15,6 @@ __pycache__/
 
 # Local secrets and data
 .env
+.env.secrets
 .data/
 .local_store/

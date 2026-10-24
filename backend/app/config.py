@@ -4,18 +4,29 @@ Pitch thresholds below are engineering defaults for short intonation phrases.
 They are not validated clinical standards.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(BACKEND_DIR / ".env", BACKEND_DIR / ".env.secrets"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
     anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-sonnet-4-6"
+    anthropic_model: str = "claude-sonnet-5-5"
+    spacetime_uri: str = "https://maincloud.spacetimedb.com"
+    spacetime_database: str | None = None
+    spacetime_token: str | None = None
+    live_coach_effort: str = "medium"
+    live_notes_effort: str = "high"
+    live_coach_timeout_s: float = 15.0
+    live_history_limit: int = 12
     moss_project_id: str | None = None
     moss_project_key: str | None = None
     moss_index_name: str = "articulate-cues"
@@ -62,6 +73,10 @@ class Settings(BaseSettings):
     @property
     def anthropic_configured(self) -> bool:
         return bool(self.anthropic_api_key)
+
+    @property
+    def spacetime_configured(self) -> bool:
+        return bool(self.spacetime_database and self.spacetime_token)
 
     @property
     def moss_configured(self) -> bool:

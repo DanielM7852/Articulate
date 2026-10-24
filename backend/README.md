@@ -16,6 +16,7 @@ From this directory, with Python 3.11 or newer (developed on Python 3.14):
 python -m venv .venv
 .venv\Scripts\python -m pip install -e ".[dev]"
 copy .env.example .env
+copy .env.secrets.example .env.secrets
 .venv\Scripts\python -m pytest
 .venv\Scripts\python -m uvicorn app.main:app --reload
 ```
@@ -44,9 +45,9 @@ A real upload is multipart form data:
 
 ## Configuration
 
-See `.env.example`. Keys stay on the server.
+Tunable settings live in `.env` (see `.env.example`); API keys and tokens live in `.env.secrets` (see `.env.secrets.example`, gitignored). Both are read from the backend directory regardless of the working directory; `.env.secrets` wins over `.env`, and real environment variables win over both. Keys stay on the server.
 
-`ANTHROPIC_MODEL` defaults to `claude-sonnet-4-6`, which is in the current structured-output model list. Change it if the account uses a different current model.
+`ANTHROPIC_MODEL` defaults to `claude-sonnet-5-5`. Change it if the account uses a different current model.
 
 Moss is optional. Install it with `pip install -e ".[moss]"`, set `MOSS_PROJECT_ID` and `MOSS_PROJECT_KEY`, then preview the index write:
 
