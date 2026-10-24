@@ -16,6 +16,13 @@ cue back.
 | `apps/web/`, `services/api/`, `spacetimedb/`, `packages/contracts/` | The coaching backbone workstream: a session controller with versioned contracts, Parselmouth formants, Moss retrieval, a Cartesia WebSocket voice and SpacetimeDB persistence. Independent of `web/` and `backend/`. | see [Backbone](#backbone) |
 | `docs/` | Contracts and notes: [`backend-contract.md`](docs/backend-contract.md), [`protocol.md`](docs/protocol.md), [`coaching-agent.md`](docs/coaching-agent.md), [`limitations.md`](docs/limitations.md), [`sponsor-integration.md`](docs/sponsor-integration.md), [`live-metrics.md`](docs/live-metrics.md). | |
 
+## CV data collector
+
+See [docs/vision-collector.md](docs/vision-collector.md) for the standalone camera
+collector and integration contract. Open `/vision.html` in the `apps/web` workspace to
+inspect/export full landmarks, blendshapes, geometry, pose, quality, timing and
+optional images without the backend. Import `apps/web/src/cv/index.ts` for integration.
+
 ## Quick start
 
 ```powershell

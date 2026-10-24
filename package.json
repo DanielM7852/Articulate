@@ -11,6 +11,8 @@
     "dev": "npm run dev --workspace apps/web",
     "build": "npm run build --workspace apps/web && npm run check --workspace spacetimedb",
     "test:audio": "node --test apps/web/tests/*.test.mjs",
+    "test:vision": "vitest run --config vitest.vision.config.ts --configLoader runner",
+    "test:vision:e2e": "playwright test --config playwright.vision.config.ts",
     "test:e2e": "playwright test",
     "test:database": "vitest run",
     "contracts:check": "node scripts/check-contracts.mjs",
