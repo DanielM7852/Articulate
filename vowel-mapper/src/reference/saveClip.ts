@@ -4,13 +4,17 @@ const WORKLET = `registerProcessor('clip-capture', class extends AudioWorkletPro
 });`;
 
 export async function recordClip(seconds: number): Promise<{ samples: Float32Array; rate: number }> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    // Same as src/audio/capture.ts: browser speech enhancement can distort the spectral envelope.
-    audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-  });
+  // Create and resume the context before any await, while the click still counts as a user gesture.
   const context = new AudioContext({ sampleRate: 48000 });
+  const resumed = context.resume();
   const url = URL.createObjectURL(new Blob([WORKLET], { type: 'text/javascript' }));
+  let stream: MediaStream | null = null;
   try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      // Same as src/audio/capture.ts: browser speech enhancement can distort the spectral envelope.
+      audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    await resumed;
     await context.audioWorklet.addModule(url);
     const node = new AudioWorkletNode(context, 'clip-capture');
     const wanted = Math.round(seconds * context.sampleRate);
@@ -25,13 +29,14 @@ export async function recordClip(seconds: number): Promise<{ samples: Float32Arr
         offset += chunk.length;
         if (offset >= wanted) { clearTimeout(timeout); resolve(); }
       };
-      context.createMediaStreamSource(stream).connect(node);
-      void context.resume();
+      context.createMediaStreamSource(stream!).connect(node);
+      // As in capture.ts: the browser only keeps rendering a graph that reaches the output. The node writes silence.
+      node.connect(context.destination);
     });
     return { samples, rate: context.sampleRate };
   } finally {
     URL.revokeObjectURL(url);
-    stream.getTracks().forEach((track) => track.stop());
+    stream?.getTracks().forEach((track) => track.stop());
     void context.close();
   }
 }
