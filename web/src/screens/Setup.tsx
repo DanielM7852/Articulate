@@ -1,33 +1,32 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Hand, Mic, ShieldCheck, Square, Video } from 'lucide-react';
-import { AppShell } from '../components/AppShell';
-import { AmplitudeMeter, CameraTile, VowelGlyph } from '../components/practice';
-import { Badge, Button } from '../components/ui';
+import { CheckCircle2, Mic, ShieldCheck, Square, TriangleAlert, Video } from 'lucide-react';
+import { OnboardingFrame, StepHeading, Switch, stepTransition, useStepNav } from '../components/Onboarding';
+import { AmplitudeMeter, CameraTile } from '../components/practice';
 import { useMicrophone, type CaptureSummary } from '../audio/useMicrophone';
 import { useAppState } from '../state/AppState';
 import { SOUNDS } from '../state/types';
 
+/** Two onboarding steps on one route so the microphone stream carries over. */
+type Stage = 'mic' | 'try';
+
+const UNCLEAR: Record<NonNullable<CaptureSummary['qualityReason']>, string> = {
+  silence: 'I couldn’t hear that clearly. Try moving a little closer.',
+  'too-short': 'That was quite short. Try holding the sound a bit longer.',
+  clipping: 'That was too loud for the microphone. Try moving a little further away.',
+};
+
 export default function Setup() {
-  const navigate = useNavigate();
+  const go = useStepNav();
   const mic = useMicrophone();
   const { camera, setCamera, addAttempt, plan } = useAppState();
+  const [stage, setStage] = useState<Stage>('mic');
   const [baseline, setBaseline] = useState<CaptureSummary | null>(null);
   const sound = SOUNDS[plan.sound];
-
-  const micBadge =
-    mic.status === 'ready' || mic.status === 'recording' ? (
-      <Badge tone="success">Microphone ready</Badge>
-    ) : mic.status === 'denied' ? (
-      <Badge tone="warn">Microphone blocked</Badge>
-    ) : mic.status === 'unsupported' ? (
-      <Badge tone="warn">Not supported in this browser</Badge>
-    ) : (
-      <Badge tone="neutral">Not checked yet</Badge>
-    );
+  const recording = mic.status === 'recording';
+  const live = mic.status === 'ready' || recording;
 
   async function toggleBaseline() {
-    if (mic.status === 'recording') {
+    if (recording) {
       const summary = await mic.endRecording();
       setBaseline(summary);
       addAttempt({
@@ -50,191 +49,142 @@ export default function Setup() {
     }
   }
 
-  const recording = mic.status === 'recording';
+  const toPlan = () => {
+    mic.stop();
+    go('/plan');
+  };
+
+  if (stage === 'mic') {
+    const status =
+      mic.status === 'denied' ? (
+        <span className="ob-status ob-status--warn" role="alert">
+          <TriangleAlert size={17} aria-hidden="true" /> Microphone blocked. Allow it in site settings, or skip for now.
+        </span>
+      ) : mic.status === 'unsupported' ? (
+        <span className="ob-status ob-status--warn">
+          <TriangleAlert size={17} aria-hidden="true" /> This browser can’t use a microphone. You can skip this.
+        </span>
+      ) : live && mic.noiseLevel === 'noisy' ? (
+        <span className="ob-status ob-status--warn">
+          <TriangleAlert size={17} aria-hidden="true" /> The room sounds a little noisy
+        </span>
+      ) : live ? (
+        <span className="ob-status ob-status--ok">
+          <CheckCircle2 size={17} aria-hidden="true" /> Microphone ready{mic.noiseLevel === 'quiet' ? ' · quiet enough to begin' : ''}
+        </span>
+      ) : (
+        <span className="ob-status">Not checked yet</span>
+      );
+
+    return (
+      <OnboardingFrame
+        step={4}
+        stageKey="mic"
+        onBack={() => go('/quiz/3', 'back')}
+        secondary={{ label: 'Skip setup', onClick: toPlan }}
+        primary={{ label: 'Continue', onClick: () => stepTransition(() => setStage('try')) }}
+      >
+        <StepHeading title="Let’s check your microphone." hint="Speak naturally, about a hand’s length away." />
+
+        <div className="ob-panel" aria-live="polite">
+          <AmplitudeMeter levels={mic.levels} active={live} />
+          {status}
+          <div className="btn-row" style={{ justifyContent: 'center' }}>
+            {!live && mic.status !== 'unsupported' && (
+              <button type="button" className="btn btn--sm" onClick={() => mic.start()} disabled={mic.status === 'requesting'}>
+                <Mic size={16} aria-hidden="true" />
+                {mic.status === 'denied' ? 'Try again' : 'Check microphone'}
+              </button>
+            )}
+            {mic.devices.length > 1 && (
+              <select className="btn btn--sm" aria-label="Change microphone" onChange={(e) => mic.start(e.target.value)} defaultValue="">
+                <option value="" disabled>
+                  Change microphone
+                </option>
+                {mic.devices.map((d, i) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || `Microphone ${i + 1}`}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+
+        <div className="ob-cam">
+          {camera ? (
+            <CameraTile enabled />
+          ) : (
+            <span className="ob-cam-icon" aria-hidden="true">
+              <Video size={22} />
+            </span>
+          )}
+          <span className="ob-row-copy grow">
+            <span className="ob-label">Lip mirror · optional</span>
+            <span className="ob-fine">See your lips while you practice. Off unless you turn it on.</span>
+          </span>
+          <Switch label="Lip mirror camera" checked={camera} onChange={setCamera} />
+        </div>
+
+        <p className="ob-fine row" style={{ gap: 8, justifyContent: 'center' }}>
+          <ShieldCheck size={16} color="var(--color-navy)" aria-hidden="true" style={{ flexShrink: 0 }} />
+          Recordings aren’t saved without your consent.
+        </p>
+      </OnboardingFrame>
+    );
+  }
 
   return (
-    <AppShell context="Set up your space" footerNote="Microphone calibration, graph scale, and sound targets are separate.">
-      <div className="page stack gap-28" style={{ paddingTop: 34 }}>
-        <header className="stack gap-16">
-          <div className="stack gap-12" style={{ maxWidth: 890 }}>
-            <p className="eyebrow">Before your first lesson</p>
-            <h1 className="display-md">Let’s make room for your sound.</h1>
-            <p className="body">
-              Check your microphone, then try a short sound without a cue. This helps suggest support. It is not a
-              pronunciation score.
-            </p>
-          </div>
-          <Badge>Setup + a short first try</Badge>
-        </header>
+    <OnboardingFrame
+      step={5}
+      stageKey="try"
+      onBack={() => stepTransition(() => setStage('mic'), 'back')}
+      secondary={baseline?.quality === 'usable' ? undefined : { label: 'Skip', onClick: toPlan, disabled: recording }}
+      primary={{ label: 'Continue', onClick: toPlan, disabled: recording }}
+    >
+      <StepHeading
+        title="Try a sound on your own."
+        hint="Hold it comfortably for about 3 seconds. No example, no score."
+      />
 
-        <div className="setup-grid">
-          <div className="stack gap-18">
-            <section className="card" aria-labelledby="mic-h">
-              <div className="card-head">
-                <p className="eyebrow" id="mic-h">
-                  01 / Microphone check
-                </p>
-                {micBadge}
-              </div>
-              <div className="inset-tile row" style={{ gap: 18, justifyContent: 'center', padding: 24 }}>
-                <span className="row" style={{ gap: 10, color: 'var(--color-navy)' }} aria-hidden="true">
-                  <Mic size={30} strokeWidth={1.5} />
-                  <span style={{ width: 80, borderTop: '2px dashed var(--color-navy-mist)' }} />
-                  <Hand size={30} strokeWidth={1.5} />
-                </span>
-                <p className="small" style={{ maxWidth: 220 }}>
-                  Speak naturally, about a hand’s length from the microphone.
-                </p>
-              </div>
-              <div className="inset-tile row row--between wrap" style={{ padding: 14, borderRadius: 6 }}>
-                <div className="stack gap-4">
-                  <AmplitudeMeter levels={mic.levels} active={mic.status === 'ready' || recording} />
-                  <p className="fine">Input amplitude · capture quality only</p>
-                </div>
-                {mic.noiseLevel === 'quiet' && <Badge tone="success">Quiet enough to begin</Badge>}
-                {mic.noiseLevel === 'noisy' && <Badge tone="warn">Room sounds noisy</Badge>}
-              </div>
-              {mic.status === 'denied' && (
-                <p className="fine" role="alert">
-                  Microphone access was blocked. Allow it in your browser’s site settings, then check again. You can also
-                  continue without a sample.
-                </p>
-              )}
-              <div className="btn-row">
-                <Button size="sm" onClick={() => mic.start()}>
-                  {mic.status === 'idle' || mic.status === 'denied' ? 'Check microphone' : 'Check microphone again'}
-                </Button>
-                {mic.devices.length > 1 && (
-                  <select
-                    className="btn btn--sm"
-                    aria-label="Change device"
-                    onChange={(e) => mic.start(e.target.value)}
-                    defaultValue=""
-                  >
-                    <option value="" disabled>
-                      Change device
-                    </option>
-                    {mic.devices.map((d, i) => (
-                      <option key={d.deviceId} value={d.deviceId}>
-                        {d.label || `Microphone ${i + 1}`}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            </section>
-
-            <section className="card" aria-labelledby="cam-h">
-              <div className="card-head">
-                <p className="eyebrow" id="cam-h">
-                  Optional / Lip camera
-                </p>
-                <Badge tone={camera ? 'success' : 'neutral'}>{camera ? 'On' : 'Off'}</Badge>
-              </div>
-              <div className="inset-tile stack gap-16" style={{ alignItems: 'center' }}>
-                <CameraTile enabled={camera} />
-                <p className="small">
-                  See your visible lip movement in a small mirror tile. The camera is off unless you choose to enable it;
-                  it cannot show internal tongue position.
-                </p>
-              </div>
-              <div className="btn-row">
-                <Button size="sm" icon={<Video size={17} aria-hidden="true" />} aria-pressed={camera} onClick={() => setCamera(!camera)}>
-                  {camera ? 'Turn camera off' : 'Enable camera'}
-                </Button>
-                {!camera && (
-                  <Button size="sm" onClick={() => setCamera(false)}>
-                    Skip camera
-                  </Button>
-                )}
-              </div>
-            </section>
-
-            <p className="row row--top fine" style={{ gap: 10, padding: '0 4px' }}>
-              <ShieldCheck size={19} color="var(--color-navy)" aria-hidden="true" style={{ flexShrink: 0 }} />
-              Recordings are transient and aren’t saved without your consent. No camera is needed. You can stop or skip at
-              any time.
-            </p>
-          </div>
-
-          <div className="stack gap-18">
-            <section className="card card--lg" aria-labelledby="base-h">
-              <div className="card-head">
-                <p className="eyebrow" id="base-h">
-                  02 / A short first try
-                </p>
-                <Badge>Unassisted · no reference yet</Badge>
-              </div>
-              <div className="inset-tile inset-tile--soft">
-                <VowelGlyph sound={plan.sound} />
-                <p className="small" style={{ textAlign: 'center', marginTop: 12 }}>
-                  Hold the vowel comfortably for about 3 seconds.
-                </p>
-              </div>
-              <p className="small">
-                Take a comfortable breath, select Record, and try the sound once. There’s no example playing and no target
-                to follow for this first attempt. Stop whenever you need.
-              </p>
-              <div className="btn-row" aria-live="polite">
-                <Button
-                  variant="primary"
-                  icon={recording ? <Square size={17} aria-hidden="true" /> : <Mic size={17} aria-hidden="true" />}
-                  onClick={toggleBaseline}
-                  disabled={mic.status === 'unsupported'}
-                >
-                  {recording ? `Stop · ${mic.elapsed.toFixed(1)} s` : baseline ? 'Record first try again' : 'Record first try'}
-                </Button>
-                {recording ? (
-                  <Badge live>Recording</Badge>
-                ) : (
-                  <Button onClick={() => navigate('/plan')}>Skip first try</Button>
-                )}
-              </div>
-              {recording && <AmplitudeMeter levels={mic.levels} active />}
-              {baseline?.quality === 'usable' && (
-                <div className="card card--success" style={{ padding: 18, gap: 6 }} role="status">
-                  <p className="strong" style={{ color: 'var(--color-success)', fontSize: 13 }}>
-                    Usable capture · {baseline.usableVoicedSec.toFixed(1)} s of voiced sound
-                  </p>
-                  <p className="fine">Saved as your baseline for “{sound.spelled}”. This is not a score.</p>
-                </div>
-              )}
-              <p className="fine">
-                This checks usable capture and can inform support later. A first try does not establish a speech level or
-                diagnose anything.
-              </p>
-            </section>
-
-            <div className="card card--warn" style={{ padding: 18, gap: 8 }} role={baseline?.quality === 'unclear' ? 'alert' : undefined}>
-              <p className="strong" style={{ color: 'var(--color-warn)', fontSize: 12, textTransform: 'uppercase' }}>
-                {baseline?.quality === 'unclear' ? 'That capture was unclear' : 'If the room is noisy or no voice is captured'}
-              </p>
-              <p className="ink" style={{ fontSize: 13, lineHeight: 1.6 }}>
-                {baseline?.qualityReason === 'clipping'
-                  ? '“That was too loud for the microphone. Try moving a little further away.”'
-                  : '“I couldn’t measure that clearly. Try moving closer to the microphone.”'}{' '}
-                Nothing is scored. Retry, change device, or continue without a sample.
-              </p>
-            </div>
-          </div>
+      <div className="ob-panel" style={{ gap: 18 }}>
+        <div className="stack gap-4" style={{ alignItems: 'center' }}>
+          <p className="ob-glyph">{sound.ipa}</p>
+          <p className="ob-hint">
+            {sound.spelled} · as in {sound.example}
+          </p>
         </div>
-
-        <div className="row row--between">
-          <Button icon={<ArrowLeft size={17} aria-hidden="true" />} onClick={() => navigate(-1)}>
-            Back
-          </Button>
-          <Button
-            variant="primary"
-            icon={<ArrowRight size={17} aria-hidden="true" />}
-            onClick={() => {
-              mic.stop();
-              navigate('/plan');
-            }}
-          >
-            See my suggested plan
-          </Button>
+        <AmplitudeMeter levels={mic.levels} active={recording} />
+        <button
+          type="button"
+          className="ob-record"
+          aria-pressed={recording}
+          aria-label={recording ? 'Stop recording' : 'Record'}
+          onClick={toggleBaseline}
+          disabled={mic.status === 'unsupported'}
+        >
+          {recording ? <Square size={24} fill="currentColor" aria-hidden="true" /> : <Mic size={28} aria-hidden="true" />}
+        </button>
+        <div aria-live="polite" role="status">
+          {recording ? (
+            <span className="ob-status">Recording · {mic.elapsed.toFixed(1)} s</span>
+          ) : baseline?.quality === 'usable' ? (
+            <span className="ob-status ob-status--ok">
+              <CheckCircle2 size={17} aria-hidden="true" /> Got it · {baseline.usableVoicedSec.toFixed(1)} s of voiced sound
+            </span>
+          ) : baseline ? (
+            <span className="ob-status ob-status--warn">
+              <TriangleAlert size={17} aria-hidden="true" /> {UNCLEAR[baseline.qualityReason ?? 'silence']}
+            </span>
+          ) : (
+            <span className="ob-status">Tap to record, tap again to stop</span>
+          )}
         </div>
       </div>
-    </AppShell>
+
+      <p className="ob-fine ob-hide-short" style={{ textAlign: 'center' }}>
+        This first try only checks that we can hear you. It isn’t a score or a diagnosis.
+      </p>
+    </OnboardingFrame>
   );
 }
