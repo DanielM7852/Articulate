@@ -97,7 +97,7 @@ export default function PracticeStudio() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration, captions, learnerName, learnerEmail } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration, captions, learnerName } = useAppState();
   const profileId = profileIdFor(learnerName);
   const [liveResp, setLiveResp] = useState<LiveCoachResponse | null>(null);
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
@@ -337,8 +337,9 @@ export default function PracticeStudio() {
       };
     }
 
-    const response = await analyzeAttempt(attempt, history, { learnerId: learnerEmail, plan });
-    if (response.plan) updatePlan(response.plan);
+    const response = await analyzeAttempt(attempt, history, { learnerId: profileId, plan });
+    // The session director owns the current sound; apply only pace and assistance.
+    if (response.plan) updatePlan({ pace: response.plan.pace, assistance: response.plan.assistance });
     await seq.whenIdle(); // never overlap the bridge line
     if (runId.current !== myRun) return null;
     setCoach(response);

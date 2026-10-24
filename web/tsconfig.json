@@ -17,6 +17,5 @@
       "@vowel-mapper/*": ["../vowel-mapper/src/*"]
     }
   },
-  "include": ["src"],
-  "exclude": ["src/spacetime"]
+  "include": ["src"]
 }
