@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-24",
+  "baselineCommit": "4657251",
+  "estimatorSha256": "cd8feb87a323b741a3e283ed5af96c647b24f597752b608d7e9b1a030df3cc94",
+  "manifestSha256": "32626e3a228e67a1c54ca9bf72613777837967297274114dbbe9a6fae7dfb378",
+  "noiseSha256": "50b070344e7b7c02e2fa24139e8c1028bd1dd27c0f4898df54ccb3a857eb9fe5",
+  "conditions": [
+    "clean",
+    "20",
+    "15",
+    "10",
+    "5"
+  ],
+  "counts": {
+    "allFrames": 112300,
+    "boundaryOrUnknown": 64690,
+    "overRangeSamples": 37415
+  },
+  "corpora": {
+    "hillenbrand": {
+      "clips": 288,
+      "speakers": 24,
+      "seconds": 166.291,
+      "preparedWavBytes": 15986382
+    },
+    "librispeech": {
+      "clips": 47,
+      "speakers": 24,
+      "seconds": 407.725,
+      "preparedWavBytes": 39145278
+    }
+  },
+  "h95Revision": "6dd44decc8ef5b537cbb54732a3b00c8fa652e65",
+  "librispeechRevision": "0daa1eb43dda38ee6ce752e785555380e5628f5c",
+  "runtimeEstimatorModified": false
+}

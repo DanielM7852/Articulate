@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from './audio/estimator';
 import { VowelPlot } from './components/VowelPlot';
 import { GameMode, type FrameListener } from './game/GameMode';
 import type { GameCalibrations } from './game/lessons';
+import { ConsonantCuePreview } from './components/ConsonantCuePreview';
 import { useVowelSession } from './useVowelSession';
 
 const trackingCopy = {
@@ -104,6 +105,7 @@ export default function App() {
           <label className="ceiling-control">Analysis ceiling<select aria-label="Analysis ceiling" value={ceilingHz} disabled={active} onChange={(event) => setCeilingHz(Number(event.target.value))}><option value="5000">5,000 Hz</option><option value="5500">5,500 Hz · default</option><option value="6000">6,000 Hz</option></select></label>
         </div>
         <p>Changing the ceiling can help different voices. These measurements are experimental; accepted frames are not a pronunciation score. Unreliable frames are excluded. Nasal cues are experimental half-second medians over voiced frames (bands 80–400, 400–1,200, 1,200–3,000 Hz); they do not affect tracking.</p>
+        <ConsonantCuePreview />
       </details>
       <footer><span>Articulate / 2D mapper prototype</span><p>This maps vowel acoustics, not exact tongue position. No audio is saved or uploaded.</p></footer>
     </main>

@@ -119,8 +119,10 @@ or guaranteed match of Praat**. Parameters and windowing differ. References:
 
 Silence, unvoiced broadband noise, clipping and implausible estimates are gated.
 When noise broadens F1 past the bandwidth limit, the frame is rejected rather than
-relabelling F2 as F1. Noise can still cause F2 to be dropped and F3 reported as F2
-(known gap, covered by expected-fail tests), so a loud room can show a second cluster.
+relabelling F2 as F1. A second mask guards against a broadened F2 being replaced by F3. Known noisy
+F1 slips remain at some pitches (two expected-fail tests), so a loud room can
+still show misleading positions. The real-speech benchmark below also measures
+the clean-vowel coverage cost of both guards.
 This is **not speaker separation**: nearby voiced speech can still move the dot.
 Browser echo cancellation, noise suppression and automatic gain control are
 requested off to preserve the spectrum; devices may not honor every constraint.
@@ -150,3 +152,22 @@ ignored `test-results/`.
 
 These checks do not establish performance on a real built-in microphone or in
 the hackathon venue. Dependencies are locked in `package-lock.json`.
+
+## Real-speech evaluation and consonant preview
+
+The [offline benchmark](scripts/eval/README.md) evaluates public LibriSpeech
+recordings with published phone alignments and DEMAND cafeteria noise at
+20/15/10/5 dB. A separately qualified Hillenbrand mirror study compares against
+original formant measurements. Read the [decision and limitations](eval-results/decision.md),
+[detailed baseline](eval-results/baseline.md), and
+[real-speech browser checks](eval-results/browser-verification.md).
+
+The measured consonant leakage remains a limitation. No nasal gate, F3 display,
+or estimator threshold change was justified by this small study. Under Tracking
+details, **Consonant cue preview** is off by default and shows scripted rent/ween
+sound-order cues in a separate lane. It is not microphone recognition and does
+not change plotted points. Do not treat it as nasal detection.
+
+Use `MAPPER_PORT=5181 npm run test:e2e` for an isolated dev test server and
+`MAPPER_PREVIEW=1 MAPPER_PORT=5182 npm run test:e2e -- --grep 'synthetic microphone|consonant cue prototype'`
+for these browser checks against the production build.
