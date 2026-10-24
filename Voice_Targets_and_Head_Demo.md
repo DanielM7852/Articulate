@@ -149,7 +149,16 @@ Ways to combine them without either side switching:
 - **Words as paths.** The path overlay from `head.ts` can be used for any word: run `model-path.ts` on a new word's takes and you get a new model. Paths need about 12 tracked points (≈0.3 s of voiced sound), so ask for slow, stretched words.
 - **Wording.** In-app copy here stays measurement-only and carries the "not a substitute for a licensed speech-language pathologist" line. `tests/game.test.ts` fails if `src/game/` uses words like "correct" or "accurate", or any network or storage API.
 
-## 5. Practical notes
+## 5. Known issues at the time of this push
+
+- **The model is a synthetic placeholder** (section 2). Rebuild it from real takes before relying on the threshold.
+- **One e2e test fails: "say head … three close ones match the model voice".** The synthetic "head" goes through the whole microphone pipeline and is drawn and scored, but lands at 0.29 against the placeholder's 0.27 threshold. Every other test passes: 109 unit tests (plus the 2 expected noisy-"oo" failures) and 15 e2e tests.
+- **The close zone ignores voice-sizing error.** The zone counts only the model's own repeat-to-repeat spread. The learner's voice size from "uh" + group is off by 0.38–0.55 reference radii (90th percentile, Amendment 3), which is about 0.5–0.8 /ɛ/ radii on the "head" path. So a learner who matches the model can still miss.
+  - Candidate fix, not decided: zone = √(model term² + sizing term²), with the sizing term taken from the learner's group.
+- **Page heading copy.** In Game mode, the page heading and intro (in `App.tsx`) still describe rings, which don't apply to "Say head". It was left alone because `App.tsx` is where the consonant work will conflict.
+- **No code review was run on this push.** It was pushed at Karsten's request to unblock work.
+
+## 6. Practical notes
 
 - **Merging `vowel-mapper/src/App.tsx`:** it will conflict with the in-progress consonant work, because both add an entry.
 - **Frame timestamps restart** when the mic restarts. Every lesson resets an attempt in progress on that event.
