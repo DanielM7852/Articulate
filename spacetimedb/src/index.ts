@@ -30,6 +30,58 @@ const acceptedEvents = table(
   { name: "accepted_events", public: false },
   { id: t.string().primaryKey(), sessionId: t.string() },
 );
+const learner = table(
+  { name: "learner", public: false },
+  {
+    identity: t.identity().primaryKey(),
+    profile_id: t.string().index(),
+    display_name: t.string(),
+    created_at: t.timestamp(),
+    updated_at: t.timestamp(),
+  },
+);
+const learnerAttempt = table(
+  { name: "learner_attempt", public: false },
+  {
+    attempt_id: t.string().primaryKey(),
+    learner: t.identity().index(),
+    profile_id: t.string().index(),
+    sound: t.string(),
+    status: t.string(),
+    started_at: t.timestamp(),
+    ended_at: t.option(t.timestamp()),
+    summary: t.string(),
+  },
+);
+const metricBatch = table(
+  { name: "metric_batch", public: false },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    attempt_id: t.string().index(),
+    kind: t.string(),
+    seq: t.u32(),
+    frame_count: t.u32(),
+    frames: t.string(),
+    received_at: t.timestamp(),
+  },
+);
+const coachTurn = table(
+  { name: "coach_turn", public: false },
+  {
+    attempt_id: t.string().primaryKey(),
+    profile_id: t.string().index(),
+    created_at: t.timestamp(),
+    decision: t.string(),
+  },
+);
+const learnerNote = table(
+  { name: "learner_note", public: false },
+  {
+    profile_id: t.string().primaryKey(),
+    notes: t.string(),
+    updated_at: t.timestamp(),
+  },
+);
 const db = schema({
   backend,
   sessions,
@@ -37,6 +89,11 @@ const db = schema({
   coachingDecisions,
   cueOutcomes,
   acceptedEvents,
+  learner,
+  learnerAttempt,
+  metricBatch,
+  coachTurn,
+  learnerNote,
 });
 export default db;
 
@@ -163,5 +220,173 @@ export const commit_event = db.reducer(
     if (current) ctx.db.sessions.id.update(next);
     else ctx.db.sessions.insert(next);
     ctx.db.acceptedEvents.insert({ id: e.event_id, sessionId: e.session_id });
+  },
+);
+
+const encoder = new TextEncoder();
+const byteLength = (v: string) => encoder.encode(v).length;
+const profileIdRe = /^[A-Za-z0-9_.:@-]{1,64}$/;
+
+function parseJsonObject(text: string, what: string): void {
+  if (byteLength(text) > 16384) throw new Error(`${what} too large`);
+  let v: unknown;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    throw new Error(`${what} is not valid JSON`);
+  }
+  if (typeof v !== "object" || v === null || Array.isArray(v))
+    throw new Error(`${what} must be a JSON object`);
+}
+
+export const register_learner = db.reducer(
+  { profile_id: t.string(), display_name: t.string() },
+  (ctx, { profile_id, display_name }) => {
+    if (!profileIdRe.test(profile_id))
+      throw new Error("invalid profile_id: 1-64 chars of [A-Za-z0-9_.:@-]");
+    if (display_name.length > 80)
+      throw new Error("display_name too long (max 80)");
+    const existing = ctx.db.learner.identity.find(ctx.sender);
+    if (existing)
+      ctx.db.learner.identity.update({
+        ...existing,
+        profile_id,
+        display_name,
+        updated_at: ctx.timestamp,
+      });
+    else
+      ctx.db.learner.insert({
+        identity: ctx.sender,
+        profile_id,
+        display_name,
+        created_at: ctx.timestamp,
+        updated_at: ctx.timestamp,
+      });
+  },
+);
+
+export const begin_attempt = db.reducer(
+  { attempt_id: t.string(), sound: t.string() },
+  (ctx, { attempt_id, sound }) => {
+    const me = ctx.db.learner.identity.find(ctx.sender);
+    if (!me) throw new Error("not a registered learner");
+    if (!uuid.test(attempt_id)) throw new Error("attempt_id must be a UUID");
+    if (!/^[a-z]{1,16}$/.test(sound))
+      throw new Error("invalid sound: 1-16 chars of [a-z]");
+    if (ctx.db.learnerAttempt.attempt_id.find(attempt_id))
+      throw new Error("attempt already exists");
+    ctx.db.learnerAttempt.insert({
+      attempt_id,
+      learner: ctx.sender,
+      profile_id: me.profile_id,
+      sound,
+      status: "open",
+      started_at: ctx.timestamp,
+      ended_at: undefined,
+      summary: "",
+    });
+  },
+);
+
+export const push_metrics = db.reducer(
+  {
+    attempt_id: t.string(),
+    kind: t.string(),
+    seq: t.u32(),
+    frames_json: t.string(),
+  },
+  (ctx, { attempt_id, kind, seq, frames_json }) => {
+    const attempt = ctx.db.learnerAttempt.attempt_id.find(attempt_id);
+    if (!attempt) throw new Error("unknown attempt");
+    if (!attempt.learner.isEqual(ctx.sender))
+      throw new Error("not attempt owner");
+    if (attempt.status !== "open") throw new Error("attempt is not open");
+    if (kind !== "audio" && kind !== "video")
+      throw new Error("kind must be audio or video");
+    if (byteLength(frames_json) > 32768) throw new Error("frames too large");
+    let frames: unknown;
+    try {
+      frames = JSON.parse(frames_json);
+    } catch {
+      throw new Error("frames_json is not valid JSON");
+    }
+    if (!Array.isArray(frames) || frames.length < 1 || frames.length > 200)
+      throw new Error("frames_json must be a JSON array of 1-200 frames");
+    for (const f of frames)
+      if (typeof f !== "object" || f === null || Array.isArray(f))
+        throw new Error("each frame must be a JSON object");
+    for (const b of ctx.db.metricBatch.attempt_id.filter(attempt_id))
+      if (b.kind === kind && b.seq === seq) return;
+    ctx.db.metricBatch.insert({
+      id: 0n,
+      attempt_id,
+      kind,
+      seq,
+      frame_count: frames.length,
+      frames: frames_json,
+      received_at: ctx.timestamp,
+    });
+  },
+);
+
+export const end_attempt = db.reducer(
+  { attempt_id: t.string() },
+  (ctx, { attempt_id }) => {
+    const attempt = ctx.db.learnerAttempt.attempt_id.find(attempt_id);
+    if (!attempt) throw new Error("unknown attempt");
+    if (!attempt.learner.isEqual(ctx.sender))
+      throw new Error("not attempt owner");
+    if (attempt.status !== "open") return;
+    ctx.db.learnerAttempt.attempt_id.update({
+      ...attempt,
+      status: "ended",
+      ended_at: ctx.timestamp,
+    });
+  },
+);
+
+export const record_coach_turn = db.reducer(
+  {
+    attempt_id: t.string(),
+    summary_json: t.string(),
+    decision_json: t.string(),
+  },
+  (ctx, { attempt_id, summary_json, decision_json }) => {
+    const principal = ctx.db.backend.id.find(0);
+    if (!principal || !ctx.sender.isEqual(principal.identity))
+      throw new Error("backend only");
+    const attempt = ctx.db.learnerAttempt.attempt_id.find(attempt_id);
+    if (!attempt) throw new Error("unknown attempt");
+    parseJsonObject(summary_json, "summary_json");
+    parseJsonObject(decision_json, "decision_json");
+    ctx.db.learnerAttempt.attempt_id.update({
+      ...attempt,
+      summary: summary_json,
+      status: "coached",
+    });
+    const row = {
+      attempt_id,
+      profile_id: attempt.profile_id,
+      created_at: ctx.timestamp,
+      decision: decision_json,
+    };
+    if (ctx.db.coachTurn.attempt_id.find(attempt_id))
+      ctx.db.coachTurn.attempt_id.update(row);
+    else ctx.db.coachTurn.insert(row);
+  },
+);
+
+export const set_learner_note = db.reducer(
+  { profile_id: t.string(), notes_json: t.string() },
+  (ctx, { profile_id, notes_json }) => {
+    const principal = ctx.db.backend.id.find(0);
+    if (!principal || !ctx.sender.isEqual(principal.identity))
+      throw new Error("backend only");
+    if (!profileIdRe.test(profile_id)) throw new Error("invalid profile_id");
+    parseJsonObject(notes_json, "notes_json");
+    const row = { profile_id, notes: notes_json, updated_at: ctx.timestamp };
+    if (ctx.db.learnerNote.profile_id.find(profile_id))
+      ctx.db.learnerNote.profile_id.update(row);
+    else ctx.db.learnerNote.insert(row);
   },
 );
