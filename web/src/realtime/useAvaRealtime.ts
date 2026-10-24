@@ -37,6 +37,8 @@ export interface UseAvaRealtimeOptions {
   /** Every spoken sentence, for captions and guide lip sync (same pattern as useCoachSequence). */
   onSpeech?: (speech: TeacherSpeech, text: string) => void;
   onUserTranscript?: (text: string) => void;
+  /** The learner started speaking (semantic VAD) while not in practice mode. Fires even when bargeIn is off. */
+  onLearnerSpeech?: () => void;
   sessionOptions?: RealtimeSessionOptions;
   speed?: number;
   /** Stop Ava when the learner starts speaking. Default true. */
@@ -47,6 +49,10 @@ export interface UseAvaRealtimeOptions {
 
 const ECHO_WINDOW_MS = 4000;
 const ECHO_OVERLAP = 0.6;
+
+/** A response we asked for (or VAD will start) counts as pending this long while waiting for response.created. */
+const PENDING_EXPIRY_MS = 6000;
+const IDLE_POLL_MS = 80;
 
 const RESULT_INSTRUCTIONS =
   'Relay this caption to the learner in your own words, in one or two short sentences. Keep its meaning and direction. ' +
@@ -72,6 +78,11 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
   const dropped = useRef(new Set<string>());
   const recentAva = useRef<{ text: string; at: number }[]>([]);
   const lastAttemptId = useRef<string | null>(null);
+  /** Time we asked for a response (or the learner's turn ended) and response.created has not arrived yet; 0 = none. */
+  const awaitingSince = useRef(0);
+  const learnerSpeaking = useRef(false);
+  /** Count of sentences that have started playing; compare before/after a relay to see whether Ava started speaking. */
+  const spokenCount = useRef(0);
 
   // ---- speech queue
 
@@ -86,6 +97,7 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
       const text = q.items.shift()!;
       const sp = speakTeacher(text, opts.current.speed === undefined ? undefined : { speed: opts.current.speed });
       q.current = sp;
+      spokenCount.current += 1;
       setSpeech(sp);
       setCaption(text);
       recentAva.current.push({ text, at: Date.now() });
@@ -167,16 +179,25 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
   const connect = useCallback(async () => {
     if (sessionRef.current && (sessionRef.current.state === 'open' || sessionRef.current.state === 'connecting')) return;
     setError(null);
+    awaitingSince.current = 0;
+    learnerSpeaking.current = false;
     const session = new RealtimeSession(opts.current.sessionOptions);
     sessionRef.current = session;
     session.on('state', setState);
     session.on('error', (m) => setError(m));
     session.on('textDelta', ({ responseId, delta }) => {
       if (dropped.current.has(responseId)) return;
+      if (session.practiceMode) {
+        // Ava stays silent while the board is live; a late response (for example after a relay fallback) is discarded.
+        dropResponse(responseId);
+        session.cancelResponse();
+        return;
+      }
       let sp = splitters.current.get(responseId);
       if (!sp) { sp = new SentenceSplitter(); splitters.current.set(responseId, sp); }
       enqueue(sp.push(delta));
     });
+    session.on('responseCreated', () => { awaitingSince.current = 0; });
     session.on('textDone', ({ responseId }) => {
       const sp = splitters.current.get(responseId);
       if (sp && !dropped.current.has(responseId)) enqueue(sp.flush());
@@ -186,9 +207,20 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
       if (sp && !dropped.current.has(responseId)) enqueue(sp.flush());
       splitters.current.delete(responseId);
       const wasDropped = dropped.current.delete(responseId);
-      if (status === 'completed' && !wasDropped && functionCalls.length) void runTools(session, functionCalls);
+      if (status === 'completed' && !wasDropped && functionCalls.length) {
+        awaitingSince.current = Date.now(); // the tool turn is followed by another response
+        void runTools(session, functionCalls);
+      }
+    });
+    session.on('speechStopped', () => {
+      learnerSpeaking.current = false;
+      if (!session.practiceMode) awaitingSince.current = Date.now(); // VAD is about to start a response
     });
     session.on('speechStarted', () => {
+      if (!session.practiceMode) {
+        learnerSpeaking.current = true;
+        try { opts.current.onLearnerSpeech?.(); } catch { /* caller errors never break the session */ }
+      }
       if (!(opts.current.bargeIn ?? true)) return;
       if (queue.current.running || session.responding) {
         stopSpeaking();
@@ -212,6 +244,8 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
     });
     try {
       await session.connect();
+      // disconnect() or unmount while connecting: do not leave an orphaned live session behind.
+      if (sessionRef.current !== session) session.disconnect();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Realtime connection failed.');
     }
@@ -223,6 +257,8 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
     sessionRef.current = null;
     splitters.current.clear();
     dropped.current.clear();
+    awaitingSince.current = 0;
+    learnerSpeaking.current = false;
     setPractice(false);
   }, [stopSpeaking]);
 
@@ -262,11 +298,46 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
   }, [setPracticeMode]);
 
   /** Attempt end, direct path: the lesson already has the coaching; skip the tool turn and relay it. */
-  const relayResult = useCallback(async (coaching: AvaCoaching, attemptId?: string) => {
+  const relayResult = useCallback(async (coaching: AvaCoaching, attemptId?: string, instructions?: string) => {
     if (attemptId) lastAttemptId.current = attemptId;
     await setPracticeMode(false);
-    sessionRef.current?.injectResult(`Coaching result for the attempt the learner just finished: ${JSON.stringify(coaching)}`, RESULT_INSTRUCTIONS);
+    const session = sessionRef.current;
+    if (!session || session.state !== 'open') throw new Error('Realtime session is not open.');
+    awaitingSince.current = Date.now(); // pending until response.created, so waitForIdle cannot slip through the gap
+    session.injectResult(
+      `Coaching result for the attempt the learner just finished: ${JSON.stringify(coaching)}`,
+      instructions ?? RESULT_INSTRUCTIONS,
+    );
   }, [setPracticeMode]);
+
+  /** No response pending or generating, no learner turn in progress, sentence queue empty, nothing playing. */
+  const isIdle = useCallback(() => {
+    const session = sessionRef.current;
+    const q = queue.current;
+    if (!session) return true;
+    const pending = awaitingSince.current !== 0 && Date.now() - awaitingSince.current < PENDING_EXPIRY_MS;
+    return !pending && !learnerSpeaking.current && !session.responding && !q.running && q.items.length === 0 && !q.current;
+  }, []);
+
+  /**
+   * Resolves true once idle (see isIdle); false on timeout or when the session is not open (closed, failed or never
+   * connected). timeoutMs 0 is a single non-blocking check.
+   */
+  const waitForIdle = useCallback((timeoutMs: number): Promise<boolean> => new Promise<boolean>((resolve) => {
+    const started = Date.now();
+    const check = () => {
+      const session = sessionRef.current;
+      if (!session || session.state !== 'open') { resolve(false); return true; }
+      if (isIdle()) { resolve(true); return true; }
+      if (Date.now() - started >= timeoutMs) { resolve(false); return true; }
+      return false;
+    };
+    if (check()) return;
+    const timer = setInterval(() => { if (check()) clearInterval(timer); }, IDLE_POLL_MS);
+  }), [isIdle]);
+
+  /** Number of sentences that have started playing; read it before a relay and compare to see if Ava began speaking. */
+  const speechCount = useCallback(() => spokenCount.current, []);
 
   const sendUserText = useCallback((text: string) => {
     stopSpeaking();
@@ -290,6 +361,8 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
     relayResult,
     sendUserText,
     stopSpeaking,
+    waitForIdle,
+    speechCount,
     session: () => sessionRef.current,
   };
 }
