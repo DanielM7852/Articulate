@@ -28,8 +28,8 @@
   "voices": [
     {
       "id": "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
-      "name": "Skylar (Ava)",
-      "isAva": true,
+      "name": "Skylar (previous Ava)",
+      "isAva": false,
       "included": false,
       "reason": "height_i_not_above_a",
       "clips": 12
@@ -84,8 +84,8 @@
     },
     {
       "id": "2a12b36c-7f9b-4c3a-9f7a-72731b15323a",
-      "name": "Ella",
-      "isAva": false,
+      "name": "Ella (Ava)",
+      "isAva": true,
       "included": true,
       "reason": null,
       "clips": 12

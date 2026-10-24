@@ -47,7 +47,9 @@ class Settings(BaseSettings):
     cartesia_api_key: str | None = None
     cartesia_voice_id: str | None = None
     # Skylar, the public en-US example voice in the Sonic 3.6 docs. Used only when a key is set and no voice id is.
-    cartesia_default_voice_id: str = "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
+    # Ava's voice: Ella, chosen because SPARC reads her ee/oo/ah most distinctly and consistently of the reference
+    # voices (see app/live/articulation_reference.json). The previous default, Skylar, failed that check.
+    cartesia_default_voice_id: str = "2a12b36c-7f9b-4c3a-9f7a-72731b15323a"
     cartesia_version: str = "2026-08-14"
     cartesia_model_id: str = "sonic-3.6"
     store_dir: str = ".local_store"
