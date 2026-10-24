@@ -1,4 +1,6 @@
 @import './tokens.css';
+@import './onboarding.css';
+@import './practice-studio.css';
 
 *,
 *::before,
@@ -241,7 +243,7 @@ a {
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease, transform var(--dur-press) var(--ease-out);
   text-decoration: none;
 }
 .btn:hover {
@@ -249,7 +251,7 @@ a {
   background: #fdfdfc;
 }
 .btn:active {
-  transform: translateY(1px);
+  transform: scale(0.97);
 }
 .btn--primary {
   background: var(--color-navy);
@@ -481,167 +483,6 @@ button.badge {
   gap: 14px;
 }
 
-/* ---------- Choice cards (quiz, plan) ---------- */
-.choice {
-  position: relative;
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  text-align: left;
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  padding: 22px;
-  cursor: pointer;
-  min-height: 92px;
-  width: 100%;
-  transition: border-color 120ms ease, background 120ms ease;
-}
-.choice:hover {
-  border-color: var(--color-navy-mist);
-}
-.choice[aria-checked='true'] {
-  background: var(--color-navy-soft);
-  border: 1.5px solid var(--color-navy);
-  padding: 21.5px;
-}
-.choice--media {
-  flex-direction: column;
-  min-height: 142px;
-}
-.choice-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  flex: 1;
-  min-width: 0;
-}
-.choice-title {
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--color-ink);
-}
-.choice-desc {
-  font-size: 13px;
-  color: var(--color-muted);
-  line-height: 1.6;
-}
-.choice-icon {
-  color: var(--color-navy);
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-.choice-indicator {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid var(--color-line);
-  background: var(--color-surface);
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.choice[aria-checked='true'] .choice-indicator {
-  background: var(--color-navy);
-  border-color: var(--color-navy);
-  color: #fff;
-}
-.choice--media .choice-indicator {
-  position: absolute;
-  top: 15px;
-  right: 15px;
-}
-.choice-media {
-  width: 100%;
-  height: 92px;
-  border-radius: var(--radius-media);
-  background: var(--color-navy);
-  color: var(--color-navy-mist);
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* ---------- Quiz layout ---------- */
-.quiz-layout {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  gap: 64px;
-  padding: 42px 56px;
-  min-height: calc(100vh - var(--nav-height) - var(--footer-height));
-}
-.journey {
-  background: var(--color-navy);
-  border-radius: var(--radius-panel);
-  padding: 30px;
-  color: var(--color-ivory);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 24px;
-  min-height: 640px;
-  box-shadow: var(--shadow-panel);
-}
-.journey .eyebrow {
-  color: var(--color-navy-mist);
-}
-.journey-steps {
-  list-style: none;
-  padding: 20px 0 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.journey-step {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-  opacity: 0.7;
-}
-.journey-step[aria-current='step'] {
-  opacity: 1;
-}
-.journey-marker {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--color-navy-deep);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-.journey-step[aria-current='step'] .journey-marker {
-  background: var(--color-ivory);
-  color: var(--color-navy);
-}
-.question {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 24px;
-  padding-top: 8px;
-}
-.progress-bar {
-  display: flex;
-  gap: 6px;
-}
-.progress-bar span {
-  flex: 1;
-  height: 3px;
-  background: var(--color-line);
-}
-.progress-bar span.done {
-  background: var(--color-navy);
-}
-
 /* ---------- Lesson ---------- */
 .lesson-steps {
   background: var(--color-surface);
@@ -685,22 +526,6 @@ button.badge {
 .lesson-step-arrow {
   font-size: 14px;
   color: var(--color-muted);
-}
-
-.prompt-bar {
-  background: var(--color-navy);
-  border-radius: var(--radius-card);
-  padding: 22px;
-  display: grid;
-  grid-template-columns: minmax(220px, 307px) auto minmax(0, 1fr);
-  gap: 24px;
-  align-items: center;
-  color: var(--color-ivory);
-}
-.prompt-word {
-  font-family: var(--font-serif);
-  font-size: 26px;
-  line-height: 1.2;
 }
 
 .meter {
@@ -818,13 +643,6 @@ button.badge {
   top: 8px;
 }
 
-.metric-value {
-  font-size: 25px;
-  font-weight: 500;
-  color: var(--color-navy);
-  line-height: 1.1;
-}
-
 .history-row {
   display: grid;
   grid-template-columns: 1.1fr 1.4fr auto;
@@ -886,18 +704,7 @@ button.badge {
   .page {
     padding: 32px 24px;
   }
-  .quiz-layout {
-    grid-template-columns: 1fr;
-    gap: 28px;
-    padding: 28px 24px;
-  }
-  .journey {
-    min-height: 0;
-  }
   .grid-2 {
-    grid-template-columns: 1fr;
-  }
-  .prompt-bar {
     grid-template-columns: 1fr;
   }
   .lesson-steps {
@@ -1071,99 +878,11 @@ button.badge {
   }
 }
 
-/* ---------- Welcome ---------- */
-.welcome {
-  display: grid;
-  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
-  gap: 72px;
-  align-items: center;
-  padding: 56px;
-}
-.welcome-panel {
-  min-height: 680px;
-}
-@media (max-width: 1100px) {
-  .welcome {
-    grid-template-columns: 1fr;
-    padding: 32px 24px;
-    gap: 32px;
-  }
-  .welcome-panel {
-    min-height: 0;
-  }
-}
-
-/* ---------- Setup ---------- */
-.setup-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 600px) minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
-}
+/* ---------- Native selects styled as buttons ---------- */
 select.btn {
   appearance: auto;
 }
-@media (max-width: 1100px) {
-  .setup-grid {
-    grid-template-columns: 1fr;
-  }
-}
 
-/* ---------- Plan ---------- */
-.plan {
-  display: grid;
-  grid-template-columns: minmax(0, 730px) minmax(0, 1fr);
-  gap: 56px;
-  padding: 56px;
-  align-items: stretch;
-}
-.sound-choice {
-  flex-direction: column;
-  gap: 12px;
-  border-radius: var(--radius-panel);
-  padding: 20px;
-}
-.sound-choice[aria-checked='true'] {
-  padding: 19.5px;
-}
-.field select.btn {
-  justify-content: flex-start;
-  padding-right: 16px;
-}
-@media (max-width: 1100px) {
-  .plan {
-    grid-template-columns: 1fr;
-    padding: 32px 24px;
-  }
-}
-
-/* ---------- Practice ---------- */
-.practice-row {
-  display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
-  gap: 24px;
-  align-items: stretch;
-}
-.practice-row--even {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 28px;
-}
-@media (max-width: 1100px) {
-  .practice-row,
-  .practice-row--even {
-    grid-template-columns: 1fr;
-  }
-}
-@media (max-width: 640px) {
-  .metrics {
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-}
 
 /* ---------- Summary ---------- */
 .summary-grid {
