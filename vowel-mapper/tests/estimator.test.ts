@@ -101,3 +101,58 @@ describe('formant estimation from an audio frame', () => {
     expect(estimateFormants(frame, 48000, { ceilingHz: -1, minimumRms: 0.008 }).valid).toBe(false);
   });
 });
+
+describe('third formant', () => {
+  // Includes r-coloured vowels, whose F3 sits close above F2.
+  it.each([
+    [300, 2300, 3000], [400, 2600, 3300], [540, 1650, 2500], [675, 1320, 2500], [750, 1200, 2600],
+    [570, 840, 2400], [370, 930, 2800], [470, 1300, 1700], [450, 1150, 1600], [500, 1400, 1900],
+  ])('reports F3 of a clean %i / %i / %i Hz vowel on every accepted frame', (...formants) => {
+    for (const pitch of [100, 160]) {
+      const signal = vowelSignal({ formants, pitch, seconds: 0.3 });
+      for (let start = 0; start + 2400 <= signal.length; start += 1200) {
+        const estimate = estimateFormants(signal.slice(start, start + 2400), 48000);
+        if (!estimate.valid) throw new Error(estimate.reason);
+        expect(estimate.f3, `pitch ${pitch}`).toBeDefined();
+        expect(Math.abs(estimate.f3! - formants[2]), `pitch ${pitch}`).toBeLessThan(150);
+      }
+    }
+  });
+
+  // Noise broadens a close F3 past a formant's bandwidth; the spare pole above must not be promoted into its place.
+  const misplacedF3 = (formants: number[], snrDb: number) => {
+    const misplaced: string[] = [];
+    for (const pitch of [100, 160, 220]) {
+      const signal = withNoise(vowelSignal({ formants, pitch, seconds: 0.5 }), snrDb);
+      for (let start = 0; start + 2400 <= signal.length; start += 1200) {
+        const estimate = estimateFormants(signal.slice(start, start + 2400), 48000);
+        if (estimate.valid && estimate.f3 !== undefined && Math.abs(estimate.f3 - formants[2]) >= 250) {
+          misplaced.push(`pitch ${pitch}: ${Math.round(estimate.f3)}`);
+        }
+      }
+    }
+    return misplaced;
+  };
+
+  it.each([
+    { formants: [470, 1300, 1700], snrDb: 20 }, { formants: [470, 1300, 1700], snrDb: 15 },
+    { formants: [450, 1150, 1600], snrDb: 20 }, { formants: [450, 1150, 1600], snrDb: 15 },
+    { formants: [500, 1400, 1900], snrDb: 20 },
+    { formants: [675, 1320, 2500], snrDb: 20 }, { formants: [675, 1320, 2500], snrDb: 15 },
+  ])('withholds rather than misplaces F3 of a noisy $formants Hz vowel ($snrDb dB SNR)', ({ formants, snrDb }) => {
+    expect(misplacedF3(formants, snrDb)).toEqual([]);
+  });
+
+  // Known gap: a narrow pole near 3.6 kHz can stand in for a lost 1.9 kHz F3.
+  it.fails('KNOWN GAP: misplaces F3 of a noisy 500 / 1400 / 1900 Hz vowel at 15 dB SNR', () => {
+    expect(misplacedF3([500, 1400, 1900], 15)).toEqual([]);
+  });
+
+  it('keeps level and voicing on clipped frames while withholding formants', () => {
+    const clipped = Float32Array.from(vowelSignal().slice(-2400), (value) => Math.max(-1, Math.min(1, value * 4)));
+    const estimate = estimateFormants(clipped, 48000);
+    expect(estimate).toMatchObject({ valid: false, reason: 'clipped' });
+    expect(estimate.rms).toBeGreaterThan(0.1);
+    expect(estimate.periodicity).toBeGreaterThan(0.65);
+  });
+});
