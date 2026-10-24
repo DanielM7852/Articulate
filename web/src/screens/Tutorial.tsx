@@ -172,6 +172,7 @@ export default function Tutorial() {
             tracking={graph.tracking}
             statusLabel={solo ? (live.tracking ? 'Tracking your vowel' : 'Listening') : phase === 'watch' ? 'Watch the guide' : 'Example'}
             holdSec={Math.min(graph.holdSec, HOLD_GOAL_SEC)}
+            emptyHint={solo ? 'Hold “ee” and your sound appears here.' : 'Watch the example.'}
           />
           {micBlocked && micMessage && (
             <span className="lp-overlay lp-overlay--bl lp-pill" role="alert">
