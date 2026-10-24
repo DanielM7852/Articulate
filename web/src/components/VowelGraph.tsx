@@ -1,9 +1,13 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { VowelPoint } from '@vowel-mapper/audio/tracker';
-import { buildTrail, sampleKey, trailOpacity } from '@vowel-mapper/components/trail';
+import { buildRibbons, buildTrail, sampleKey, trailHead, trailOpacity } from '@vowel-mapper/components/trail';
 import { useTrailAnimation } from '@vowel-mapper/components/useTrailAnimation';
 import { SOUNDS, SOUND_ORDER, type SoundId } from '../state/types';
 import { HOLD_GOAL_SEC, TARGETS, inTarget, project, targetEllipse } from '../vowel/targets';
+
+/** Ink widths in CSS pixels: a tapered comet tail while live, an even line otherwise. */
+const INK_WIDTH = 5;
+const STATIC_WIDTH = 2;
 
 /**
  * Live F1/F2 graph: the learner's vowel as a cursor on the vowel space, a short
@@ -37,7 +41,6 @@ export function VowelGraph({
   /** Second line of the empty state; defaults to the recording hint. */
   emptyHint?: string;
 }) {
-  const id = useId();
   const plotRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -51,11 +54,20 @@ export function VowelGraph({
     return () => ro.disconnect();
   }, [hidden]);
 
-  // Cosmetic only: geometry and fade never feed tracking, targets or scoring.
-  const { now, arrivals, reducedMotion } = useTrailAnimation(trace, point, live);
-  const geometry = useMemo(() => buildTrail(trace, point, !reducedMotion, project), [trace, point, reducedMotion]);
+  // Cosmetic only: the eased head, geometry and fade never feed tracking, targets or
+  // scoring; `inside` and the hold ring below use the accepted point. Ink is built in
+  // CSS pixels so the ribbon keeps an even width under the stretched plot.
+  const { now, arrivals, headMs, reducedMotion } = useTrailAnimation(trace, point, live);
+  const toPx = useCallback(
+    (p: { f1: number; f2: number }) => {
+      const c = project(p);
+      return { x: (c.x / 100) * size.w, y: (c.y / 100) * size.h };
+    },
+    [size.w, size.h],
+  );
+  const geometry = useMemo(() => buildTrail(trace, point, !reducedMotion, toPx), [trace, point, reducedMotion, toPx]);
   const opacity = (sample: VowelPoint) => (live ? trailOpacity(now - (arrivals.get(sampleKey(sample)) ?? now)) : 1);
-  const strokes = geometry.filter((stroke) => opacity(stroke.to) > 0);
+  const ribbons = buildRibbons(geometry, headMs, (sample) => (live ? INK_WIDTH * opacity(sample) : STATIC_WIDTH));
 
   if (hidden) {
     return (
@@ -67,15 +79,16 @@ export function VowelGraph({
 
   const target = TARGETS[sound];
   const ellipse = targetEllipse(target);
-  const cursor = point ? project(point) : null;
+  // Display position only: eased along the trail toward the accepted point, which it reaches when movement stops.
+  const cursor = point ? (trailHead(geometry, headMs) ?? toPx(point)) : null;
   const inside = point !== null && tracking && inTarget(point, target);
   const holdProgress = inside ? Math.min(1, holdSec / HOLD_GOAL_SEC) : 0;
 
   const cursorStyle: CSSProperties | undefined = cursor
     ? {
-        transform: `translate(${(cursor.x / 100) * size.w}px, ${(cursor.y / 100) * size.h}px)`,
+        transform: `translate(${cursor.x}px, ${cursor.y}px)`,
         // Live: the cursor fades with its newest sample (and stays dimmed when not confidently tracking).
-        ...(live ? { opacity: opacity(point!) * (tracking ? 1 : 0.3), transition: 'transform 90ms linear' } : {}),
+        ...(live ? { opacity: opacity(point!) * (tracking ? 1 : 0.3) } : {}),
       }
     : undefined;
 
@@ -103,33 +116,14 @@ export function VowelGraph({
             }).join(' ')}
           />
           <ellipse className="vg-target" cx={ellipse.cx} cy={ellipse.cy} rx={ellipse.rx} ry={ellipse.ry} />
-          {live && (
-            <defs>
-              {strokes.map((stroke) => (
-                <linearGradient
-                  key={stroke.key}
-                  id={`${id}-${stroke.key}`}
-                  gradientUnits="userSpaceOnUse"
-                  x1={stroke.start.x}
-                  y1={stroke.start.y}
-                  x2={stroke.end.x}
-                  y2={stroke.end.y}
-                >
-                  <stop offset="0" style={{ stopColor: 'var(--color-navy)' }} stopOpacity={opacity(stroke.from)} />
-                  <stop offset="1" style={{ stopColor: 'var(--color-navy)' }} stopOpacity={opacity(stroke.to)} />
-                </linearGradient>
-              ))}
-            </defs>
-          )}
-          {strokes.map((stroke) => (
-            <path
-              key={stroke.key}
-              className={`vg-trail${live ? ' is-live' : ''}`}
-              d={stroke.d}
-              stroke={live ? `url(#${id}-${stroke.key})` : undefined}
-            />
-          ))}
         </svg>
+        {ribbons.length > 0 && size.w > 0 && size.h > 0 && (
+          <svg className="vg-ink" viewBox={`0 0 ${size.w} ${size.h}`} aria-hidden="true">
+            {ribbons.map((ribbon) => (
+              <path key={ribbon.key} className={`vg-trail${live ? ' is-live' : ''}`} d={ribbon.d} />
+            ))}
+          </svg>
+        )}
 
         {SOUND_ORDER.map((id) => {
           const c = project(TARGETS[id]);

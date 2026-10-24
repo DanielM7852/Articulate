@@ -11,7 +11,20 @@ const render = (page: Page, props: Partial<VowelPlotProps> = {}) => page.evaluat
   trace, point: trace.at(-1)!, faded: false, live: true, ...props,
 });
 const pending = (page: Page) => page.evaluate(() => window.trailHarness.pendingFrames());
-const lastOpacity = (page: Page) => page.locator('linearGradient stop[offset="1"]').last().getAttribute('stop-opacity').then(Number);
+const outlines = (page: Page) => page.locator('.vowel-trail').evaluateAll((paths) => paths.map((p) => p.getAttribute('d')!));
+const vertices = (d: string) => {
+  const xy = d.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+  return Array.from({ length: xy.length / 2 }, (_, i) => ({ x: xy[2 * i], y: xy[2 * i + 1] }));
+};
+/** Total ink area (shoelace): shrinks as ribbons taper with age. */
+const inkArea = async (page: Page) => (await outlines(page)).reduce((total, d) => {
+  const points = vertices(d);
+  const twice = points.reduce((sum, p, i) => {
+    const q = points[(i + 1) % points.length];
+    return sum + p.x * q.y - q.x * p.y;
+  }, 0);
+  return total + Math.abs(twice) / 2;
+}, 0);
 
 test.beforeEach(async ({ page }) => {
   test.skip(process.env.MAPPER_PREVIEW === '1', 'Deterministic component harness uses the Vite dev server.');
@@ -24,20 +37,25 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('a glide has connected curves and an age gradient; stalled ink fully evaporates', async ({ page }) => {
+test('a glide is one smooth tapered ribbon; stalled ink fully evaporates', async ({ page }) => {
   await render(page);
-  await expect(page.locator('.vowel-trail')).toHaveCount(2);
-  const paths = await page.locator('.vowel-trail').evaluateAll((paths) => paths.map((p) => p.getAttribute('d')!));
-  expect(paths.every((d) => d.includes(' C'))).toBe(true);
-  expect(paths[1].split(' C')[0].slice(1)).toBe(paths[0].split(' ').at(-1));
-  const stops = await page.locator('linearGradient stop').evaluateAll((stops) => stops.map((s) => Number(s.getAttribute('stop-opacity'))));
-  expect(stops[0]).toBeLessThan(stops.at(-1)!);
+  await expect(page.locator('.vowel-trail')).toHaveCount(1);
+  await expect(page.locator('linearGradient')).toHaveCount(0);
+  const [d] = await outlines(page);
+  expect(d).toMatch(/^M.* Z$/);
+  // Outline runs tail→head on one side, head→tail on the other: the older tail is narrower.
+  const points = vertices(d);
+  const half = points.length / 2;
+  const width = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+  expect(width(points[0], points.at(-1)!)).toBeLessThan(width(points[half - 1], points[half]));
+  // Curved: the glide is subdivided, not drawn as two straight pieces.
+  expect(points.length).toBeGreaterThan(6);
   await page.screenshot({ path: 'test-results/trail-glide.png' });
-  const initial = await lastOpacity(page);
+  const initial = await inkArea(page);
   await page.clock.runFor(1000);
-  expect(await lastOpacity(page)).toBeLessThan(initial);
+  expect(await inkArea(page)).toBeLessThan(initial);
   await page.clock.runFor(2100);
-  await expect(page.locator('.vowel-trail, linearGradient, [data-testid="cursor"]')).toHaveCount(0);
+  await expect(page.locator('.vowel-trail, [data-testid="cursor"]')).toHaveCount(0);
   expect(await pending(page)).toBe(0);
 });
 
@@ -45,29 +63,33 @@ test('a held vowel keeps the head steady, then a new segment starts without revi
   await render(page);
   await expect(page.getByTestId('cursor')).toBeVisible();
   const location = await page.getByTestId('cursor').getAttribute('transform');
+  const fresh = await inkArea(page);
   await page.clock.runFor(1500);
-  const oldOpacity = await lastOpacity(page);
   const held = { ...trace.at(-1)!, timestampMs: 525 };
   await render(page, { point: held });
   await expect(page.getByTestId('cursor')).toHaveAttribute('opacity', '1');
   await expect(page.getByTestId('cursor')).toHaveAttribute('transform', location!);
+  await expect(page.getByTestId('cursor')).toHaveAttribute('data-f1', String(held.f1));
   // Existing ink retains its age when audio timestamps resume behind wall time.
-  expect(Number(await page.locator('linearGradient stop[offset="1"]').nth(1).getAttribute('stop-opacity'))).toBeLessThanOrEqual(oldOpacity);
+  expect(await inkArea(page)).toBeLessThan(fresh * 0.8);
   const next = { timestampMs: 550, f1: 350, f2: 800, segment: 1 };
   await render(page, { trace: [...trace, held, next], point: next });
-  await expect(page.locator('.vowel-trail')).toHaveCount(3);
+  await expect(page.locator('.vowel-trail')).toHaveCount(1);
   await expect(page.locator('.vowel-trail[data-segment="1"]')).toHaveCount(0);
   await render(page, { trace: [...trace, held, next], point: { ...next, timestampMs: 575, f1: 400 } });
+  // The new stroke grows out from its first sample as the head eases in.
+  await page.clock.runFor(200);
   await expect(page.locator('.vowel-trail[data-segment="1"]')).toHaveCount(1);
+  await expect(page.getByTestId('cursor')).toHaveAttribute('data-f1', '400');
 });
 
 test('Finish restores the retained static trace; restart and unmount cancel animation', async ({ page }) => {
   await render(page);
-  await expect(page.locator('.vowel-trail')).toHaveCount(2);
+  await expect(page.locator('.vowel-trail')).toHaveCount(1);
   await page.clock.runFor(3100);
   await expect(page.locator('.vowel-trail')).toHaveCount(0);
   await render(page, { live: false });
-  await expect(page.locator('.vowel-trail')).toHaveCount(2);
+  await expect(page.locator('.vowel-trail')).toHaveCount(1);
   await expect(page.getByTestId('cursor')).toHaveAttribute('opacity', '1');
   expect(await pending(page)).toBe(0);
   const held = await page.locator('.vowel-plot').innerHTML();
@@ -77,7 +99,7 @@ test('Finish restores the retained static trace; restart and unmount cancel anim
   await expect(page.locator('.vowel-trail')).toHaveCount(0);
   expect(await pending(page)).toBe(0);
   await render(page);
-  await expect(page.locator('.vowel-trail')).toHaveCount(2);
+  await expect(page.locator('.vowel-trail')).toHaveCount(1);
   expect(await pending(page)).toBe(1);
   await page.evaluate(() => window.trailHarness.unmount());
   expect(await pending(page)).toBe(0);
@@ -85,23 +107,25 @@ test('Finish restores the retained static trace; restart and unmount cancel anim
 
 test('background time expires ink without replaying frames on return', async ({ page }) => {
   await render(page);
-  await expect(page.locator('.vowel-trail')).toHaveCount(2);
+  await expect(page.locator('.vowel-trail')).toHaveCount(1);
   await page.evaluate(() => window.trailHarness.visibility(true));
   expect(await pending(page)).toBe(0);
   await page.clock.runFor(5000);
   await page.evaluate(() => window.trailHarness.visibility(false));
-  await expect(page.locator('.vowel-trail, linearGradient')).toHaveCount(0);
+  await expect(page.locator('.vowel-trail')).toHaveCount(0);
   expect(await pending(page)).toBe(0);
 });
 
 test('reduced motion uses straight strokes, still fades, and clips ink on mobile and desktop', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await render(page);
-  await expect(page.locator('.vowel-trail').first()).toHaveAttribute('d', / L/);
+  // Straight strokes: one outline vertex per side per sample (3 samples, 6 vertices).
+  await expect(page.locator('.vowel-trail')).toHaveCount(1);
+  expect(vertices((await outlines(page))[0])).toHaveLength(6);
   expect(await pending(page)).toBe(0);
-  const initial = await lastOpacity(page);
+  const initial = await inkArea(page);
   await page.clock.runFor(1000);
-  expect(await lastOpacity(page)).toBeLessThan(initial);
+  expect(await inkArea(page)).toBeLessThan(initial);
   for (const width of [320, 390, 1280]) {
     await page.setViewportSize({ width, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
