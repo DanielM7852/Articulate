@@ -93,8 +93,23 @@ def timestamp_micros(value: Any) -> int:
     return 0
 
 
+def new_http_client(settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
+    """Long-lived pooled client (keeps TLS connections warm across requests)."""
+    return httpx.AsyncClient(
+        transport=transport,
+        timeout=8.0,
+        headers={"Authorization": f"Bearer {settings.spacetime_token or ''}"},
+    )
+
+
 class SpacetimeClient:
-    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        http: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._http = http
         self._base = f"{settings.spacetime_uri.rstrip('/')}/v1/database/{settings.spacetime_database}"
         self._token = settings.spacetime_token or ""
         self._transport = transport
@@ -108,8 +123,11 @@ class SpacetimeClient:
         )
 
     async def sql(self, query: str) -> list[dict[str, Any]]:
-        async with self._client() as client:
-            response = await client.post(f"{self._base}/sql", content=query.encode("utf-8"))
+        if self._http is not None:
+            response = await self._http.post(f"{self._base}/sql", content=query.encode("utf-8"))
+        else:
+            async with self._client() as client:
+                response = await client.post(f"{self._base}/sql", content=query.encode("utf-8"))
         if response.status_code >= 300:
             raise SpacetimeError(f"sql failed: HTTP {response.status_code}")
         try:
@@ -118,11 +136,11 @@ class SpacetimeClient:
             raise SpacetimeError("sql returned invalid JSON") from exc
 
     async def call(self, reducer: str, args: list[Any]) -> None:
-        async with self._client() as client:
-            response = await client.post(
-                f"{self._base}/call/{reducer}",
-                content=json.dumps(args),
-                headers={"Content-Type": "application/json"},
-            )
+        url, content, headers = f"{self._base}/call/{reducer}", json.dumps(args), {"Content-Type": "application/json"}
+        if self._http is not None:
+            response = await self._http.post(url, content=content, headers=headers)
+        else:
+            async with self._client() as client:
+                response = await client.post(url, content=content, headers=headers)
         if response.status_code >= 300:
             raise SpacetimeError(f"reducer {reducer} failed: HTTP {response.status_code}")

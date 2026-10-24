@@ -142,6 +142,7 @@ class LiveCoachResponse(BaseModel):
     nextAction: NextAction
     evidence: list[EvidenceItem]
     persisted: bool = False
+    timingsMs: dict[str, int] | None = None
 
 
 class CoachDecision(BaseModel):

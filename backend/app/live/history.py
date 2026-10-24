@@ -169,7 +169,7 @@ class SpacetimeHistory:
             return False
 
 
-def build_history(settings: Settings, transport=None) -> LearnerHistory:
+def build_history(settings: Settings, transport=None, http=None) -> LearnerHistory:
     if settings.spacetime_configured:
-        return SpacetimeHistory(SpacetimeClient(settings, transport))
+        return SpacetimeHistory(SpacetimeClient(settings, transport, http))
     return LocalHistory(settings)

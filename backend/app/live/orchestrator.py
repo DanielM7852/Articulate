@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 MAX_AUDIO_FRAMES = 1500
 MAX_VIDEO_FRAMES = 600
 OPEN_POLL_TOTAL_S = 2.0
-OPEN_POLL_STEP_S = 0.25
+OPEN_POLL_STEP_S = 0.15
 
 
 @dataclass
@@ -45,6 +45,7 @@ class LiveDeps:
     anthropic_client: Any = None  # tests inject a fake with .messages.parse
     transport: httpx.AsyncBaseTransport | None = None  # tests inject httpx.MockTransport
     history: LearnerHistory | None = None
+    spacetime: SpacetimeClient | None = None  # shared pooled client from the app runtime
 
     def get_history(self) -> LearnerHistory:
         return self.history or build_history(self.settings, self.transport)
@@ -78,16 +79,16 @@ def _decode_frames(batches: list[dict[str, Any]]) -> tuple[list[AudioFrame], lis
 
 
 async def _read_spacetime_frames(deps: LiveDeps, attempt_id: str) -> tuple[list[AudioFrame], list[LipFrame]]:
-    client = SpacetimeClient(deps.settings, deps.transport)
+    client = deps.spacetime or SpacetimeClient(deps.settings, deps.transport)
     lit = uuid_literal(attempt_id)
     deadline = time.monotonic() + OPEN_POLL_TOTAL_S
-    while True:
-        rows = await client.sql(f"SELECT * FROM learner_attempt WHERE attempt_id = {lit}")
-        status = unwrap(rows[0].get("status")) if rows else None
-        if status != "open" or time.monotonic() >= deadline:
-            break
+    status_q = f"SELECT * FROM learner_attempt WHERE attempt_id = {lit}"
+    batch_q = f"SELECT * FROM metric_batch WHERE attempt_id = {lit}"
+    # Status and batches are fetched together; an already-ended attempt needs no polling or second read.
+    rows, batches = await asyncio.gather(client.sql(status_q), client.sql(batch_q))
+    while (unwrap(rows[0].get("status")) if rows else None) == "open" and time.monotonic() < deadline:
         await asyncio.sleep(OPEN_POLL_STEP_S)
-    batches = await client.sql(f"SELECT * FROM metric_batch WHERE attempt_id = {lit}")
+        rows, batches = await asyncio.gather(client.sql(status_q), client.sql(batch_q))
     return _decode_frames(batches)
 
 
@@ -126,16 +127,40 @@ def _user_message(
     return json.dumps(payload, separators=(",", ":"))
 
 
+def _ms(start: float, end: float) -> int:
+    return int(round((end - start) * 1000))
+
+
+async def _load_history(deps: LiveDeps, history: LearnerHistory, body: LiveCoachRequest) -> tuple[LearnerContext, int]:
+    t0 = time.perf_counter()
+    try:
+        context = await history.load(body.profileId, deps.settings.live_history_limit)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("history load failed: %s", type(exc).__name__)
+        context = LearnerContext()
+    return context, _ms(t0, time.perf_counter())
+
+
+async def _timed_frames(deps: LiveDeps, body: LiveCoachRequest):
+    t0 = time.perf_counter()
+    result = await gather_frames(deps, body)
+    return result, _ms(t0, time.perf_counter())
+
+
 async def _decide(
     deps: LiveDeps,
     body: LiveCoachRequest,
     audio: AudioScore,
     video: VideoScore | None,
     context: LearnerContext,
+    timings: dict[str, int],
 ):
     candidates = evidence_candidates(audio, video, body.clientSummary)
+    timings["llm"] = 0
+    timings["validate"] = 0
     if deps.model_available:
         try:
+            t0 = time.perf_counter()
             decision = await llm.ask(
                 deps.settings,
                 deps.anthropic_client,
@@ -146,29 +171,36 @@ async def _decide(
                 deps.settings.live_coach_timeout_s,
                 max_tokens=6000,
             )
+            t1 = time.perf_counter()
+            timings["llm"] = _ms(t0, t1)
             evidence = validate_decision(decision, body.sound, audio, video, candidates)
+            timings["validate"] = _ms(t1, time.perf_counter())
             return "agent", decision, evidence
         except Exception as exc:  # noqa: BLE001 - any model or validation failure uses the fallback
+            timings["llm"] = _ms(t0, time.perf_counter())
             logger.warning("live coach used fallback: %s", type(exc).__name__)
+    t2 = time.perf_counter()
     decision, evidence = fallback_decision(body.sound, audio, video, candidates, context.attempts)
+    timings["validate"] += _ms(t2, time.perf_counter())
     return "fallback", decision, evidence
 
 
 async def coach_attempt(deps: LiveDeps, body: LiveCoachRequest) -> LiveCoachResponse:
-    audio_frames, lip_frames, metrics_source = await gather_frames(deps, body)
+    started = time.perf_counter()
+    timings: dict[str, int] = {}
+    history = deps.get_history()
+    # Frame read and history load are independent: run them concurrently.
+    ((audio_frames, lip_frames, metrics_source), timings["frames"]), (context, timings["history"]) = await asyncio.gather(
+        _timed_frames(deps, body), _load_history(deps, history, body)
+    )
+    t = time.perf_counter()
     audio = score_audio(body.sound, audio_frames)
     video = score_video(body.sound, lip_frames)
-
-    history = deps.get_history()
-    try:
-        context = await history.load(body.profileId, deps.settings.live_history_limit)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("history load failed: %s", type(exc).__name__)
-        context = LearnerContext()
+    timings["scoring"] = _ms(t, time.perf_counter())
     # The current attempt may already be stored (for example a retried request); never show it as history.
     context.attempts = [a for a in context.attempts if a.get("attemptId") != body.attemptId]
 
-    source, decision, evidence = await _decide(deps, body, audio, video, context)
+    source, decision, evidence = await _decide(deps, body, audio, video, context, timings)
     response = LiveCoachResponse(
         attemptId=body.attemptId,
         source=source,
@@ -194,10 +226,20 @@ async def coach_attempt(deps: LiveDeps, body: LiveCoachRequest) -> LiveCoachResp
         "cueId": response.cueId,
         "nextAction": response.nextAction,
     }
-    decision_json = response.model_dump(exclude={"audio", "video", "persisted"})
+    decision_json = response.model_dump(exclude={"audio", "video", "persisted", "timingsMs"})
+    t = time.perf_counter()
     try:
         response.persisted = await history.record(body.profileId, body.attemptId, summary, decision_json)
     except Exception as exc:  # noqa: BLE001
         logger.warning("persist failed: %s", type(exc).__name__)
         response.persisted = False
+    timings["persist"] = _ms(t, time.perf_counter())
+    timings["total"] = _ms(started, time.perf_counter())
+    response.timingsMs = {k: timings[k] for k in ("frames", "history", "scoring", "llm", "validate", "persist", "total")}
+    logger.info(
+        "live coach timings ms %s source=%s metrics=%s",
+        " ".join(f"{k}={v}" for k, v in response.timingsMs.items()),
+        response.source,
+        response.metricsSource,
+    )
     return response

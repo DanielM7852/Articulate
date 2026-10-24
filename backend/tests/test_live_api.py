@@ -225,7 +225,7 @@ def test_spacetime_path_reads_frames_and_records_turn(tmp_path):
     j = r.json()
     assert r.status_code == 200 and j["metricsSource"] == "spacetimedb" and j["persisted"] is True
     assert j["audio"]["frames"] == 20 and j["video"]["verdict"] == "matches"
-    assert f"attempt_id = '{AID}'" in st.sql[0]
+    assert any(f"attempt_id = '{AID}'" in q for q in st.sql)
     name, args = st.calls[0]
     assert name == "record_coach_turn" and args[0] == AID and len(args) == 3
     summary, dec = json.loads(args[1]), json.loads(args[2])
