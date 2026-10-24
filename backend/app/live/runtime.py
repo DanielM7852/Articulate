@@ -92,8 +92,10 @@ class LiveRuntime:
         task.add_done_callback(self._tasks.discard)
 
     async def aclose(self) -> None:
-        for task in list(self._tasks):
+        tasks = list(self._tasks)
+        for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         if self._http is not None:
             try:
                 await self._http.aclose()

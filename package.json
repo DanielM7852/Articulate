@@ -15,6 +15,7 @@
     "test:vision:e2e": "playwright test --config playwright.vision.config.ts",
     "test:e2e": "playwright test",
     "test:database": "vitest run",
+    "test:practice": "vitest run --config vitest.practice.config.ts",
     "contracts:check": "node scripts/check-contracts.mjs",
     "contracts": "json2ts -i packages/contracts/schema.json -o packages/contracts/generated.d.ts --declareExternallyReferenced"
   },

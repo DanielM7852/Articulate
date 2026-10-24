@@ -5,7 +5,9 @@ They are not validated clinical standards.
 """
 
 from pathlib import Path
+from typing import Literal
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -33,6 +35,19 @@ class Settings(BaseSettings):
     live_session_ttl_s: float = 3600.0
     live_coach_timeout_s: float = 15.0
     live_history_limit: int = 12
+    # Opt in only after publishing the coordination reducers. API and workers share these settings.
+    live_coordination: Literal["local", "spacetime"] = "local"
+    live_identity_secret: str | None = None
+    live_cookie_secure: bool = True
+    live_identity_ttl_s: int = Field(default=2_592_000, ge=60, le=31_536_000)
+    live_job_poll_s: float = Field(default=0.2, ge=0.05, le=5)
+    live_worker_concurrency: int = Field(default=4, ge=1, le=64)
+    live_global_concurrency: int = Field(default=32, ge=1, le=1000)
+    live_job_lease_s: int = Field(default=60, ge=30, le=300)
+    live_queue_limit: int = Field(default=1000, ge=1, le=10000)
+    live_jobs_per_profile: int = Field(default=4, ge=1, le=16)
+    live_job_retention_s: int = Field(default=3600, ge=300, le=86400)
+
     moss_project_id: str | None = None
     moss_project_key: str | None = None
     moss_index_name: str = "articulate-cues"
@@ -75,6 +90,17 @@ class Settings(BaseSettings):
     clipping_fraction_limit: float = 0.01
     silence_rms_limit: float = 0.008
     clipping_sample_level: float = 0.99
+
+    @model_validator(mode="after")
+    def shared_coordination_requirements(self):
+        if self.live_coordination == "spacetime":
+            if not self.spacetime_configured:
+                raise ValueError("spacetime coordination requires SPACETIME_DATABASE and SPACETIME_TOKEN")
+            if not self.live_identity_secret or len(self.live_identity_secret) < 32:
+                raise ValueError("spacetime coordination requires LIVE_IDENTITY_SECRET (at least 32 characters)")
+            if self.live_session_ttl_s <= 0:
+                raise ValueError("shared sessions require a positive LIVE_SESSION_TTL_S")
+        return self
 
     @property
     def anthropic_configured(self) -> bool:

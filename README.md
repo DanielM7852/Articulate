@@ -48,6 +48,9 @@ through Vite aliases, so clone the whole repository rather than `web/` alone.
 
 ## Backbone
 
+For multiple replicas of the practice app, see [shared session deployment](docs/session-scaling.md).
+It uses SpacetimeDB coordination and a separate Python worker pool; it is opt-in.
+
 Requirements: Python 3.12, uv, Node 22.12+.
 
 ```powershell

@@ -18,6 +18,7 @@ import { AttemptRecorder } from '../live/attemptRecorder';
 import { offlineSink, type MetricSink } from '../live/metricSink';
 import { createSpacetimeSink, type SinkStatus } from '../live/spacetimeSink';
 import { profileIdFor, requestLiveCoach, type LiveCoachResponse } from '../live/liveCoach';
+import { getLiveIdentity } from '../live/transport';
 import { useCoachSequence } from '../live/useCoachSequence';
 import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
 import { useSpeech } from '../audio/useSpeech';
@@ -118,12 +119,20 @@ export default function PracticeStudio() {
   });
   if (!recorder.current) recorder.current = new AttemptRecorder(delegate.current);
   useEffect(() => {
-    const sink = createSpacetimeSink({ profileId, displayName: learnerName || 'Learner', onStatus: setSyncStatus });
-    sinkRef.current = sink;
-    setSyncStatus(sink.status);
+    let disposed = false;
+    let sink: ReturnType<typeof createSpacetimeSink> | null = null;
+    // In shared mode the authenticated API queues inline features. Browser SDK identities cannot
+    // write signed guest profiles or impersonate the API's backend identity.
+    void getLiveIdentity().then((principal) => {
+      if (disposed || principal.shared) return;
+      sink = createSpacetimeSink({ profileId, displayName: learnerName || 'Learner', onStatus: setSyncStatus });
+      sinkRef.current = sink;
+      setSyncStatus(sink.status);
+    }).catch(() => { /* Local coaching remains available if the backend cannot be reached. */ });
     return () => {
+      disposed = true;
       sinkRef.current = offlineSink;
-      sink.close();
+      sink?.close();
     };
   }, [profileId, learnerName]);
   const attemptIdRef = useRef<string>('');
