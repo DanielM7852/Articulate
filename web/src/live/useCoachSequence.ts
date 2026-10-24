@@ -5,10 +5,12 @@ import type { CueId, LiveCoachResponse } from './liveCoach';
 
 /**
  * Plays a live coach response: the teacher speaks the caption (Cartesia, browser fallback) while the
- * avatar either lip-syncs in front view, or, when the decision asks for a cue, swings to the side
- * cutaway and loops the cue (the cue owns the mouth, so no lip sync) and then returns to front view.
- * A side view with no cue (word coaching on tongue sounds, which have no mouth-demo cue) turns to the
- * cutaway and lip-syncs the line there, holds it at least one cue length, then returns to front view.
+ * avatar lip-syncs it. Lip sync is attached as soon as the avatar is ready, before any camera swing,
+ * so the mouth always follows the spoken words. When the decision asks for a cue, the avatar swings to
+ * the side cutaway while it lip-syncs the line; only after the line ends does the cue loop take over
+ * the mouth, for at least one cue length, before returning to front view. A side view with no cue
+ * (word coaching on tongue sounds, which have no mouth-demo cue) lip-syncs the line in the cutaway,
+ * holds it at least one cue length, then returns to front view.
  * Every step checks a run token, so cancel() or a newer run() stops speech and resets the demo safely.
  */
 export const CUE_MIN_MS = 2500; // at least one full cue loop
@@ -23,7 +25,7 @@ export interface SequenceOptions {
 }
 
 /**
- * One therapist line: the caption, plus an optional side-view cue that owns the mouth while it plays.
+ * One therapist line: the caption, plus an optional side-view cue that takes over the mouth once the line is spoken.
  * showSideView with cueId null: side cutaway with lip sync and no cue.
  */
 export interface SequenceLine {
@@ -188,26 +190,33 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
         if (wantCue && avatar && line.cueId) {
           live.current.touchedDemo = true;
           avatar.stop();
-          await avatar.setView('side');
-          if (!alive()) return;
+          if (sp) {
+            // The mouth follows the words first (lip sync runs through the swing), then the cue takes over.
+            lipSync(avatar, sp);
+            await avatar.setView('side');
+            if (!alive()) return;
+            await sp.done;
+            if (!alive()) return;
+            live.current.stopLip?.();
+            live.current.stopLip = null;
+          } else {
+            await avatar.setView('side');
+            if (!alive()) return;
+          }
           avatar.showCue(line.cueId);
-          const cueStart = Date.now();
-          if (sp) await sp.done;
-          if (!alive()) return;
-          const minMs = sp ? CUE_MIN_MS : CUE_SILENT_MS;
-          const left = minMs - (Date.now() - cueStart);
-          if (left > 0) await sleep(left);
+          await sleep(sp ? CUE_MIN_MS : CUE_SILENT_MS);
           if (!alive()) return;
           avatar.stop();
           await avatar.setView('front');
         } else if (wantSide && avatar) {
           live.current.touchedDemo = true;
           avatar.stop();
+          // Attach lip sync before the camera swing so the start of the line is not lost.
+          if (sp) lipSync(avatar, sp);
           await avatar.setView('side');
           if (!alive()) return;
           const sideStart = Date.now();
           if (sp) {
-            lipSync(avatar, sp);
             await sp.done;
             if (!alive()) return;
           }

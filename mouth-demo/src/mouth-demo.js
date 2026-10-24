@@ -361,10 +361,12 @@ export async function createMouthDemo(container, options = {}) {
     run([...pre, ...loop], { loop: true, loopStart: pre.length });
   };
 
-  // Lip sync. A cue owns the mouth: while a cue is chosen (cue) or its shapes are still easing out
-  // (driven), speech keeps its clock and events but writes no shapes, then eases in from rest.
+  // Lip sync. A cue owns the mouth: while a cue is chosen (cue) or its shapes are still visibly easing
+  // out (driven, S.w above 0.02), speech keeps its clock and events but writes no shapes, then eases in
+  // from rest. In the last sliver of an ease-out lip sync writes after paint() in the frame, so it wins.
+  const cueOwnsFace = () => cue !== null || (driven !== null && S.w > 0.02);
   const emitSpeech = (type) => container.dispatchEvent(new CustomEvent(type, { bubbles: true }));
-  const lipsync = createLipSync({ driver, isBlocked: () => cue !== null || driven !== null, emit: emitSpeech });
+  const lipsync = createLipSync({ driver, isBlocked: cueOwnsFace, emit: emitSpeech });
   disposers.push(() => lipsync.dispose());
 
   const demo = {
@@ -541,6 +543,9 @@ export async function createMouthDemo(container, options = {}) {
     const scaled = step * timeline.speed;
     timeline.update(step);
     lipsync.update(step);
+    // The side diagram follows the lip sync whenever no cue owns the face; otherwise paint()'s setPose
+    // (run earlier this frame by timeline.update) holds it. With no speech the pose is all zero (neutral).
+    if (!cueOwnsFace() && (view === "side" || S.show > 0)) cutaway.setBlend(lipsync.pose());
     driver.update(step);
     if (look || Math.abs(lookNow.x) > 1e-3 || Math.abs(lookNow.y) > 1e-3) {
       const goal = look ?? { x: 0, y: 0 };
