@@ -32,7 +32,7 @@ function finish(id: string, token = lease, extra: Record<string, unknown> = {}) 
   tx(c => module.finish_live_job(c, {
     job_id: id, lease_token: token, result_json: '{"revision":1}',
     state_json: JSON.stringify({ session_id: id, profile_id: profile }),
-    summary_json: "", decision_json: "", notes_json: "", session_ttl_s: 300, ...extra,
+    summary_json: "", decision_json: "", notes_json: "", session_ttl_s: 300, delivered_attempt_id: "", ...extra,
   }));
 }
 
@@ -166,12 +166,12 @@ test("bounded cleanup expires requests and sessions without deleting an active l
   const { job_id: pending } = enqueue();
   now(3690); claim(pending);
   now(3701);
-  tx(c => module.cleanup_live_state(c, { job_ids: [sid, pending], session_ids: [sid] }));
+  tx(c => module.cleanup_live_state(c, { job_ids: [sid, pending], session_ids: [sid], insight_ids: [] }));
   expect(h.db.liveSession.id.find(sid)).toBeNull();
   expect(h.db.liveJob.id.find(sid)).toBeNull();
   expect(h.db.liveJob.id.find(pending)?.status).toBe("running");
   now(3721);
-  tx(c => module.cleanup_live_state(c, { job_ids: [pending], session_ids: [] }));
+  tx(c => module.cleanup_live_state(c, { job_ids: [pending], session_ids: [], insight_ids: [] }));
   expect(h.db.liveJob.id.find(pending)).toBeNull();
   expect(h.db.liveQueue.id.find(0)?.active).toBe(0);
 });

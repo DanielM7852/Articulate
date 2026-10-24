@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
+from app.integrations.spacetime import SpacetimeError
 from app.live import insight
 from app.live.articulation import annotate_attempts, extract_features
 from app.live.coordination import Coordination
@@ -30,6 +31,7 @@ from app.live.schemas import (
     valid_profile_id,
 )
 from app.live.session import get_store, start_session, take_turn
+from app.live.shared_insight import SharedInsights
 
 router = APIRouter(prefix="/v1/live")
 logger = logging.getLogger(__name__)
@@ -55,6 +57,7 @@ async def readiness(request: Request) -> dict:
             # Fail readiness if the module is unpublished or the private tables are inaccessible.
             await client.sql("SELECT id FROM live_job LIMIT 1")
             await client.sql("SELECT id FROM live_session LIMIT 1")
+            await client.sql("SELECT attempt_id FROM live_insight LIMIT 1")
         except Exception as exc:  # noqa: BLE001 - no provider details in a public health response
             raise HTTPException(503, "coordination_unavailable") from exc
     return {"status": "ready", "coordination": request.app.state.settings.live_coordination}
@@ -65,6 +68,50 @@ def _coordination(request: Request) -> Coordination:
     if client is None:
         raise HTTPException(503, "coordination_unavailable")
     return Coordination(request.app.state.settings, client)
+
+
+def _is_shared(request: Request) -> bool:
+    return request.app.state.settings.live_coordination == "spacetime"
+
+
+class _InsightSink:
+    """Where articulation status goes: this process's registry (local) or SpacetimeDB (shared). Never raises."""
+
+    def __init__(self, runtime, shared: SharedInsights | None):
+        self.runtime, self.shared = runtime, shared
+
+    async def set(self, attempt_id: str, profile_id: str, sound: str, status: str,
+                  say: str | None = None, source: str | None = None) -> bool:
+        try:
+            if self.shared is None:
+                self.runtime.set_insight(attempt_id, profile_id, sound, status, say, source)
+            else:
+                await self.shared.set(attempt_id, profile_id, sound, status, say, source)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("insight write failed: %s", type(exc).__name__)
+            return False
+
+    async def fail_if_pending(self, attempt_id: str, profile_id: str, sound: str) -> None:
+        try:
+            if self.shared is None:
+                entry = self.runtime.get_insight(attempt_id, profile_id)
+            else:
+                entry = await self.shared.get(attempt_id, profile_id)
+            if entry is None or entry["status"] == "pending":
+                await self.set(attempt_id, profile_id, sound, "none")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("insight fallback failed: %s", type(exc).__name__)
+
+
+def _sink(request: Request) -> _InsightSink:
+    runtime = get_runtime(request.app)
+    if not _is_shared(request):
+        return _InsightSink(runtime, None)
+    client = runtime.spacetime(getattr(request.app.state, "live_spacetime_transport", None))
+    if client is None:
+        raise HTTPException(503, "coordination_unavailable")
+    return _InsightSink(runtime, SharedInsights(request.app.state.settings, client))
 
 
 def _shared(request: Request, profile_id: str) -> bool:
@@ -152,12 +199,12 @@ def _pick_claim(attempt: dict, sound: str) -> dict | None:
     return allowed[0] if allowed else None
 
 
-async def _insight_lane(runtime, history, settings, client, profile_id: str, attempt_id: str, sound: str,
+async def _insight_lane(runtime, sink, history, settings, client, profile_id: str, attempt_id: str, sound: str,
                         features: dict) -> None:
     """Find the gated claim for the attempt and store a validated line in the registry."""
     items, match = await _find_attempt(history, profile_id, attempt_id, settings.live_history_limit)
     if match is None:
-        runtime.set_insight(attempt_id, profile_id, sound, "none")
+        await sink.set(attempt_id, profile_id, sound, "none")
         return
     # Persistence may have failed (or the table is unpublished): annotate in memory from this process's features.
     pending = []
@@ -171,17 +218,22 @@ async def _insight_lane(runtime, history, settings, client, profile_id: str, att
     current = next((i for i in annotated if isinstance(i, dict) and i.get("attemptId") == attempt_id), None)
     claim = _pick_claim(current, sound) if current else None
     if claim is None:
-        runtime.set_insight(attempt_id, profile_id, sound, "none")
+        await sink.set(attempt_id, profile_id, sound, "none")
         return
     recent = [i for i in annotated if isinstance(i, dict) and i.get("attemptId") != attempt_id]
     say, source = await insight.compose_line(settings, client, sound, claim, recent)
-    runtime.set_insight(attempt_id, profile_id, sound, "ready", say, source)
+    await sink.set(attempt_id, profile_id, sound, "ready", say, source)
 
 
 async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profile_id: str, sound: str,
                             clock: tuple[float | None, float | None]) -> None:
     """Collector -> features -> history -> insight line. Never raises."""
     runtime = get_runtime(request.app)
+    try:
+        sink = _sink(request)
+    except HTTPException:
+        runtime.release_articulation()
+        return
     try:
         features = history = None
         state = request.app.state
@@ -200,18 +252,13 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
                     await history.record_articulation(profile_id, attempt_id, sound, features)
                     runtime.remember_features(profile_id, attempt_id, features)
         if features is None:
-            runtime.set_insight(attempt_id, profile_id, sound, "none")
+            await sink.set(attempt_id, profile_id, sound, "none")
             return
         model_client = getattr(state, "live_client", None) or runtime.anthropic()
-        await _insight_lane(runtime, history, state.settings, model_client, profile_id, attempt_id, sound, features)
+        await _insight_lane(runtime, sink, history, state.settings, model_client, profile_id, attempt_id, sound, features)
     except Exception as exc:  # noqa: BLE001
         logger.warning("articulation job failed: %s", type(exc).__name__)
-        try:
-            entry = runtime.get_insight(attempt_id, profile_id)
-            if entry is None or entry["status"] == "pending":
-                runtime.set_insight(attempt_id, profile_id, sound, "none")
-        except Exception:  # noqa: BLE001
-            pass
+        await sink.fail_if_pending(attempt_id, profile_id, sound)
 
 
 @router.get("/articulation/{attemptId}")
@@ -221,7 +268,14 @@ async def live_articulation_status(attemptId: str, profileId: str, request: Requ
         raise HTTPException(422, "attemptId must be a UUID")
     if not valid_profile_id(profileId):
         raise HTTPException(422, "profileId must match [A-Za-z0-9_.:@-]{1,64}")
-    entry = get_runtime(request.app).get_insight(attemptId, profileId)
+    authorize_profile(request, profileId)
+    if _is_shared(request):
+        try:
+            entry = await _sink(request).shared.get(attemptId, profileId)
+        except SpacetimeError as exc:
+            raise HTTPException(503, "coordination_unavailable") from exc
+    else:
+        entry = get_runtime(request.app).get_insight(attemptId, profileId)
     if entry is None:
         return {"status": "unknown", "sound": None}
     return {"status": entry["status"], "sound": entry["sound"]}
@@ -252,13 +306,22 @@ async def live_articulation(
         chunks.append(chunk)
     if size < ARTICULATION_MIN_BYTES:
         raise HTTPException(422, "WAV body too small")
+    authorize_profile(request, profileId)
     state = request.app.state
     runtime = get_runtime(request.app)
     if not state.settings.articulation_configured and getattr(state, "live_articulation", None) is None:
         return JSONResponse({"accepted": False, "reason": "disabled"})
     if not runtime.reserve_articulation():
         return JSONResponse({"accepted": False, "reason": "busy"})
-    runtime.set_insight(attemptId, profileId, sound, "pending")
+    if _is_shared(request):
+        try:
+            sink = _sink(request)
+            await sink.shared.set(attemptId, profileId, sound, "pending")
+        except (HTTPException, SpacetimeError):
+            runtime.release_articulation()
+            return JSONResponse({"accepted": False, "reason": "unavailable"})
+    else:
+        runtime.set_insight(attemptId, profileId, sound, "pending")
     background.add_task(
         _articulation_job, request, b"".join(chunks), attemptId, profileId, sound,
         (captureStartMonotonicMs, timeOriginUnixMs),

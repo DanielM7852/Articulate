@@ -20,6 +20,7 @@ from app.live.history import LearnerHistory
 from app.live.notes import update_notes
 from app.live.orchestrator import LiveDeps, coach_attempt
 from app.live.runtime import LiveRuntime
+from app.live.shared_insight import InsightSnapshot, SharedInsights
 from app.live.schemas import LiveCoachRequest, SessionStartRequest, SessionTurnRequest
 from app.live.session import HISTORY_TURNS, SessionState, SessionStore, start_session, take_turn
 
@@ -70,6 +71,7 @@ class Worker:
         history = DeferredHistory(self.deps.get_history())
         deps = replace(self.deps, history=history)
         state_json = ""
+        delivered = ""
         if job["kind"] == "attempt.coach":
             response = await coach_attempt(deps, LiveCoachRequest.model_validate(payload))
             response.persisted = True  # This result becomes visible only after atomic completion.
@@ -90,19 +92,27 @@ class Worker:
                 saved = json.loads(rows[0]["state_json"])
                 saved["turns"] = deque(saved["turns"], maxlen=HISTORY_TURNS)
                 store.add(SessionState(**saved))
-                response = await take_turn(deps, store, SessionTurnRequest.model_validate(payload))
+                request = SessionTurnRequest.model_validate(payload)
+                snapshot = None
+                if request.event.kind == "analysis_ready":
+                    entry = await SharedInsights(self.settings, self.coordination.client).get(
+                        request.event.attemptId, job["profile_id"]
+                    )
+                    snapshot = InsightSnapshot(entry)
+                response = await take_turn(deps, store, request, snapshot)
+                delivered = snapshot.delivered if snapshot is not None else ""
             state = store.get(job["session_id"], job["profile_id"])
-            snapshot = asdict(state)
-            snapshot["turns"] = list(state.turns)
-            snapshot["last_used"] = 0  # Process-local monotonic timestamps are never shared.
-            state_json = encode(snapshot)
+            saved_state = asdict(state)
+            saved_state["turns"] = list(state.turns)
+            saved_state["last_used"] = 0  # Process-local monotonic timestamps are never shared.
+            state_json = encode(saved_state)
             response.revision = job["expected_revision"] + 1
         return [
             job["id"], job["lease_token"], encode(response.model_dump()), state_json,
             encode(history.summary) if history.summary is not None else "",
             encode(history.decision) if history.decision is not None else "",
             encode(history.notes) if history.notes is not None else "",
-            min(86400, max(1, int(self.settings.live_session_ttl_s))),
+            min(86400, max(1, int(self.settings.live_session_ttl_s))), delivered,
         ]
 
     async def _heartbeat(self, job: dict) -> None:

@@ -97,6 +97,10 @@ class LiveRuntime:
         self._artic_waiting += 1
         return True
 
+    def release_articulation(self) -> None:
+        """Give back a reserve_articulation() place whose job will never run."""
+        self._artic_waiting = max(0, self._artic_waiting - 1)
+
     @contextlib.asynccontextmanager
     async def articulation_slot(self, reserved: bool = False):
         """`async with runtime.articulation_slot(reserved=True) as ok:` runs one analysis at a time.

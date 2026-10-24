@@ -1,6 +1,6 @@
 import type { CueId } from '../../live/liveCoach';
 import type { SoundId } from '../../state/types';
-import { livePost } from '../../live/transport';
+import { getLiveIdentity, livePost } from '../../live/transport';
 
 /** Typed client for local turns or durable shared jobs. Calls throw on errors or the transport deadline. */
 export type TurnAction = 'demonstrate' | 'prompt_attempt' | 'await_reply' | 'next_sound' | 'end_session';
@@ -70,8 +70,13 @@ export async function getArticulationStatus(
   if (signal?.aborted) ctl.abort();
   else signal?.addEventListener('abort', onAbort);
   try {
-    const url = `/v1/live/articulation/${encodeURIComponent(attemptId)}?profileId=${encodeURIComponent(profileId)}`;
-    const res = await fetch(url, { signal: ctl.signal });
+    let id = profileId;
+    try {
+      const principal = await getLiveIdentity();
+      if (principal.shared && principal.profileId) id = principal.profileId;
+    } catch { /* identity unavailable: keep the caller's profile */ }
+    const url = `/v1/live/articulation/${encodeURIComponent(attemptId)}?profileId=${encodeURIComponent(id)}`;
+    const res = await fetch(url, { credentials: 'same-origin', signal: ctl.signal });
     if (!res.ok) throw new Error(`${url} failed (${res.status})`);
     const j = (await res.json()) as { status?: ArticulationStatus; sound?: SoundId | null };
     if (!j || !STATUSES.includes(j.status as ArticulationStatus)) throw new Error('Malformed articulation status');

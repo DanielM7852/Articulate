@@ -94,9 +94,12 @@ class Coordination:
 
     async def cleanup(self) -> None:
         now = int(time.time())
-        jobs, sessions = await asyncio.gather(
+        jobs, sessions, insights = await asyncio.gather(
             self.client.sql(f"SELECT id FROM live_job WHERE expires_at <= {now} LIMIT 100"),
             self.client.sql(f"SELECT id FROM live_session WHERE expires_at <= {now} LIMIT 100"),
+            self.client.sql(f"SELECT attempt_id FROM live_insight WHERE expires_at <= {now} LIMIT 100"),
         )
-        if jobs or sessions:
-            await self.client.call("cleanup_live_state", [[r["id"] for r in jobs], [r["id"] for r in sessions]])
+        if jobs or sessions or insights:
+            await self.client.call("cleanup_live_state", [
+                [r["id"] for r in jobs], [r["id"] for r in sessions], [r["attempt_id"] for r in insights],
+            ])

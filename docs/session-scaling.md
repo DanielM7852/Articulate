@@ -69,6 +69,27 @@ for `LIVE_JOB_RETENTION_S`; summaries/progress remain in learner-history tables.
 These are logical retention rules: inserts and deletions can remain in the
 database commit log/backups. Legacy `metric_batch` rows are unaffected.
 
+## Articulation analysis and insights
+
+The background SPARC analysis (`POST /v1/live/articulation`) is not a `live_job`:
+it needs the attempt's audio, and audio stays out of the database. In shared mode
+the cookie-authenticated API replica that receives the WAV calls the collector
+(`ARTICULATION_URL`, an independently bounded process) in a background task,
+limited per replica by `ARTICULATION_MAX_QUEUE`. It stores the derived features
+through `record_articulation` and the insight state in the private `live_insight`
+table (`set_live_insight`: pending → ready | none). Every API replica that should
+accept uploads needs `ARTICULATION_URL`; workers do not call the collector.
+
+`GET /v1/live/articulation/{attemptId}` reads `live_insight` from any replica. A
+pending row older than `ARTICULATION_TIMEOUT_S + LIVE_INSIGHT_TIMEOUT_S + 30` s
+(for example, its replica stopped) reads as `none`, so the browser stops waiting.
+An `analysis_ready` session turn runs on a worker, which loads the row. When it
+speaks the line, `finish_live_job` marks the row `delivered` in the same
+transaction as the turn, so the line is delivered at most once. Insight rows
+expire after `INSIGHT_TTL_S` and are removed by `cleanup_live_state`. The
+per-process feature cache is only a fallback for failed history writes.
+Shared-mode history reads come from `learner_articulation`.
+
 ## Deployment
 
 1. Review/build/test the module, then publish `spacetimedb/` to your selected

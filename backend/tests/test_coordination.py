@@ -5,6 +5,7 @@ This small HTTP fake checks Python's real wire arguments, result polling and rec
 """
 
 import json
+import time
 from copy import deepcopy
 from uuid import uuid4
 
@@ -25,12 +26,24 @@ from tests.test_live_api import body
 
 class Database:
     def __init__(self):
-        self.jobs, self.sessions, self.calls = {}, {}, []
+        self.jobs, self.sessions, self.insights, self.calls = {}, {}, {}, []
         self.fail_finish = False
+        self.fail_insight_set = False
 
     def handle(self, request):
         if request.url.path.endswith("/sql"):
             query = request.content.decode()
+            if "FROM live_insight" in query:
+                if "attempt_id = '" in query:
+                    row = self.insights.get(query.split(" = '")[1].split("'")[0])
+                    return httpx.Response(200, json=[{"rows": [deepcopy(row)] if row else []}])
+                if "expires_at <=" in query:
+                    limit = int(query.split("<=")[1].split()[0])
+                    rows = [dict(attempt_id=k) for k, v in self.insights.items() if v["expires_at"] <= limit]
+                    return httpx.Response(200, json=[{"rows": rows}])
+                return httpx.Response(200, json=[{"rows": []}])
+            if "expires_at <=" in query:
+                return httpx.Response(200, json=[{"rows": []}])
             table = self.sessions if "FROM live_session" in query else self.jobs
             key = query.split(" = '")[1].split("'")[0]
             row = table.get(key)
@@ -54,14 +67,37 @@ class Database:
         elif name == "finish_live_job":
             if self.fail_finish:
                 return httpx.Response(400, text="stale lease")
-            identity, token, result, snapshot, *_ = args
+            assert len(args) == 9
+            identity, token, result, snapshot, *_, delivered = args
             job = self.jobs[identity]
             assert token == job["lease_token"]
+            if delivered:
+                row = self.insights.get(delivered)
+                if job["kind"] != "session.turn" or not row or row["status"] != "ready"                         or row["profile_id"] != job["profile_id"]:
+                    return httpx.Response(400, text="insight conflict")
+                row["status"] = "delivered"
             if snapshot:
                 self.sessions[job["session_id"]] = dict(
                     state_json=snapshot, profile_id=job["profile_id"], revision=job["expected_revision"] + 1,
                 )
             job.update(status="done", result_json=result, request_json="")
+        elif name == "set_live_insight":
+            if self.fail_insight_set:
+                return httpx.Response(500, text="boom")
+            attempt, profile, sound, status, say, source, ttl = args
+            old = self.insights.get(attempt)
+            if old and old["profile_id"] != profile:
+                return httpx.Response(400, text="profile mismatch")
+            if not (old and old["status"] == "delivered"):
+                now = int(time.time())
+                self.insights[attempt] = dict(
+                    attempt_id=attempt, profile_id=profile, sound=sound, status=status, say=say, source=source,
+                    created_at=old["created_at"] if old else now, expires_at=now + ttl,
+                )
+        elif name == "cleanup_live_state":
+            assert len(args) == 3
+            for key in args[2]:
+                self.insights.pop(key, None)
         elif name == "fail_live_job":
             self.jobs[args[0]].update(status="failed", error_code="processing_failed")
         return httpx.Response(200)
