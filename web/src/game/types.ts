@@ -23,7 +23,11 @@ export interface VoiceFrame {
   clipped: boolean;
 }
 
-export type ZoneKind = 'vowel' | 'tuner' | 'stop';
+/**
+ * 'tuner' is the original r strip. The ghost-path engine (src/game/ghost) adds 'liquid' (r judged by
+ * path, advisory), 'fricative' and 'nasal' (cue-only, never scored).
+ */
+export type ZoneKind = 'vowel' | 'tuner' | 'stop' | 'liquid' | 'fricative' | 'nasal';
 
 export interface VowelZoneTarget {
   /** Ellipse centre and radii in Hz. */
@@ -82,6 +86,8 @@ export interface ZoneResult {
   phoneme: string;
   kind: ZoneKind;
   verdict: ZoneVerdict;
+  /** True when the zone is guidance only and never passes or fails the attempt (liquids, fricatives, nasals). */
+  advisory?: boolean;
   /** ms spent inside the target (vowel/tuner); 0 for stops. */
   dwellMs: number;
   startMs: number | null;
@@ -90,6 +96,7 @@ export interface ZoneResult {
    * Evidence the backend may cite. Keys per kind:
    *  vowel: f1Median, f2Median, f1Offset, f2Offset (ln(median/target)), inTargetFraction
    *  tuner: valueMedian (Hz), valueBest (Hz), inBandFraction
+   *  vowel/liquid on a ghost path: pathDistance (mean distance from the ghost in close-zone units, <= 1 is inside), closeFraction (0..1)
    *  stop:  burstDetected (0|1), burstMs (relative to attempt start, -1 if none), voicedBefore (0|1)
    * plus the lip channel when the camera is usable: spreadMean, roundingMean, lipOpeningMean
    */
