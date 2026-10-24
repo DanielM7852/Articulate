@@ -8,8 +8,8 @@ function makeBackground() {
   c.height = 256;
   const g = c.getContext("2d");
   const grad = g.createRadialGradient(128, 128, 0, 128, 128, 181);
-  grad.addColorStop(0, "#25102A");
-  grad.addColorStop(1, "#140A16");
+  grad.addColorStop(0, "#FFFFFF");
+  grad.addColorStop(1, "#CBD7E6");
   g.fillStyle = grad;
   g.fillRect(0, 0, 256, 256);
   const tex = new THREE.CanvasTexture(c);

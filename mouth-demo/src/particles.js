@@ -9,7 +9,7 @@ const SWING_DRIFT = 0.5; // NDC units per second at full swing
 const SWING_EASE_MS = 400;
 const REDUCED_DRIFT = 0.12; // drift scale under reduced motion
 const SIZE_PX = [2, 4.5];
-const ALPHA = [0.15, 0.5];
+const ALPHA = [0.15, 0.35];
 const MOUTH_HOLE = { cx: 0, cy: -0.35, rx: 0.5, ry: 0.6 }; // NDC ellipse kept empty
 
 const VERT = /* glsl */ `
@@ -54,8 +54,10 @@ varying float vAlpha;
 varying float vTint;
 
 void main() {
-  vec4 c = vec4(mix(uColA, uColB, vTint), vAlpha);
-  gl_FragColor = c;
+  float r = length(gl_PointCoord - 0.5) * 2.0;
+  float cov = 1.0 - smoothstep(0.8, 1.0, r);
+  if (cov < 0.01) discard;
+  gl_FragColor = vec4(mix(uColA, uColB, vTint), vAlpha * cov);
   #include <colorspace_fragment>
 }
 `;
@@ -78,7 +80,7 @@ export function createParticles({ camera, count = 300, reducedMotion = false }) 
       [
         SIZE_PX[0] + Math.random() * (SIZE_PX[1] - SIZE_PX[0]),
         ALPHA[0] + Math.random() * (ALPHA[1] - ALPHA[0]),
-        Math.random() < 0.25 ? 0.7 + Math.random() * 0.3 : Math.random() * 0.4,
+        Math.random() < 0.3 ? 0.9 + Math.random() * 0.1 : Math.random() * 0.15,
         0.6 + Math.random() * 0.8
       ],
       i * 4
@@ -98,8 +100,8 @@ export function createParticles({ camera, count = 300, reducedMotion = false }) 
     uSway: { value: SWAY_AMOUNT },
     uTwinkle: { value: reduced ? 0 : 1 },
     uPx: { value: (typeof window !== "undefined" && window.devicePixelRatio) || 1 },
-    uColA: { value: new THREE.Color("#FF2BA6") },
-    uColB: { value: new THREE.Color("#FFD1EC") }
+    uColA: { value: new THREE.Color("#203E68") },
+    uColB: { value: new THREE.Color("#CBD7E6") }
   };
 
   const material = new THREE.ShaderMaterial({
@@ -107,7 +109,7 @@ export function createParticles({ camera, count = 300, reducedMotion = false }) 
     vertexShader: VERT,
     fragmentShader: FRAG,
     transparent: true,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
     depthWrite: false,
     fog: false
   });

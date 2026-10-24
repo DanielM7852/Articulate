@@ -1,6 +1,6 @@
 # Mouth demo
 
-A 3D face that demonstrates a mouth movement for speech cue practice, built for deaf and hard-of-hearing learners. The face is a silent demonstration model (no speech, no lip-sync) rendered as a glowing pink hologram of broken scanlines. It moves from relaxed into the target mouth shape, holds it while a cyan ring pulses around the lips, then relaxes, and loops calmly. A side view swings the camera to profile and fades in a stylized tongue cutaway.
+A 3D face that demonstrates a mouth movement for speech cue practice, built for deaf and hard-of-hearing learners. The face is a silent demonstration model (no speech, no lip-sync) rendered as a navy hologram of sphere dots on a light background. It moves from relaxed into the target mouth shape, holds it while a white-and-navy ring pulses around the lips, then relaxes, and loops calmly. A side view swings the camera to profile and fades in a stylized tongue cutaway.
 
 Mouth demonstrations are illustrative and would be reviewed by speech therapists before real use.
 
@@ -81,7 +81,7 @@ Press `G` to toggle calibration. Arrow keys nudge the ring up/down/left/right, `
 
 ## Style option
 
-`hologram` renders the avatar as neon scanlines with bloom and background particles. `solid` restores the original materials with studio lighting, no bloom, and the same dark panel. Use `?style=solid` if the hologram does not read well on a projector.
+`hologram` renders the avatar as navy sphere dots with bloom and background particles. `solid` restores the original materials with studio lighting, no bloom, and the same light panel. Use `?style=solid` if the hologram does not read well on a projector.
 
 ## File map
 

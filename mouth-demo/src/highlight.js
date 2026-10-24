@@ -15,20 +15,35 @@ export function createHighlight({ headBone, camera, anchor }) {
   let pulseVal = 0;
   let calibrating = false;
 
-  const material = new THREE.MeshBasicMaterial({
-    color: "#3CF2FF",
-    transparent: true,
-    depthTest: false,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
+  // palette only: white band with thin navy edges on both sides
+  const EDGE = 0.0015;
+  const BAND = 0.006;
+  const COLORS = ["#203E68", "#FFFFFF", "#203E68"]; // inner edge, band, outer edge
+  const materials = COLORS.map(
+    (color) =>
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+  );
 
-  function buildGeometry() {
+  function buildGeometries() {
     const r = radius * 1.35;
-    return new THREE.RingGeometry(r, r + 0.004, 64);
+    const e = [r, r + EDGE, r + EDGE + BAND, r + 2 * EDGE + BAND];
+    return [0, 1, 2].map((i) => new THREE.RingGeometry(e[i], e[i + 1], 64));
   }
 
-  const mesh = new THREE.Mesh(buildGeometry(), material);
+  const mesh = new THREE.Group();
+  const parts = buildGeometries().map((geo, i) => {
+    const part = new THREE.Mesh(geo, materials[i]);
+    part.renderOrder = 999;
+    part.frustumCulled = false;
+    mesh.add(part);
+    return part;
+  });
   mesh.renderOrder = 999;
   mesh.frustumCulled = false;
   mesh.visible = false;
@@ -68,7 +83,7 @@ export function createHighlight({ headBone, camera, anchor }) {
       opacity = (0.5 + 0.5 * s) * vis;
     }
     pulseVal = pulsing ? s * visibility : 0;
-    material.opacity = opacity;
+    for (const m of materials) m.opacity = opacity;
     mesh.visible = opacity >= 0.01;
     if (!mesh.visible) return;
 
@@ -106,8 +121,11 @@ export function createHighlight({ headBone, camera, anchor }) {
       case "]": radius += STEP; resize = true; break;
     }
     if (resize) {
-      mesh.geometry.dispose();
-      mesh.geometry = buildGeometry();
+      const geos = buildGeometries();
+      parts.forEach((p, i) => {
+        p.geometry.dispose();
+        p.geometry = geos[i];
+      });
     }
     applyPosition();
     HIGHLIGHT_TUNING.offset = offset.slice();
@@ -118,8 +136,8 @@ export function createHighlight({ headBone, camera, anchor }) {
 
   function dispose() {
     mesh.removeFromParent();
-    mesh.geometry.dispose();
-    material.dispose();
+    for (const p of parts) p.geometry.dispose();
+    for (const m of materials) m.dispose();
   }
 
   return {

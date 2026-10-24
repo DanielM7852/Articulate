@@ -1,8 +1,9 @@
 export const POSES = ["neutral", "oo", "ee", "ah"];
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const PINK = "#FF2BA6";
-const CYAN = "#3CF2FF";
+const NAVY = "#203E68";
+const BLUE = "#CBD7E6";
+const WHITE = "#FFFFFF";
 const NUM = /-?\d*\.?\d+(?:e[-+]?\d+)?/gi;
 
 // Each element has the same commands and number count in every pose (see lerpPath).
@@ -41,12 +42,6 @@ export function lerpPath(a, b, t) {
   });
 }
 
-function hexMix(a, b, t) {
-  const pa = [1, 3, 5].map((k) => parseInt(a.slice(k, k + 2), 16));
-  const pb = [1, 3, 5].map((k) => parseInt(b.slice(k, k + 2), 16));
-  return "rgb(" + pa.map((v, k) => Math.round(v + (pb[k] - v) * t)).join(",") + ")";
-}
-
 function svgEl(name, attrs = {}, parent) {
   const el = document.createElementNS(SVG_NS, name);
   for (const k in attrs) el.setAttribute(k, attrs[k]);
@@ -68,8 +63,7 @@ const STATIC_PATHS = [
 
 export function createCutaway(parentEl) {
   const uid = Math.random().toString(36).slice(2, 8);
-  const glowId = `md-glow-${uid}`;
-  const patId = `md-dash-${uid}`;
+  const patId = `md-dots-${uid}`;
 
   const el = document.createElement("div");
   el.className = "md-cutaway";
@@ -80,25 +74,20 @@ export function createCutaway(parentEl) {
   el.appendChild(svg);
 
   const defs = svgEl("defs", {}, svg);
-  const filter = svgEl("filter", { id: glowId, filterUnits: "userSpaceOnUse", x: 0, y: 0, width: 400, height: 400 }, defs);
-  svgEl("feGaussianBlur", { in: "SourceGraphic", stdDeviation: 3.5, result: "b" }, filter);
-  const merge = svgEl("feMerge", {}, filter);
-  svgEl("feMergeNode", { in: "b" }, merge);
-  svgEl("feMergeNode", { in: "SourceGraphic" }, merge);
-
-  const pattern = svgEl("pattern", { id: patId, width: 14, height: 7, patternUnits: "userSpaceOnUse" }, defs);
-  svgEl("rect", { width: 14, height: 7, fill: PINK, "fill-opacity": 0.1 }, pattern);
-  const dashes = [
-    svgEl("line", { x1: 0, y1: 2, x2: 8, y2: 2, "stroke-width": 2, "stroke-linecap": "round" }, pattern),
-    svgEl("line", { x1: 7, y1: 5.5, x2: 13, y2: 5.5, "stroke-width": 2, "stroke-linecap": "round" }, pattern),
+  const pattern = svgEl("pattern", { id: patId, width: 10, height: 10, patternUnits: "userSpaceOnUse" }, defs);
+  svgEl("rect", { width: 10, height: 10, fill: BLUE }, pattern);
+  const dots = [
+    svgEl("circle", { cx: 2.5, cy: 2.5, r: 1.5, fill: NAVY }, pattern),
+    svgEl("circle", { cx: 7.5, cy: 7.5, r: 1.5, fill: NAVY }, pattern),
   ];
 
-  svgEl("rect", { width: 400, height: 400, fill: "#140A16" }, svg);
+  svgEl("rect", { width: 400, height: 400, fill: WHITE }, svg);
 
-  const stat = svgEl("g", { fill: "none", stroke: PINK, "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round", filter: `url(#${glowId})` }, svg);
+  const stat = svgEl("g", { fill: "none", stroke: NAVY, "stroke-width": 2.5, "stroke-linecap": "round", "stroke-linejoin": "round" }, svg);
   for (const d of STATIC_PATHS) svgEl("path", { d }, stat);
 
-  const anim = svgEl("g", { fill: "none", stroke: PINK, "stroke-width": 2.4, "stroke-linecap": "round", "stroke-linejoin": "round", filter: `url(#${glowId})` }, svg);
+  const anim = svgEl("g", { fill: "none", stroke: NAVY, "stroke-width": 2.5, "stroke-linecap": "round", "stroke-linejoin": "round" }, svg);
+  const tongueHalo = svgEl("path", { d: PATHS.tongue.neutral, stroke: BLUE, "stroke-width": 0, "stroke-opacity": 0 }, anim);
   const tongue = svgEl("path", { d: PATHS.tongue.neutral, fill: `url(#${patId})` }, anim);
   const upperLip = svgEl("path", { d: PATHS.upperLip.neutral }, anim);
   const lowerLipJaw = svgEl("path", { d: PATHS.lowerLipJaw.neutral }, anim);
@@ -113,10 +102,13 @@ export function createCutaway(parentEl) {
 
   function setHighlight(v) {
     const h = Math.min(1, Math.max(0, v));
-    const c = hexMix(PINK, CYAN, h);
-    tongue.setAttribute("stroke", c);
-    tongue.setAttribute("stroke-width", 2.4 + h * 1.6);
-    for (const d of dashes) d.setAttribute("stroke", c);
+    tongue.setAttribute("stroke-width", 2.5 + h * 2.5);
+    tongueHalo.setAttribute("stroke-width", h * 12);
+    tongueHalo.setAttribute("stroke-opacity", h);
+    for (const d of dots) {
+      d.setAttribute("r", 1.5 + h * 0.7);
+      d.setAttribute("fill-opacity", 0.55 + h * 0.45);
+    }
   }
 
   function show(t) {
@@ -129,6 +121,7 @@ export function createCutaway(parentEl) {
     for (const k in els) {
       els[k].setAttribute("d", lerpPath(PATHS[k][from], PATHS[k][to], t));
     }
+    tongueHalo.setAttribute("d", tongue.getAttribute("d"));
   }
 
   show(0);

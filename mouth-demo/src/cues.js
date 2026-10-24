@@ -1,7 +1,7 @@
 export const CUES = {
   "round-lips": {
     sound: "oo", caption: "Round your lips, like saying “oo”.",
-    shapes: { mouthPucker: 0.85, mouthFunnel: 0.5, jawOpen: 0.15 },
+    shapes: { mouthPucker: 1.0, mouthFunnel: 0.8, jawOpen: 0.12 },
     cutawayPose: "oo",
   },
   "spread-lips": {

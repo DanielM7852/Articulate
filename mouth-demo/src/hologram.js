@@ -5,32 +5,41 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 // ---- tuning knobs -------------------------------------------------------
+const USE_BLOOM = false; // light theme renders straight, no bloom
 export const BLOOM = { strength: 0.55, radius: 0.35, threshold: 0.45 };
-const COLOR_BASE = "#FF2BA6";
-const COLOR_CORE = "#FFD1EC";
-const BAND_FREQ = 180; // bands per metre
-const SCROLL_SPEED = 0.35; // band phase units per second (upward)
+const COLOR_NAVY = "#203E68";
+const COLOR_HALO = "#CBD7E6";
+const SCROLL_SPEED = 0.8; // row phase units per second (upward drift of the dot grid)
 const SWING_SCROLL_BOOST = 5; // extra scroll multiplier at full swing
 const SWING_RISE_MS = 250;
 const SWING_SETTLE_MS = 700;
-const MOUTH_EMPH = { bandMul: 1.7, dutyAdd: 0.15, brightGain: 0.6, dashFreqMul: 1.0, thresholdKeep: 0 };
+const COL_PER_ROW = 0.9; // columns per row frequency (hex-like stagger)
+const MOUTH_EMPH = { rowMul: 1.2, radius: 0.44, opacity: 1.0, coverCap: 0.95 }; // denser, larger, opaque, no dropout
 const RIM_POWER = 2;
-const RIPPLE = { speed: 0.35, width: 0.03, durationMs: 1300, gain: 0.5 }; // m/s, m
-const GLIDE = { minGapMs: 6000, maxGapMs: 8000, firstGapMs: 3500, durationMs: 2200, width: 0.012, gain: 0.6 };
-const REVEAL_EDGE = 0.025; // metres of bright leading edge
+const RIM_RADIUS = 0.1; // extra dot radius at silhouettes
+const RIM_OPACITY = 0.15;
+const BREATH = 0.1; // dot radius shimmer
+const RIPPLE = { speed: 0.35, width: 0.03, durationMs: 1300, swell: 0.2 }; // m/s, m
+const GLIDE = { minGapMs: 6000, maxGapMs: 8000, firstGapMs: 3500, durationMs: 2200, width: 0.012, swell: 0.18 };
+const REVEAL_EDGE = 0.025; // metres of enlarged leading-edge dots
+const EDGE_SWELL = 0.22;
 const BOTTOM_FADE = 0.06; // metres of soft fade at the lowest part of the head
-const HOLD_GAIN = 0.35;
-const RIM_GAIN = 0.7;
-const EDGE_GAIN = 1.0;
-const SOFT_CLIP = 1.4; // highlight rolloff: 1 - exp(-c * SOFT_CLIP)
+const HOLD_SWELL = 0.1;
+const ALIAS_FROM = 0.5; // fwidth(row phase) where dots blend to average coverage
+const ALIAS_TO = 0.8;
+const HEAD_RADIUS = 0.09; // metres, cylindrical column coordinate around the head axis
+const PREPASS_OFFSET = { factor: 2, units: 4 };
+const LIP = { targets: ["mouthPucker", "mouthFunnel"], lo: 0.4, hi: 0.7, radial: 0.35, radius: 0.5, darken: 0.2, line: 0.9 };
+const TEX = { rMax: 0.55, rMin: 0.22, l0: 0.25, l1: 1.0, lipLo: 0.45, lipHi: 0.6, morphW: 0.0, cavityR: 0.1, cavityDark: 0.05 };
+const DEBUG_VIEW = 0; // 1: lip mask, 2: luminance
+const LIP_TEETH = false; // teeth get no lip weight
 const PREPASS_ORDER = -10;
 const HOLO_ORDER = 1;
 
-// per-class tuned params (hair/glasses share "sparse")
+// per-class params: rowFreq = dot rows per metre, radius in row-pitch units
 const CLASS_PARAMS = {
-  full: { bandMul: 1, duty: 0.35, dashFreq: 260, threshold: 0.3, bright: 0.6, side: THREE.FrontSide, prepass: true },
-  eyes: { bandMul: 1.4, duty: 0.55, dashFreq: 200, threshold: 0.12, bright: 1.0, side: THREE.FrontSide, prepass: true },
-  sparse: { bandMul: 0.7, duty: 0.25, dashFreq: 200, threshold: 0.55, bright: 0.25, side: THREE.DoubleSide, prepass: false }
+  full: { rowFreq: 340, radius: 0.38, opacity: 0.92, dropout: 0.06, side: THREE.FrontSide, prepass: true },
+  eyes: { rowFreq: 400, radius: 0.46, opacity: 1.0, dropout: 0.0, side: THREE.FrontSide, prepass: true }
 };
 
 const HIDDEN_RE = /body|outfit|footwear|shoe|shirt|top|bottom|cloth|jacket|pants/i;
@@ -38,9 +47,9 @@ const HIDDEN_RE = /body|outfit|footwear|shoe|shirt|top|bottom|cloth|jacket|pants
 function classify(name) {
   if (/eye/i.test(name) && !/lash|brow/i.test(name)) return "eyes";
   if (/head|teeth|tongue/i.test(name)) return "full";
-  if (/hair|glasses|lash|brow|beard/i.test(name)) return "sparse";
+  if (/hair|glasses|lash|brow|beard/i.test(name)) return "hidden";
   if (HIDDEN_RE.test(name)) return "hidden";
-  return "sparse";
+  return "hidden";
 }
 
 function rep(src, from, to, label, misses) {
@@ -55,6 +64,8 @@ const VERT_PARS = /* glsl */ `
 varying vec3 vRestPos;
 varying vec3 vHNormal;
 varying vec3 vViewPos;
+attribute float aLip;
+varying float vLip;
 `;
 
 const FRAG_PARS = /* glsl */ `
@@ -68,25 +79,62 @@ uniform float uReveal;
 uniform vec2 uFade;
 uniform float uGlideY;
 uniform float uHold;
-uniform vec3 uColBase;
-uniform vec3 uColCore;
-uniform float uBandFreq;
-uniform float uDuty;
-uniform float uDashFreq;
-uniform float uDashThresh;
-uniform float uBright;
+uniform vec3 uColNavy;
+uniform vec3 uColHalo;
+uniform float uRowFreq;
+uniform float uRadius;
+uniform float uOpacity;
+uniform float uDropout;
+uniform vec2 uCylC;
 varying vec3 vRestPos;
 varying vec3 vHNormal;
 varying vec3 vViewPos;
+varying float vLip;
 
 float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+// one dot lattice with a constant row frequency (so fwidth only reflects real surface slope)
+void dotLattice(float rf, float R0, float dropout, float swell, float coverCap, out float a, out float shade, out float spec) {
+  float phase = vRestPos.y * rf - uPhase;
+  float row = floor(phase);
+  float fy = fract(phase) - 0.5;
+  // columns wrap around the head's vertical axis; whole column count per turn hides the seam at the back
+  float circ = 6.2831853 * ${HEAD_RADIUS.toFixed(3)};
+  float cf = max(floor(circ * rf * ${COL_PER_ROW.toFixed(2)}), 1.0) / circ;
+  float u = atan(vRestPos.x - uCylC.x, vRestPos.z - uCylC.y) * ${HEAD_RADIUS.toFixed(3)};
+  float su = u * cf + 0.5 * mod(row, 2.0);
+  float col = floor(su);
+  float fx = fract(su) - 0.5;
+  vec2 q = vec2(fx * rf / cf, fy); // units of row pitch
+
+  float h = hash21(vec2(col, row));
+  float breath = 1.0 + ${BREATH.toFixed(2)} * uShimmer * sin(uTime * 1.1 + h * 6.2831);
+  float R = min(R0 * breath + swell, 0.56);
+
+  float d = length(q);
+  float fw = fwidth(d) + 1e-5;
+  a = 1.0 - smoothstep(R - fw, R + fw, d);
+  if (h < dropout) a = 0.0;
+  // dots finer than a few pixels: average coverage instead of noise
+  float alias = smoothstep(${ALIAS_FROM.toFixed(2)}, ${ALIAS_TO.toFixed(2)}, fwidth(phase));
+  float cover = clamp(3.14159 * R * R * 1.6, 0.0, coverCap);
+  a = mix(a, cover, alias);
+
+  // fake sphere: lit from upper left, darker toward the edge
+  float rr2 = clamp(d / R, 0.0, 1.0);
+  vec3 sn = vec3(q / R, sqrt(max(1.0 - rr2 * rr2, 0.0)));
+  float lit = clamp(dot(sn, normalize(vec3(-0.45, 0.55, 0.7))), 0.0, 1.0);
+  shade = mix(mix(0.55, 1.15, lit), 1.0, alias);
+  spec = 0.35 * pow(lit, 10.0) * (1.0 - alias);
 }
 `;
 
 const FRAG_BODY = /* glsl */ `
 vec3 outgoingLight;
 {
+  vec3 tex = diffuseColor.rgb; // avatar diffuse (linear), sampled by map_fragment
   float y = vRestPos.y;
   if (y > uReveal) discard;
 
@@ -103,51 +151,46 @@ vec3 outgoingLight;
     float life = 1.0 - smoothstep(${(RIPPLE.durationMs * 0.0004).toFixed(3)}, ${(RIPPLE.durationMs * 0.001).toFixed(3)}, uRippleTime);
     ripple = exp(-k * k) * life;
   }
-
-  float bf = uBandFreq * (1.0 + (${MOUTH_EMPH.bandMul.toFixed(2)} - 1.0) * m);
-  float phase = y * bf - uPhase;
-  float bi = floor(phase);
-  float bfrac = phase - bi;
-  float duty = uDuty + ${MOUTH_EMPH.dutyAdd.toFixed(2)} * m + 0.15 * rim;
-  duty = min(duty, 0.9);
-  float alias = step(0.5, fwidth(phase)); // bands finer than ~2 px: fill at average coverage instead of noise
-  if (alias < 0.5 && bfrac > duty) discard;
-
-  float df = uDashFreq * (1.0 + (${MOUTH_EMPH.dashFreqMul.toFixed(2)} - 1.0) * m);
-  float u = vRestPos.x + 0.8 * vRestPos.z;
-  float su = u * df;
-  float seg = floor(su);
-  float h = hash21(vec2(seg, bi));
-  float h2 = hash21(vec2(bi, 7.3));
-  float thr = uDashThresh * (1.0 - (1.0 - ${MOUTH_EMPH.thresholdKeep.toFixed(2)}) * m);
-  thr += 0.12 * uShimmer * sin(uTime * 0.7 + h2 * 6.2831);
-  thr -= 0.25 * ripple;
-  if (alias < 0.5 && h < thr) discard;
-
-  // capsule shape inside the kept segment: rounded dash ends read as dots
-  float T = duty / bf;
-  float L = mix(1.0 / df, 10.0, m); // solid lines (no dash caps) inside the mouth
-  vec2 p = vec2((fract(su) - 0.5) * min(L, 1.0 / df), (bfrac / duty - 0.5) * T);
-  float hl = max(L * 0.5 - T * 0.5, 0.0);
-  float d = length(vec2(max(abs(p.x) - hl, 0.0), p.y));
-  float fw = fwidth(d) + 1e-6;
-  float a = 1.0 - smoothstep(T * 0.5 - fw, T * 0.5 + fw, d);
-  a = mix(a, min(duty * 1.5, 0.75), alias);
-  if (a < 0.02) discard;
-
   float edge = smoothstep(uReveal - ${REVEAL_EDGE.toFixed(3)}, uReveal, y);
   float gl = (y - uGlideY) / ${GLIDE.width.toFixed(3)};
   float glide = exp(-gl * gl) * (1.0 - smoothstep(0.0, 0.01, uHold));
-  float hold = uHold * m;
 
-  float heat = rim * 0.6 + m * 0.1 + ripple * 0.5 + glide * 0.6 + edge + hold * 0.15;
-  float gain = 1.0 + rim * ${RIM_GAIN.toFixed(2)} + m * ${MOUTH_EMPH.brightGain.toFixed(2)} + ripple * ${RIPPLE.gain.toFixed(2)}
-    + glide * ${GLIDE.gain.toFixed(2)} + edge * ${EDGE_GAIN.toFixed(2)} + hold * ${HOLD_GAIN.toFixed(2)};
+  float swell = rim * ${RIM_RADIUS.toFixed(2)} + ripple * ${RIPPLE.swell.toFixed(2)} + glide * ${GLIDE.swell.toFixed(2)}
+    + edge * ${EDGE_SWELL.toFixed(2)};
+  float drop = max(uDropout * (1.0 - rim) - 0.12 * ripple, 0.0);
+
+  float aB, shB, spB, aM, shM, spM;
+  // halftone: darker texture -> bigger dots; red (lips) -> mouth emphasis
+  float lum = sqrt(max(dot(tex, vec3(0.2126, 0.7152, 0.0722)), 0.0));
+  float redness = (tex.r - max(tex.g, tex.b)) / (tex.r + 0.02); // chroma ratio: lips ~0.8, skin ~0.5
+  float L = max(smoothstep(${TEX.lipLo.toFixed(2)}, ${TEX.lipHi.toFixed(2)}, redness), vLip * ${TEX.morphW.toFixed(2)});
+  L = clamp(L, 0.0, 1.0);
+  float cavity = (1.0 - smoothstep(0.0, ${TEX.cavityDark.toFixed(2)}, dot(tex, vec3(0.3333)))) * m * (1.0 - L);
+  float tR = mix(${TEX.rMax.toFixed(2)}, ${TEX.rMin.toFixed(2)}, smoothstep(${TEX.l0.toFixed(2)}, ${TEX.l1.toFixed(2)}, lum)) * (uRadius / 0.38);
+  tR = mix(tR, ${TEX.cavityR.toFixed(2)}, cavity);
+  dotLattice(uRowFreq, tR, drop, swell, 0.7, aB, shB, spB);
+  dotLattice(uRowFreq * ${MOUTH_EMPH.rowMul.toFixed(2)}, mix(tR, ${LIP.radius.toFixed(2)}, L), 0.0, swell + uHold * ${HOLD_SWELL.toFixed(2)}, ${MOUTH_EMPH.coverCap.toFixed(2)}, aM, shM, spM);
+  float ml = clamp(max(m * ${LIP.radial.toFixed(2)} * (1.0 - cavity), L), 0.0, 1.0);
+  float a = mix(aB, aM, ml);
+  float shade = mix(shB, shM, ml);
+  float spec = mix(spB, spM, ml);
+  // thin solid contour where the lip weight crosses 0.5
+  float lg = fwidth(vLip) + 1e-4;
+  float line = (1.0 - smoothstep(0.6, 1.4, abs(vLip - 0.5) / lg)) * ${LIP.line.toFixed(2)};
+  a = max(a, line);
+  if (a < 0.02) discard;
+
+  vec3 col3 = uColNavy * shade * (1.0 - ${LIP.darken.toFixed(2)} * L) + uColHalo * spec;
+  col3 = mix(col3, uColHalo, 0.35 * edge);
+
   float fade = smoothstep(uFade.x, uFade.y, y);
-
-  outgoingLight = mix(uColBase, uColCore, clamp(heat, 0.0, 1.0)) * uBright * gain * fade;
-  outgoingLight = (vec3(1.0) - exp(-outgoingLight * ${SOFT_CLIP.toFixed(2)})) * 0.9;
-  diffuseColor.a = a;
+  float op = mix(uOpacity, ${MOUTH_EMPH.opacity.toFixed(2)}, ml);
+  op = min(op + rim * ${RIM_OPACITY.toFixed(2)} + 0.2 * edge, 1.0);
+  outgoingLight = col3;
+  if (${DEBUG_VIEW} == 1) { outgoingLight = vec3(L); a = 1.0; }
+  if (${DEBUG_VIEW} == 2) { outgoingLight = vec3(lum); a = 1.0; }
+  if (${DEBUG_VIEW} == 3) { outgoingLight = tex; a = 1.0; }
+  diffuseColor.a = a * op * fade;
 }
 `;
 
@@ -157,7 +200,7 @@ function patchShader(shader, uniforms, misses) {
   // meshbasic only builds normals for skinning/envmap; always build them for the rim
   v = rep(v, "#if defined ( USE_ENVMAP ) || defined ( USE_SKINNING )", "#if 1", "vert:normal-block", misses);
   v = rep(v, "#include <morphtarget_pars_vertex>", "#include <morphtarget_pars_vertex>\n" + VERT_PARS, "vert:pars", misses);
-  v = rep(v, "#include <morphtarget_vertex>", "#include <morphtarget_vertex>\nvRestPos = transformed;", "vert:restpos", misses);
+  v = rep(v, "#include <morphtarget_vertex>", "#include <morphtarget_vertex>\nvRestPos = transformed;\nvLip = aLip;", "vert:restpos", misses);
   v = rep(
     v,
     "#include <project_vertex>",
@@ -192,8 +235,9 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
     uFade: { value: new THREE.Vector2(-1e3, -1e3) },
     uGlideY: { value: -1e3 },
     uHold: { value: 0 },
-    uColBase: { value: new THREE.Color(COLOR_BASE) },
-    uColCore: { value: new THREE.Color(COLOR_CORE) }
+    uCylC: { value: new THREE.Vector2(0, 0) },
+    uColNavy: { value: new THREE.Color(COLOR_NAVY) },
+    uColHalo: { value: new THREE.Color(COLOR_HALO) }
   };
 
   // classify meshes once
@@ -215,6 +259,44 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
   });
   console.info("[hologram] mesh classification", summary);
 
+  function addLipAttribute(mesh, zero) {
+    const g = mesh.geometry;
+    if (!g || g.attributes.aLip) return;
+    const n = g.attributes.position.count;
+    const out = new Float32Array(n);
+    const dict = mesh.morphTargetDictionary || {};
+    const morphs = g.morphAttributes.position || [];
+    if (!zero) {
+      for (const name of LIP.targets) {
+        const t = morphs[dict[name]];
+        if (!t) continue;
+        const len = new Float32Array(n);
+        const nz = [];
+        for (let i = 0; i < n; i++) {
+          let dx = t.getX(i);
+          let dy = t.getY(i);
+          let dz = t.getZ(i);
+          if (!g.morphTargetsRelative) {
+            dx -= g.attributes.position.getX(i);
+            dy -= g.attributes.position.getY(i);
+            dz -= g.attributes.position.getZ(i);
+          }
+          len[i] = Math.hypot(dx, dy, dz);
+          if (len[i] > 1e-6) nz.push(len[i]);
+        }
+        if (!nz.length) continue;
+        nz.sort((a, b) => a - b);
+        const p95 = nz[Math.floor(nz.length * 0.95)] || nz[nz.length - 1];
+        for (let i = 0; i < n; i++) out[i] = Math.max(out[i], Math.min(len[i] / p95, 1));
+      }
+      for (let i = 0; i < n; i++) out[i] = THREE.MathUtils.smoothstep(out[i], LIP.lo, LIP.hi);
+    }
+    g.setAttribute("aLip", new THREE.BufferAttribute(out, 1));
+  }
+  for (const e of entries) {
+    if (e.cls === "full") addLipAttribute(e.mesh, /teeth/i.test(e.mesh.name) && !LIP_TEETH);
+  }
+
   // reveal range from geometry bounds (rest space)
   let minY = Infinity;
   let maxY = -Infinity;
@@ -225,7 +307,10 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
     if (!g) continue;
     if (!g.boundingBox) g.computeBoundingBox();
     const b = g.boundingBox;
-    if (/head/i.test(e.mesh.name) && !/hair/i.test(e.mesh.name)) headMinY = Math.min(headMinY, b.min.y);
+    if (/head/i.test(e.mesh.name) && !/hair/i.test(e.mesh.name)) {
+      headMinY = Math.min(headMinY, b.min.y);
+      shared.uCylC.value.set((b.min.x + b.max.x) / 2, b.min.z + HEAD_RADIUS + 0.02);
+    }
     minY = Math.min(minY, b.min.y);
     maxY = Math.max(maxY, b.max.y);
   }
@@ -237,34 +322,35 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
   shared.uFade.value.set(minY, minY + BOTTOM_FADE);
 
   // hologram materials: one per class, created lazily, reused across style switches
-  const materials = {};
-  function getMaterial(cls) {
-    if (materials[cls]) return materials[cls];
+  const materials = new Map();
+  function getMaterial(e) {
+    const cls = e.cls;
+    if (materials.has(e)) return materials.get(e);
     const p = CLASS_PARAMS[cls];
     const mat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
+      map: (e.material && e.material.map) || null,
       transparent: true,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
       depthWrite: false,
       side: p.side,
       fog: false,
       toneMapped: false
     });
     const own = {
-      uBandFreq: { value: BAND_FREQ * p.bandMul },
-      uDuty: { value: p.duty },
-      uDashFreq: { value: p.dashFreq },
-      uDashThresh: { value: p.threshold },
-      uBright: { value: p.bright }
+      uRowFreq: { value: p.rowFreq },
+      uRadius: { value: p.radius },
+      uOpacity: { value: p.opacity },
+      uDropout: { value: p.dropout }
     };
     mat.onBeforeCompile = (shader) => {
       const misses = [];
       patchShader(shader, { ...shared, ...own }, misses);
       if (misses.length) console.warn("[hologram] shader injection missed:", misses.join(", "));
     };
-    mat.customProgramCacheKey = () => "hologram-v1";
+    mat.customProgramCacheKey = () => "hologram-v5";
     mat.userData.hologramClass = cls;
-    materials[cls] = mat;
+    materials.set(e, mat);
     return mat;
   }
 
@@ -276,8 +362,8 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
         depthWrite: true,
         depthTest: true,
         polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1
+        polygonOffsetFactor: PREPASS_OFFSET.factor,
+        polygonOffsetUnits: PREPASS_OFFSET.units
       });
     }
     return prepassMaterial;
@@ -319,7 +405,7 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
         m.visible = false;
         continue;
       }
-      m.material = getMaterial(e.cls);
+      m.material = getMaterial(e);
       m.renderOrder = HOLO_ORDER;
       if (CLASS_PARAMS[e.cls].prepass && m.parent) {
         if (!e.prepass) e.prepass = makePrepass(e);
@@ -470,6 +556,8 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
         for (const e of entries) {
           if (e.prepass) syncPrepass(e);
         }
+      }
+      if (USE_BLOOM && currentStyle === "hologram") {
         ensureComposer();
         composer.render();
       } else {
@@ -487,7 +575,7 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
       currentStyle = "solid";
       disposed = true;
       for (const e of entries) e.prepass = null;
-      for (const k of Object.keys(materials)) materials[k].dispose();
+      for (const mt of materials.values()) mt.dispose();
       if (prepassMaterial) prepassMaterial.dispose();
       if (composer) {
         for (const p of composer.passes) if (p.dispose) p.dispose();

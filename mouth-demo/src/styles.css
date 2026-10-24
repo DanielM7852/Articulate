@@ -1,12 +1,8 @@
 .md-root {
-  --md-plum-deep: #140a16;
-  --md-plum: #25102a;
-  --md-pink: #ff2ba6;
-  --md-core: #ffd1ec;
-  --md-cyan: #3cf2ff;
-  --md-text: #f6eff4;
-  --md-ink: #140a16;
-  --md-strip: #0b050d;
+  --md-navy: #203e68;
+  --md-grey: #dadfd9;
+  --md-white: #ffffff;
+  --md-blue: #cbd7e6;
   --md-swing-ms: 1200ms;
 
   position: relative;
@@ -17,8 +13,8 @@
   min-height: 320px;
   box-sizing: border-box;
   overflow: hidden;
-  background: var(--md-plum-deep);
-  color: var(--md-text);
+  background: linear-gradient(180deg, var(--md-white) 0%, var(--md-blue) 100%);
+  color: var(--md-navy);
   font-family: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
   container: md-root / inline-size;
 }
@@ -37,7 +33,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  background: linear-gradient(180deg, var(--md-plum-deep) 0%, var(--md-plum) 100%);
+  background: linear-gradient(180deg, var(--md-white) 0%, var(--md-blue) 100%);
 }
 
 .md-canvas-host {
@@ -59,7 +55,8 @@
   flex: 0 0 0;
   min-width: 0;
   overflow: hidden;
-  background: var(--md-plum-deep);
+  background: var(--md-white);
+  border-left: 2px solid var(--md-grey);
   transition: flex-basis var(--md-swing-ms) ease-in-out;
 }
 
@@ -79,7 +76,7 @@
   bottom: 6px;
   font-size: 13px;
   line-height: 1.2;
-  color: rgba(246, 239, 244, 0.75);
+  color: var(--md-navy);
   white-space: nowrap;
 }
 
@@ -93,7 +90,7 @@
     width: 48%;
     aspect-ratio: 1 / 1;
     border-radius: 8px;
-    border: 1px solid rgba(255, 43, 166, 0.5);
+    border: 2px solid var(--md-grey);
     transform: translateX(calc(100% + 16px));
     transition: transform var(--md-swing-ms) ease-in-out;
   }
@@ -113,7 +110,7 @@
   padding: 16px;
   text-align: center;
   font-size: 18px;
-  color: var(--md-text);
+  color: var(--md-navy);
   pointer-events: none;
 }
 
@@ -124,8 +121,8 @@
 .md-caption {
   min-height: calc(1.3em + 24px);
   padding: 12px 16px;
-  background: var(--md-strip);
-  color: var(--md-text);
+  background: var(--md-grey);
+  color: var(--md-navy);
   font-size: clamp(28px, 20px + 1.2vw, 34px);
   font-weight: 700;
   line-height: 1.3;
@@ -140,17 +137,17 @@
   justify-content: center;
   gap: 12px;
   padding: 12px 16px 8px;
-  background: var(--md-strip);
+  background: var(--md-white);
 }
 
 .md-btn {
   min-width: 44px;
   min-height: 44px;
   padding: 8px 20px;
-  border: 2px solid var(--md-pink);
+  border: 2px solid var(--md-navy);
   border-radius: 8px;
-  background: transparent;
-  color: var(--md-text);
+  background: var(--md-white);
+  color: var(--md-navy);
   font-size: 18px;
   font-weight: 700;
   line-height: 1.2;
@@ -159,24 +156,25 @@
 }
 
 .md-btn:hover {
-  background: rgba(255, 43, 166, 0.2);
+  background: var(--md-blue);
 }
 
 .md-btn[aria-pressed="true"] {
-  background: var(--md-pink);
-  color: var(--md-ink);
+  background: var(--md-navy);
+  color: var(--md-white);
 }
 
 .md-btn:focus-visible {
-  outline: 3px solid var(--md-cyan);
-  outline-offset: 3px;
+  outline: 3px solid var(--md-navy);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--md-white);
 }
 
 .md-note {
   margin: 0;
   padding: 6px 16px 10px;
-  background: var(--md-strip);
-  color: rgba(246, 239, 244, 0.75);
+  background: var(--md-white);
+  color: var(--md-navy);
   font-size: 13px;
   line-height: 1.3;
   text-align: center;
@@ -189,8 +187,9 @@
   max-width: calc(100% - 16px);
   padding: 4px 8px;
   border-radius: 4px;
-  background: rgba(11, 5, 13, 0.85);
-  color: var(--md-text);
+  background: var(--md-white);
+  color: var(--md-navy);
+  border: 1px solid var(--md-navy);
   font-size: 12px;
   line-height: 1.3;
   pointer-events: none;
@@ -214,6 +213,6 @@ body.md-harness #app {
 
 body.md-harness {
   margin: 0;
-  background: #0b050d;
+  background: linear-gradient(180deg, #ffffff 0%, #cbd7e6 100%) fixed;
   font-family: "Atkinson Hyperlegible", system-ui, sans-serif;
 }
