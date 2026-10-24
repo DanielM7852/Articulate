@@ -1,0 +1,12 @@
+# This repository shares workspace context; code repositories stay independent.
+/*
+!/.gitignore
+!/*.md
+!/.claude/
+
+# Keep machine-specific Claude settings and credentials local.
+/.claude/settings.local.json
+/.claude/**/.env
+/.claude/**/.env.*
+/.claude/**/credentials.json
+/.claude/**/secrets.json
