@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createMicrophoneSession, type MicrophoneSession } from './audio/capture';
+import { CueSummary, type CueReadout } from './audio/cues';
 import { DEFAULT_SETTINGS, type EstimatorSettings } from './audio/estimator';
 import type { TrackedFrame, VowelPoint } from './audio/tracker';
 
@@ -15,11 +16,12 @@ interface SessionState {
   durationMs: number;
   error: string | null;
   stale: boolean;
+  cues: CueReadout | null;
 }
 
 const emptyState = (): SessionState => ({
   phase: 'idle', frame: null, trace: [], frames: 0, accepted: 0,
-  sampleRate: null, durationMs: 0, error: null, stale: false,
+  sampleRate: null, durationMs: 0, error: null, stale: false, cues: null,
 });
 
 function errorMessage(error: unknown): string {
@@ -31,8 +33,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Could not start audio analysis. Press Start to try again.';
 }
 
-export function useVowelSession(settings: EstimatorSettings = DEFAULT_SETTINGS) {
+export interface SessionOptions {
+  /** Receives every tracked frame, including frames React may batch into one render. */
+  onFrame?: (frame: TrackedFrame) => void;
+}
+
+export function useVowelSession(settings: EstimatorSettings = DEFAULT_SETTINGS, options: SessionOptions = {}) {
   const [state, setState] = useState<SessionState>(emptyState);
+  const onFrame = useRef(options.onFrame);
+  onFrame.current = options.onFrame;
   const session = useRef<MicrophoneSession | null>(null);
   const pending = useRef<AbortController | null>(null);
   const generation = useRef(0);
@@ -62,6 +71,7 @@ export function useVowelSession(settings: EstimatorSettings = DEFAULT_SETTINGS) 
     const token = generation.current;
     const controller = new AbortController();
     pending.current = controller;
+    const cueSummary = new CueSummary();
     setState({ ...emptyState(), phase: 'requesting' });
     try {
       const current = await createMicrophoneSession({
@@ -70,11 +80,13 @@ export function useVowelSession(settings: EstimatorSettings = DEFAULT_SETTINGS) 
         onFrame: (frame) => {
           if (generation.current !== token) return;
           lastFrameAt.current = performance.now();
+          onFrame.current?.(frame);
+          const cues = cueSummary.push(frame.estimate, frame.cues, frame.timestampMs);
           setState((previous) => {
             const last = previous.trace.at(-1);
             const append = frame.point && (!last || frame.point.timestampMs - last.timestampMs >= 50);
             return {
-              ...previous, frame, stale: false, frames: previous.frames + 1,
+              ...previous, frame, cues, stale: false, frames: previous.frames + 1,
               accepted: previous.accepted + (frame.point ? 1 : 0),
               durationMs: frame.timestampMs,
               trace: append ? [...previous.trace.filter((sample) => sample.timestampMs >= frame.timestampMs - 18000).slice(-359), frame.point!] : previous.trace,

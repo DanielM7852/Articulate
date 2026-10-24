@@ -2,7 +2,8 @@ import { defineConfig } from '@playwright/test';
 import { resolve } from 'node:path';
 
 const preview = process.env.MAPPER_PREVIEW === '1';
-const port = Number(process.env.MAPPER_PORT ?? (preview ? 5174 : 5173));
+// MAPPER_PORT lets a second checkout run its own server instead of reusing another checkout's.
+const port = Number(process.env.MAPPER_PORT) || (preview ? 5174 : 5173);
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({

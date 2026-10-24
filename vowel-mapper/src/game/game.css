@@ -1,0 +1,79 @@
+/* Zone game. Uses the mapper's tokens from styles.css; outcome colours add teal (hit) and amber (miss). */
+.game-workspace { --hit: #117f7e; --miss: #b7791f; --unheard: #8a99ad; }
+
+/* Plot overlay */
+.game-zone polygon { fill: #2e64f5; fill-opacity: .05; stroke: #9db5ef; stroke-width: 1.2; stroke-dasharray: 4 4; transition: fill-opacity .2s ease, stroke .2s ease; }
+.game-zone text { font-family: "Avenir Next", "Segoe UI", sans-serif; font-weight: 600; letter-spacing: -.3px; fill: #7f97c4; }
+.game-zone.is-active polygon { fill-opacity: .1; stroke: #2e64f5; stroke-width: 1.8; stroke-dasharray: none; }
+.game-zone.is-active text { fill: #355ca5; }
+.game-zone.is-reached polygon { fill: var(--hit); fill-opacity: .14; stroke: var(--hit); stroke-width: 1.8; stroke-dasharray: none; }
+.game-zone.is-reached text { fill: #0d5e5d; }
+.game-glide { fill: none; stroke: #2e64f5; color: #2e64f5; stroke-width: 2; stroke-dasharray: 1 7; stroke-linecap: round; }
+.game-hold-progress { fill: none; stroke: var(--hit); stroke-width: 4; stroke-linecap: round; }
+.game-approach { fill: none; stroke: #2e64f5; stroke-width: 2.2; }
+
+/* Panel */
+.game-panel { display: flex; flex-direction: column; }
+.game-copy { min-height: 0; margin: 14px 0 18px; }
+.game-copy strong { color: #355ca5; font-weight: 650; }
+.game-copy h2[data-outcome="hit"] { color: #0d5e5d; }
+.game-copy h2[data-outcome="miss"] { color: #8a5a12; }
+.game-copy h2[data-outcome="unheard"] { color: #586b87; }
+
+.game-phases { list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 16px 0 0; padding: 0; }
+.game-phases li { display: flex; flex-direction: column; align-items: center; padding: 10px 4px 9px; border: 1px solid var(--line); border-radius: 12px; color: #8a99ad; }
+.game-phases strong { font-family: "Avenir Next", sans-serif; font-size: 20px; font-weight: 600; letter-spacing: -.8px; }
+.game-phases small { font-size: 10px; margin-top: 2px; }
+.game-phases li.is-active { border-color: var(--blue); color: #355ca5; background: #f6f9ff; }
+.game-phases li.is-done { color: #0d5e5d; border-color: #bfdcdb; }
+
+.game-meter { display: grid; grid-template-columns: 1fr auto; row-gap: 8px; font-size: 10px; color: var(--muted); margin-bottom: 20px; }
+.game-meter-count { font-family: "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; }
+.game-bar, .game-window { grid-column: 1 / -1; height: 8px; border-radius: 5px; background: #eaf0fa; overflow: hidden; }
+.game-bar i, .game-window i { display: block; height: 100%; background: #477bf5; border-radius: 5px; }
+.game-window { height: 4px; margin: -6px 0 16px; }
+.game-window i { background: #9db5ef; }
+
+.game-strip { list-style: none; display: flex; gap: 6px; margin: 16px 0 0; padding: 0; }
+.game-strip li { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 7px 0 6px; border-radius: 10px; font-size: 10px; color: var(--muted); }
+.game-strip li.is-current { background: #f0f4fd; color: var(--ink); font-weight: 600; }
+.game-glyph circle, .game-glyph path { fill: none; stroke-width: 1.6; }
+.game-glyph .glyph-hit { fill: var(--hit); stroke: var(--hit); }
+.game-glyph .glyph-miss { stroke: var(--miss); }
+.game-glyph .glyph-unheard { stroke: var(--unheard); stroke-dasharray: 2.2 2; }
+.game-glyph text { font-size: 8px; font-weight: 700; fill: #6a7a92; }
+.game-glyph .glyph-pending { fill: #c4d0e2; stroke: none; }
+.game-strip li.is-current .glyph-pending { fill: var(--blue); }
+
+/* The word, letter by letter: judged vowels in ink, consonant cues pale with their cue beneath. */
+.game-word { display: flex; justify-content: center; align-items: flex-start; gap: 14px; padding: 22px 0 6px; }
+.game-word span { display: flex; flex-direction: column; align-items: center; }
+.game-word b { font-family: "Avenir Next", "Segoe UI", sans-serif; font-size: 56px; line-height: 1; font-weight: 600; letter-spacing: -2.5px; color: var(--ink); padding: 0 2px 8px; border-bottom: 3px solid var(--blue); }
+.game-word small { font-size: 10px; margin-top: 7px; color: #355ca5; font-weight: 600; white-space: nowrap; }
+.game-word .is-cue b { color: #b3c1d6; border-bottom: 3px dotted #cfd9e8; }
+.game-word .is-cue small { color: var(--muted); font-weight: 400; white-space: normal; max-width: 64px; text-align: center; line-height: 1.35; }
+
+.game-mic { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); margin: 0 0 14px; }
+.game-mic::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #c4d0e2; }
+.game-mic.is-tracking::before { background: var(--blue); }
+
+.game-pacing { border: 0; margin: 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 9px; font-size: 12px; }
+.game-pacing legend { font-size: 10px; color: var(--muted); margin-bottom: 8px; padding: 0; }
+.game-pacing label { display: flex; align-items: center; gap: 8px; }
+.game-pacing input { accent-color: var(--blue); margin: 0; }
+.game-pacing select { background: white; border: 1px solid #bdcbe0; border-radius: 7px; padding: 7px; font-size: 12px; color: var(--ink); }
+
+.game-error { margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; background: #fdf6ec; color: #8a5a12; font-size: 12px; line-height: 1.5; }
+.game-problems { margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.game-problems li + li { margin-top: 6px; }
+
+.game-results { list-style: none; margin: 0 0 20px; padding: 0; border-top: 1px solid var(--line); }
+.game-results li { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.game-results b { font-family: "Avenir Next", sans-serif; font-size: 16px; font-weight: 600; letter-spacing: -.4px; }
+.game-results span { color: var(--muted); font-size: 11px; }
+
+.game-boundary { margin: auto 0 0; padding-top: 18px; border-top: 1px solid var(--line); font-size: 10px; line-height: 1.6; color: var(--muted); }
+.game-panel .controls + .game-boundary, .game-panel .control-note + .game-boundary { margin-top: 22px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 720px) { .game-word b { font-size: 48px; } }

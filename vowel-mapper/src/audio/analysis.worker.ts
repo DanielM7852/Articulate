@@ -1,3 +1,4 @@
+import { spectralCues } from './cues';
 import { estimateFormants, type EstimatorSettings } from './estimator';
 import { VowelTracker } from './tracker';
 
@@ -11,5 +12,5 @@ self.onmessage = (event: MessageEvent<{
 }>) => {
   const { frame, sampleRate, timestampMs, settings } = event.data;
   const estimate = estimateFormants(frame, sampleRate, settings);
-  self.postMessage(tracker.push(estimate, timestampMs));
+  self.postMessage({ ...tracker.push(estimate, timestampMs), cues: estimate.rms > 0 ? spectralCues(frame, sampleRate) : null });
 };
