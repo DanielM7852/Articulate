@@ -1,6 +1,23 @@
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { computeVisionTelemetry } from "./vision";
 
+const nativeImportScripts = self.importScripts.bind(self);
+self.importScripts = (...urls: (string | URL)[]) => {
+  try {
+    return nativeImportScripts(...urls);
+  } catch {
+    /* Vite module worker */
+  }
+  for (const url of urls) {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", String(url), false);
+    xhr.send();
+    if (xhr.status < 200 || xhr.status >= 300)
+      throw new Error(`MediaPipe wasm load failed (${xhr.status})`);
+    (0, eval)(xhr.responseText);
+  }
+};
+
 let landmarker: FaceLandmarker | null = null;
 let initFailed = false;
 
@@ -11,18 +28,24 @@ async function ensureLandmarker(wasmBaseUrl?: string, modelAssetPath?: string) {
       wasmBaseUrl ||
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/wasm",
     );
-    landmarker = await FaceLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath:
-          modelAssetPath ||
-          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-        delegate: "GPU",
-      },
-      runningMode: "IMAGE",
-      numFaces: 1,
-      outputFaceBlendshapes: true,
-      outputFacialTransformationMatrixes: true,
-    });
+    const create = (delegate: "GPU" | "CPU") =>
+      FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            modelAssetPath ||
+            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+          delegate,
+        },
+        runningMode: "IMAGE",
+        numFaces: 1,
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: true,
+      });
+    try {
+      landmarker = await create("GPU");
+    } catch {
+      landmarker = await create("CPU");
+    }
     postMessage({ type: "ready" });
     return landmarker;
   } catch (err) {
@@ -45,7 +68,8 @@ self.onmessage = async (event: MessageEvent) => {
   if (data.type === "frame" && data.bitmap) {
     const bitmap: ImageBitmap = data.bitmap;
     const timestampMs: number = data.timestampMs ?? 0;
-    const aspect = bitmap.width && bitmap.height ? bitmap.width / bitmap.height : 4 / 3;
+    const aspect =
+      bitmap.width && bitmap.height ? bitmap.width / bitmap.height : 4 / 3;
     try {
       const lm = await ensureLandmarker();
       if (!lm) {

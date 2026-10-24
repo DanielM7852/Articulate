@@ -9,3 +9,4 @@ __pycache__/
 *.egg-info/
 test-results/
 playwright-report/
+apps/web/public/mediapipe/wasm/

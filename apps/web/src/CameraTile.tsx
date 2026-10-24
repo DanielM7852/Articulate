@@ -46,6 +46,21 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
     const startMsRef = useRef<number>(0);
     const workerBusyRef = useRef(false);
     const workerFallbackRef = useRef(false);
+    const workerReadyRef = useRef(false);
+    const liveProps = useRef({
+      targetId,
+      capturing,
+      onTelemetry,
+      onError,
+      onModeChange,
+    });
+    liveProps.current = {
+      targetId,
+      capturing,
+      onTelemetry,
+      onError,
+      onModeChange,
+    };
 
     const [latest, setLatest] = useState<VisionMetrics | null>(null);
     const [keyframes, setKeyframes] = useState<VisionKeyframe[]>([]);
@@ -92,7 +107,11 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
         h = canvas.height;
       ctx.clearRect(0, 0, w, h);
 
-      if (mode === "webcam" && videoRef.current && videoRef.current.readyState >= 2) {
+      if (
+        mode === "webcam" &&
+        videoRef.current &&
+        videoRef.current.readyState >= 2
+      ) {
         ctx.save();
         ctx.translate(w, 0);
         ctx.scale(-1, 1);
@@ -165,8 +184,14 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
         ctx.stroke();
       }
 
-      if (capturing && metrics.valid && collectorRef.current) {
-        collectorRef.current.capture(canvas, metrics, overlay);
+      if (
+        liveProps.current.capturing &&
+        mode === "webcam" &&
+        metrics.valid &&
+        collectorRef.current &&
+        videoRef.current
+      ) {
+        collectorRef.current.capture(videoRef.current, metrics, overlay);
         setKeyframes([...collectorRef.current.getKeyframes()]);
       }
     }
@@ -174,11 +199,11 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
     function handleResult(metrics: VisionMetrics, overlay: VisionOverlay) {
       setLatest(metrics);
       drawOverlay(metrics, overlay);
-      if (capturing) {
+      if (liveProps.current.capturing) {
         if (framesRef.current.length < 300) {
           framesRef.current.push(metrics);
         }
-        onTelemetry(metrics);
+        liveProps.current.onTelemetry(metrics);
       }
     }
 
@@ -200,7 +225,7 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
           if (!active) return;
           const elapsed = performance.now() - startMsRef.current;
           const { metrics, overlay } = generateSyntheticVision(
-            targetId,
+            liveProps.current.targetId,
             index++,
             elapsed,
           );
@@ -214,6 +239,7 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
 
       setWorkerStatus("Starting MediaPipe worker…");
       workerFallbackRef.current = false;
+      workerReadyRef.current = false;
 
       try {
         const worker = new Worker(
@@ -226,26 +252,37 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
           if (!active) return;
           const msg = ev.data;
           if (msg.type === "ready") {
+            workerReadyRef.current = true;
             setWorkerStatus("MediaPipe Face Landmarker active");
           } else if (msg.type === "result") {
             handleResult(msg.metrics, msg.overlay);
           } else if (msg.type === "fallback_needed" || msg.type === "error") {
             workerFallbackRef.current = true;
-            setWorkerStatus("Webcam active · geometric CV fallback");
+            setWorkerStatus("Camera visible · tracking unavailable");
           }
         };
         worker.onerror = () => {
           workerFallbackRef.current = true;
           workerBusyRef.current = false;
         };
-        worker.postMessage({ type: "init" });
+        const origin = new URL(import.meta.env.BASE_URL, window.location.href);
+        worker.postMessage({
+          type: "init",
+          wasmBaseUrl: new URL("mediapipe/wasm", origin).href,
+          modelAssetPath: new URL("mediapipe/face_landmarker.task", origin)
+            .href,
+        });
       } catch {
         workerFallbackRef.current = true;
       }
 
       navigator.mediaDevices
         .getUserMedia({
-          video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: "user" },
+          video: {
+            width: { ideal: 320 },
+            height: { ideal: 240 },
+            facingMode: "user",
+          },
           audio: false,
         })
         .then(async (stream) => {
@@ -262,6 +299,12 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
           timer = setInterval(async () => {
             if (!active || !videoRef.current) return;
             const elapsed = performance.now() - startMsRef.current;
+            // Backpressure skips a frame; it must never create target-dependent observations.
+            if (
+              workerBusyRef.current ||
+              (!workerReadyRef.current && !workerFallbackRef.current)
+            )
+              return;
             if (
               !workerFallbackRef.current &&
               workerRef.current &&
@@ -282,18 +325,29 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
                 workerFallbackRef.current = true;
               }
             }
-            const { metrics, overlay } = generateSyntheticVision(
-              targetId,
-              index++,
-              elapsed,
+            handleResult(
+              {
+                timestamp_ms: Math.round(elapsed),
+                valid: false,
+                quality_flags: ["camera_tracking_unavailable"],
+                lip_opening: null,
+              },
+              {
+                outerLip: [],
+                innerLip: [],
+                corners: null,
+                vertical: null,
+                faceBox: null,
+              },
             );
-            handleResult(metrics, overlay);
           }, 70);
         })
         .catch((err) => {
           if (!active) return;
-          onError(err instanceof Error ? err.message : "Camera access denied");
-          onModeChange("off");
+          liveProps.current.onError(
+            err instanceof Error ? err.message : "Camera access denied",
+          );
+          liveProps.current.onModeChange("off");
         });
 
       return () => {
@@ -301,19 +355,30 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
         if (timer) clearInterval(timer);
         workerRef.current?.terminate();
         workerRef.current = null;
-        streamRef.current?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+        workerBusyRef.current = false;
+        workerReadyRef.current = false;
+        streamRef.current
+          ?.getTracks()
+          .forEach((t: MediaStreamTrack) => t.stop());
         streamRef.current = null;
       };
-    }, [mode, targetId, capturing]);
+    }, [mode]);
 
     return (
-      <section className="camera-tile" aria-label="Computer vision lip tracking">
+      <section
+        className="camera-tile"
+        aria-label="Computer vision lip tracking"
+      >
         <div className="camera-header">
           <div>
             <span className="eyebrow">03 / COMPUTER VISION (MEDIAPIPE)</span>
             <h3>Visible lip &amp; jaw telemetry</h3>
           </div>
-          <div className="camera-controls" role="group" aria-label="Camera mode">
+          <div
+            className="camera-controls"
+            role="group"
+            aria-label="Camera mode"
+          >
             {(
               [
                 ["off", "Camera off"],
@@ -405,7 +470,10 @@ export const CameraTile = forwardRef<CameraTileHandle, Props>(
               </div>
 
               {keyframes.length > 0 && (
-                <div className="keyframes-strip" aria-label="Captured agent keyframes">
+                <div
+                  className="keyframes-strip"
+                  aria-label="Captured agent keyframes"
+                >
                   <span className="eyebrow">
                     KEYFRAMES QUEUED FOR CLAUDE VISION ({keyframes.length}/3)
                   </span>

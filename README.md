@@ -4,6 +4,13 @@ Select a vowel → capture synthetic features or microphone PCM → watch an ind
 
 The backbone lives in `apps/web`, `services/api` and `spacetimedb`. The existing `mouth-demo/` remains a separate visual workstream. The backbone uses a labeled static React Three Fiber placeholder through `ReferenceAdapter`; TalkingHead is not a backbone dependency.
 
+## CV data collector
+
+See [docs/vision-collector.md](docs/vision-collector.md) for the standalone camera
+collector and integration contract. Open `/vision.html` in the web workspace to
+inspect/export full landmarks, blendshapes, geometry, pose, quality, timing and
+optional images without the backend. Import `apps/web/src/cv/index.ts` for integration.
+
 ## Run locally
 
 Requirements: Python 3.12, uv, Node 22.12+ (tested with Node 24), npm. From this repository:
