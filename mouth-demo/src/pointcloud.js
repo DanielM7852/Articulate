@@ -18,20 +18,30 @@ const COLOR_HALO = "#CBD7E6";
 const COLOR_GREY = "#DADFD9";
 
 // dots per square metre of surface, by mesh class; and an overall cap
-const DENSITY = { full: 230000, eyes: 360000, teeth: 260000, hair: 70000 };
+const DENSITY = { full: 230000, eyes: 360000, teeth: 260000, hair: 230000 };
 const MAX_DOTS = 320000;
 // Even spacing: candidates are generated at OVERSAMPLE x the density, then accepted only
 // if no accepted dot lies within SPACING / sqrt(density) of them (dart throwing).
 const OVERSAMPLE = 4;
 const SPACING = 0.82;
-const DOT = { radius: 0.00068, mouthSwell: 0.3, holdSwell: 0.25, rimSwell: 0.12, minPx: 1.5, maxPx: 7 }; // metres; px limits in CSS pixels
+const DOT = { radius: 0.00068, mouthSwell: 0.1, holdSwell: 0.08, rimSwell: 0.12, minPx: 1.5, maxPx: 7 }; // metres; px limits in CSS pixels
 const KIND = { head: 0, hair: 1, eyes: 2, teeth: 3 };
-const SIZE_MUL = { full: 1, hair: 0.85, eyes: 0.8, teeth: 0.8 };
+const SIZE_MUL = { full: 1, hair: 1.15, eyes: 0.8, teeth: 0.8 };
+// hair reads as a dark mass so its silhouette frames the face: base = navy * base, highlights scaled by spec
+const HAIR_TONE = { base: 0.42, spec: 0.25 };
+// teeth: a soft grey-navy, not a bright white slit between the lips
+const TEETH_TONE = { navyMix: 0.78, spec: 0.35 };
+// Lips are the darkest skin texels, so they get the largest dots; cap that near the mouth so a smile
+// (which squeezes the lips vertically) does not pile them into a heavy, scaly band.
+const LIP_SIZE_CAP = 1.15;
 const MOUTH_RADIUS_MUL = 1.6;
 const BOTTOM_FADE = 0.06; // metres of soft fade at the lowest part of the head
 const HAIR_FADE = 0.08; // metres above the head bottom: the long hair fades out
 // thin the fringe in front of the forehead so the face reads (same shape as the hologram style)
-const FRINGE = { zStartFrac: 0.62, band: 0.07, sideFrac: 0.75, sideSoft: 0.03, yDrop: 0.05, ySoft: 0.03, strength: 0.9 };
+const FRINGE = { zStartFrac: 0.62, band: 0.03, sideFrac: 0.75, sideSoft: 0.03, yDrop: 0.05, ySoft: 0.03, strength: 1.0 };
+// scalp cap: head dots above a soft hairline take the hair tone, so the crown reads as one dark mass with the
+// hair cards instead of a pale scalp ringed by hair (same shape as the hologram style's "cap" hair mode)
+const SCALP = { hairlineDrop: 0.085, soft: 0.011, temple: 0.045, nape: 0.17 }; // metres
 /**
  * Pointer interaction: a displacement field, not a hole. Each dot near the pointer's
  * ray has a target displacement that falls off as a Gaussian of its distance to the
@@ -111,7 +121,7 @@ void main() {
   float rim = pow(1.0 - clamp(facing, 0.0, 1.0), 2.0);
   // key light from the upper left, in view space; hair cards are two-sided, so take the lit side
   float lambert = dot(n, normalize(vec3(-0.45, 0.6, 0.75)));
-  if (vKind > 0.5 && vKind < 1.5) lambert = abs(lambert);
+  if (aInfo.y > 0.5 && aInfo.y < 1.5) lambert = abs(lambert);
   float lit = smoothstep(-0.15, 0.85, lambert);
   float sizeLight = mix(${LIGHT.sizeShadow.toFixed(2)}, ${LIGHT.sizeLit.toFixed(2)}, lit);
   float r = uRadius * aInfo.x * sizeLight * (1.0 + ${DOT.mouthSwell.toFixed(2)} * aInfo.z + uHold * ${DOT.holdSwell.toFixed(2)} * aInfo.z + ${DOT.rimSwell.toFixed(2)} * rim);
@@ -146,11 +156,18 @@ void main() {
   float lit = clamp(dot(sn, normalize(vec3(-0.45, 0.55, 0.7))), 0.0, 1.0);
   float shade = mix(0.55, 1.15, lit) * mix(${LIGHT.shadeShadow.toFixed(2)}, ${LIGHT.shadeLit.toFixed(2)}, vLit);
   float spec = 0.35 * pow(lit, 10.0) * (0.4 + 0.6 * vLit);
+  float rimGlow = 0.2 * vRim;
   vec3 base = uColNavy;
-  if (vKind > 2.5) base = mix(uColGrey, uColNavy, 0.25);
-  else if (vKind > 1.5) base = uColNavy * 0.75;
-  else if (vKind > 0.5) base = uColNavy * 0.82;
-  vec3 col = base * shade + uColHalo * (spec + 0.2 * vRim) + uColHalo * 0.08 * vMouth;
+  if (vKind > 2.5) {
+    base = mix(uColGrey, uColNavy, ${TEETH_TONE.navyMix.toFixed(2)});
+    spec *= ${TEETH_TONE.spec.toFixed(2)};
+  } else if (vKind > 1.5) base = uColNavy * 0.75;
+  else if (vKind > 0.5) {
+    base = uColNavy * ${HAIR_TONE.base.toFixed(2)};
+    spec *= ${HAIR_TONE.spec.toFixed(2)};
+    rimGlow = 0.0;
+  }
+  vec3 col = base * shade + uColHalo * (spec + rimGlow) + uColHalo * 0.04 * vMouth;
   gl_FragColor = vec4(col, cov * vAlpha);
   #include <colorspace_fragment>
 }
@@ -297,6 +314,11 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   const halfW = (hb.max.x - hb.min.x) / 2;
   const fringeZ = hb.min.z + (hb.max.z - hb.min.z) * FRINGE.zStartFrac;
   const fringeY = hb.max.y - FRINGE.yDrop;
+  const scalpY = hb.max.y - SCALP.hairlineDrop;
+  const scalpMask = (p) => {
+    const y0 = scalpY - SCALP.temple * smooth(0.045, 0.085, Math.abs(p.x)) - SCALP.nape * (1 - smooth(-0.03, 0, p.z));
+    return smooth(y0 - SCALP.soft, y0 + SCALP.soft, p.y);
+  };
   const mouthC = anchor?.restCenter ?? new THREE.Vector3(0, 1.55, 0.09);
   const mouthR = (anchor?.radius ?? 0.03) * MOUTH_RADIUS_MUL;
 
@@ -361,6 +383,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     const nb = new THREE.Vector3();
     const ncv = new THREE.Vector3();
     const weighted = e.cls !== "hair";
+    const isScalp = e.cls === "full" && /head/i.test(e.mesh.name);
 
     // 1. candidates, several per final dot, in a random order so acceptance is unbiased.
     // Each triangle's density is raised by the darkness of its texture and by its curvature
@@ -484,6 +507,12 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         const v = w0 * uv.getY(ia) + w1 * uv.getY(ib) + w2 * uv.getY(ic);
         const l = smooth(TEX.l0, TEX.l1, lum(u, v));
         size *= TEX.dark + (TEX.bright - TEX.dark) * l;
+        if (mouth > 0) size += (Math.min(size, sizeMul * LIP_SIZE_CAP) - size) * mouth;
+      }
+      let dotKind = kind;
+      if (isScalp && Math.random() < scalpMask(P)) {
+        dotKind = KIND.hair;
+        size = SIZE_MUL.hair;
       }
       const tkey = `${ei}:${cand[i]}:${cand[i + 1]}`; // a directed edge belongs to one triangle in a consistently wound mesh
       let tid = uniqIndex.get(tkey);
@@ -494,7 +523,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       }
       dotTri.push(tid);
       bary.push(cand[i + 3], cand[i + 4], cand[i + 5]);
-      info.push(size, kind, mouth, alpha);
+      info.push(size, dotKind, mouth, alpha);
       kept++;
     }
     perClass[e.mesh.name || e.cls] = `${e.cls}: ${kept} dots, ${nc} candidates, area ${areas.get(e).sum.toFixed(4)} m²`;
