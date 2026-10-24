@@ -18,7 +18,7 @@ from .controller import Conflict, Runtime, restore
 from .persistence import Outbox
 from .providers import CueRepository, Reasoner
 from .decisions import prepared_captions
-from .schemas import TARGETS, Command
+from .schemas import TARGETS, Command, VisionKeyframe, VisionMetrics
 
 
 class JsonLog(logging.Formatter):
@@ -146,6 +146,7 @@ def create_app(settings: Settings | None = None):
             else "configured, unverified"
             if settings.spacetimedb_database and settings.spacetimedb_token
             else "missing configuration",
+            "vision": "MediaPipe Face Landmarker (browser worker + keyframe multimodal)",
         }
         ok = settings.mock_mode or (
             repository.ready
@@ -178,6 +179,22 @@ def create_app(settings: Settings | None = None):
     @app.get("/api/sessions/{session_id}/snapshot")
     async def snapshot(session_id: UUID, request: Request):
         return get_runtime(session_id, bearer(request)).snapshot()
+
+    @app.post("/api/sessions/{session_id}/vision")
+    async def upload_vision(session_id: UUID, request: Request):
+        check_origin(request.headers)
+        runtime = get_runtime(session_id, bearer(request))
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(400, "invalid vision payload")
+        frame = VisionMetrics.model_validate(body["frame"]) if body.get("frame") else None
+        keyframes = [VisionKeyframe.model_validate(k) for k in body.get("keyframes", [])[:4]]
+        runtime.ingest_vision(frame=frame, keyframes=keyframes)
+        return {
+            "status": "ok",
+            "vision_frames": len(runtime.vision_frames),
+            "keyframes": len(runtime.keyframes),
+        }
 
     @app.get("/api/audio/{cache_key}")
     async def cached_audio(cache_key: str, session_id: UUID, request: Request):
@@ -242,10 +259,16 @@ def create_app(settings: Settings | None = None):
             sender = asyncio.create_task(pump(ws, queue))
             while True:
                 raw = await ws.receive_text()
-                if len(raw) > 8192 or time.time() >= runtime.expires:
+                if len(raw) > 524288 or time.time() >= runtime.expires:
                     raise ValueError("expired session or oversized command")
                 try:
-                    command = Command.model_validate_json(raw)
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict) and parsed.get("type") == "vision.telemetry":
+                        vf = VisionMetrics.model_validate(parsed["frame"]) if parsed.get("frame") else None
+                        kfs = [VisionKeyframe.model_validate(k) for k in parsed.get("keyframes", [])[:4]]
+                        runtime.ingest_vision(frame=vf, keyframes=kfs)
+                        continue
+                    command = Command.model_validate(parsed)
                     await runtime.command(command)
                 except (ValueError, ValidationError, Conflict) as exc:
                     runtime.emit(

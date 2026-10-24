@@ -2,6 +2,8 @@ import type {
   Command,
   Event,
   Session,
+  VisionKeyframe,
+  VisionMetrics,
 } from "../../../packages/contracts/generated";
 export type Snapshot = {
   session: Session;
@@ -14,6 +16,8 @@ export type Snapshot = {
   pending_sync: number;
   mock_mode: boolean;
   persistence: string;
+  camera?: string;
+  latest_vision?: VisionMetrics | null;
   cache_keys: string[];
 };
 type Connection = {
@@ -148,7 +152,6 @@ export class Client {
     });
     this.retry = 0;
     this.status("Connected");
-    // Private cached clips may be prefetched after reconnect; never enqueue them for playback.
     for (const key of this.snapshot?.cache_keys ?? [])
       void fetch(`/api/audio/${key}?session_id=${c.session_id}`, {
         headers: { Authorization: `Bearer ${c.capability}` },
@@ -175,6 +178,16 @@ export class Client {
         this.connect().catch(() => this.reconnect());
       },
       Math.min(5000, 500 * 2 ** this.retry++),
+    );
+  }
+  sendVisionTelemetry(frame?: VisionMetrics, keyframes?: VisionKeyframe[]) {
+    if (this.events?.readyState !== WebSocket.OPEN) return;
+    this.events.send(
+      JSON.stringify({
+        type: "vision.telemetry",
+        frame: frame ?? null,
+        keyframes: keyframes ?? [],
+      }),
     );
   }
   command(payload: Command["payload"]) {

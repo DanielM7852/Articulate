@@ -2,8 +2,39 @@
 
 from uuid import UUID
 
-from .coaching import ACTION_MESSAGES, MEASURED, OBSERVATIONS, assess, plan
+from .coaching import ACTION_MESSAGES, MEASURED, OBSERVATIONS, assess, plan, reference, usable
 from .schemas import TARGETS, CoachingContext, CoachingDecision, CoachingProposal, AttemptSummary, Cue
+
+VISUAL_OBSERVATIONS = {
+    ("u", True): "Camera tracking shows clear lip rounding and forward puckering for /u/.",
+    ("u", False): "Camera tracking shows your lips stayed relatively wide; try rounding and puckering them into a tighter circle for /u/.",
+    ("i", True): "Camera tracking shows clear horizontal lip spreading for /i/.",
+    ("i", False): "Camera tracking shows your mouth corners stayed relaxed; try spreading your lips gently outward like a small smile for /i/.",
+    ("aa", True): "Camera tracking shows a wide vertical mouth and jaw opening for /ɑ/.",
+    ("aa", False): "Camera tracking shows a narrow vertical mouth opening; try dropping your jaw wider for /ɑ/.",
+}
+
+
+def visual_observation(summary: AttemptSummary) -> str | None:
+    """Deterministic camera wording; only for a usable acoustic capture with lip telemetry in evidence."""
+    if "lip_opening_mean" not in summary.evidence_fields or summary.lip_opening_mean is None:
+        return None
+    if "target_distance" not in summary.evidence_fields or summary.target_id not in ("u", "i", "aa"):
+        return None
+    target = summary.target_id
+    if target == "u":
+        matched = (summary.lip_rounding_mean is not None and summary.lip_rounding_mean >= 0.35) or (
+            summary.lip_width_mean is not None and summary.lip_width_mean <= 0.68
+        )
+    elif target == "i":
+        matched = (summary.lip_spread_mean is not None and summary.lip_spread_mean >= 0.25) or (
+            summary.lip_width_mean is not None and summary.lip_width_mean >= 0.78
+        )
+    else:  # "aa"
+        matched = (summary.lip_opening_mean >= 0.28) or (
+            summary.jaw_drop_mean is not None and summary.jaw_drop_mean >= 1.15
+        )
+    return VISUAL_OBSERVATIONS[(target, bool(matched))]
 
 
 def observation(summary: AttemptSummary):
@@ -40,11 +71,15 @@ def resolve_proposal(
     if cue is None and (proposal.cue_id is not None or proposal.cue_version is not None):
         raise ValueError("unknown cue")
     evidence = list({(e.attempt_id, e.field): e for e in [*selected.evidence, *action.evidence]}.values())
+    visual = visual_observation(summary) if usable(summary, context.policy) else None
+    if visual is not None:
+        evidence.append(reference(summary, "lip_opening_mean"))
     fields = list(dict.fromkeys(e.field for e in evidence if e.attempt_id == summary.attempt_id))
     return CoachingDecision(
         attempt_id=summary.attempt_id,
         generation_id=generation,
         observation=selected.text,
+        visual_observation=visual,
         observation_id=selected.id,
         evidence_fields=fields,
         evidence=evidence,
@@ -117,6 +152,8 @@ def validate_decision(
 
 def caption_for(decision: CoachingDecision, cue: Cue | None):
     parts = [decision.observation]
+    if decision.visual_observation:
+        parts.append(decision.visual_observation)
     if cue:
         parts.append(cue.text)
     if decision.next_action in ACTION_MESSAGES:
