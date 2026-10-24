@@ -8,7 +8,7 @@ import { MouthReference, type MouthReferenceHandle, type MouthView } from '../co
 import { TeacherCaptions } from '../components/TeacherCaptions';
 import { prepareTeacher, unlockTeacherAudio } from '../audio/teacher';
 import { useConversationAudio } from '../conversation/audio';
-import { SessionControls, SessionStatus } from '../conversation/director/SessionControls';
+import { InsightBadge, SessionControls, SessionStatus } from '../conversation/director/SessionControls';
 import { useSessionDirector, type CaptureOutcome } from '../conversation/director/useSessionDirector';
 import '../conversation/director/director.css';
 import { bridgeLine } from '../live/bridge';
@@ -288,8 +288,9 @@ export default function PracticeStudio() {
     // Live coaching first; any failure falls back to the existing local/agent path.
     let live: LiveCoachResponse | null = null;
     // Background articulation analysis: fire-and-forget, parallel to (never blocking) the coach call.
+    let insight: Promise<boolean> | undefined;
     if (attemptPcm) {
-      void uploadArticulation({
+      insight = uploadArticulation({
         attemptId: attempt.attemptId,
         profileId,
         sound: attempt.sound,
@@ -340,6 +341,7 @@ export default function PracticeStudio() {
       if (runId.current !== myRun) return null;
       return {
         attemptId: attempt.attemptId,
+        insight,
         coach: {
           caption: live.caption,
           cueId: live.cueId,
@@ -362,6 +364,7 @@ export default function PracticeStudio() {
     if (runId.current !== myRun) return null;
     return {
       attemptId: attempt.attemptId,
+      insight,
       coach: {
         caption: text,
         cueId: null,
@@ -587,6 +590,7 @@ export default function PracticeStudio() {
         <>
           <div className="sd-bar">
             <SessionStatus state={director.state} label={director.statusLabel} />
+            {director.insightPending && <InsightBadge />}
             <SessionControls
               state={director.state}
               onControl={director.control}

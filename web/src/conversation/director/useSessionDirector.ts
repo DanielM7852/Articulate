@@ -3,7 +3,7 @@ import { prepareTeacher, unlockTeacherAudio } from '../../audio/teacher';
 import type { SequenceLine, SequenceOptions } from '../../live/useCoachSequence';
 import type { SoundId } from '../../state/types';
 import type { ConversationAudio, SegmentResult } from '../audio/types';
-import { sendTurn, startSession, type AttemptCoachSummary, type ControlKind, type SessionEvent, type SessionTurn } from './api';
+import { getArticulationStatus, sendTurn, startSession, type AttemptCoachSummary, type ControlKind, type SessionEvent, type SessionTurn } from './api';
 
 /**
  * Session director: a hands-free, therapist-led conversation.
@@ -26,6 +26,16 @@ import { sendTurn, startSession, type AttemptCoachSummary, type ControlKind, typ
  *   listening -> analyzing           (silence timer or a tap control => event)
  *   analyzing -> speaking            (next SessionTurn arrives; a failed call becomes a scripted turn)
  *   speaking -> ended                (action end_session finished)
+ *
+ * Insight lane (background articulation analysis, never blocks the states above)
+ *   After an attempt's audio upload is accepted (CaptureOutcome.insight resolves true) the director tracks ONE
+ *   insight {attemptId, sound}; while it is in flight, newer attempts of the same sound are not tracked (a new
+ *   sound replaces it). It polls GET /articulation/{id} every 2 s for up to 90 s (stopping on
+ *   none/delivered/unknown, 3 consecutive errors, session end or unmount). While the status is
+ *   "pending" `insightPending` is true and the UI shows a "Taking a closer look…" badge. When it becomes "ready"
+ *   it is delivered only from `listening`, after >= 1200 ms of continuous listening (no segment start), if the
+ *   sound is unchanged and the insight is < 120 s old: dispatch({kind:'analysis_ready'}) returns a normal turn.
+ *   It never interrupts speaking/capturing/analyzing, is dropped if the sound changed, and is delivered once.
  * Every async step is guarded by runRef, which is bumped by anything that supersedes it (barge-in,
  * a tap control, a new turn, unmount), so lines never overlap and stale results are dropped.
  */
@@ -36,8 +46,24 @@ const MAX_SILENCE_EVENTS = 2;
 export const SCRIPTED_KEEP_GOING = 'Let’s keep going — try the sound when you’re ready.';
 const SCRIPTED_END = 'Great work today. Let’s look at how it went.';
 
+const INSIGHT_POLL_MS = 2000;
+// Collector cold start + queueing behind the previous attempt + the deeper model writing the line.
+const INSIGHT_POLL_MAX_MS = 90_000;
+const INSIGHT_MAX_ERRORS = 3;
+const INSIGHT_QUIET_MS = 1200;
+const INSIGHT_MAX_AGE_MS = 120_000;
+
+interface TrackedInsight {
+  attemptId: string;
+  sound: SoundId;
+  since: number;
+  status: 'pending' | 'ready';
+}
+
 export interface CaptureOutcome {
   attemptId: string;
+  /** Resolves true when the attempt's audio upload was accepted for background analysis. */
+  insight?: Promise<boolean>;
   coach: AttemptCoachSummary;
 }
 
@@ -96,7 +122,19 @@ export function useSessionDirector(deps: DirectorDeps) {
   const capturePromise = useRef<Promise<void> | null>(null);
   const startAbort = useRef<AbortController | null>(null);
 
+  // Insight lane
+  const [insightPending, setInsightPending] = useState(false);
+  const insightRef = useRef<TrackedInsight | null>(null);
+  const insightToken = useRef(0); // bumped whenever tracking is replaced or stopped; stale polls/uploads check it
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollAbort = useRef<AbortController | null>(null);
+  const deliverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listeningSince = useRef<number | null>(null);
+
   const setState = useCallback((s: DirectorState) => {
+    if (s === 'listening') {
+      if (stateRef.current !== 'listening') listeningSince.current = Date.now();
+    } else listeningSince.current = null;
     stateRef.current = s;
     setStateRaw(s);
   }, []);
@@ -104,6 +142,19 @@ export function useSessionDirector(deps: DirectorDeps) {
   const clearSilence = useCallback(() => {
     if (silenceTimer.current) clearTimeout(silenceTimer.current);
     silenceTimer.current = null;
+    if (deliverTimer.current) clearTimeout(deliverTimer.current);
+    deliverTimer.current = null;
+  }, []);
+
+  /** Stop tracking and polling; any in-flight poll or pending upload promise goes stale. */
+  const stopInsight = useCallback(() => {
+    insightToken.current++;
+    insightRef.current = null;
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    pollTimer.current = null;
+    pollAbort.current?.abort();
+    pollAbort.current = null;
+    setInsightPending(false);
   }, []);
 
   /** Interrupt anything in flight: pending async steps go stale, speech stops, any capture is dropped. */
@@ -120,17 +171,21 @@ export function useSessionDirector(deps: DirectorDeps) {
 
   const dispatchRef = useRef<(e: SessionEvent) => Promise<void>>(async () => undefined);
 
+  const tryDeliverRef = useRef<() => void>(() => undefined);
+
   const beginListening = useCallback(() => {
     setState('listening');
     d.current.audio.listen('either');
     clearSilence();
-    if (silenceCount.current >= MAX_SILENCE_EVENTS) return; // keep listening quietly
-    const my = runRef.current;
-    silenceTimer.current = setTimeout(() => {
-      if (runRef.current !== my || stateRef.current !== 'listening') return;
-      silenceCount.current++;
-      void dispatchRef.current({ kind: 'silence', seconds: SILENCE_SECONDS });
-    }, SILENCE_SECONDS * 1000);
+    if (silenceCount.current < MAX_SILENCE_EVENTS) {
+      const my = runRef.current;
+      silenceTimer.current = setTimeout(() => {
+        if (runRef.current !== my || stateRef.current !== 'listening') return;
+        silenceCount.current++;
+        void dispatchRef.current({ kind: 'silence', seconds: SILENCE_SECONDS });
+      }, SILENCE_SECONDS * 1000);
+    } // else keep listening quietly
+    tryDeliverRef.current(); // a ready insight may be waiting for this pause
   }, [clearSilence, setState]);
 
   /* ---------------- executing a therapist turn ---------------- */
@@ -164,13 +219,14 @@ export function useSessionDirector(deps: DirectorDeps) {
       if (!alive()) return;
       a.setTeacherSpeaking(false);
       if (turn.action === 'end_session') {
+        stopInsight();
         setState('ended');
         d.current.onEnded();
         return;
       }
       beginListening();
     },
-    [beginListening, clearSilence, setState],
+    [beginListening, clearSilence, setState, stopInsight],
   );
 
   const scriptedTurn = useCallback(
@@ -210,6 +266,94 @@ export function useSessionDirector(deps: DirectorDeps) {
   );
   dispatchRef.current = dispatch;
 
+  /* ---------------- insight lane ---------------- */
+
+  /** Deliver a ready insight if (and only if) we are in a long enough quiet `listening` pause for the same sound. */
+  const tryDeliver = useCallback(() => {
+    const ins = insightRef.current;
+    if (!ins || ins.status !== 'ready') return;
+    if (Date.now() - ins.since >= INSIGHT_MAX_AGE_MS || ins.sound !== soundRef.current) {
+      stopInsight(); // stale or about a different sound: drop it
+      return;
+    }
+    if (stateRef.current !== 'listening' || listeningSince.current === null) return; // never interrupt; retried on the next listening
+    const quietFor = Date.now() - listeningSince.current;
+    if (quietFor < INSIGHT_QUIET_MS) {
+      if (deliverTimer.current) clearTimeout(deliverTimer.current);
+      const my = runRef.current;
+      deliverTimer.current = setTimeout(() => {
+        deliverTimer.current = null;
+        if (runRef.current === my && stateRef.current === 'listening') tryDeliverRef.current();
+      }, INSIGHT_QUIET_MS - quietFor + 20);
+      return;
+    }
+    const { attemptId, sound } = ins;
+    stopInsight(); // exactly once: tracking is cleared before the event is sent
+    void dispatchRef.current({ kind: 'analysis_ready', attemptId, currentSound: sound });
+  }, [stopInsight]);
+  tryDeliverRef.current = tryDeliver;
+
+  const pollInsight = useCallback(
+    (token: number, errors: number) => {
+      const ins = insightRef.current;
+      if (insightToken.current !== token || !ins) return;
+      const st = stateRef.current;
+      if (st === 'idle' || st === 'ended' || st === 'error' || Date.now() - ins.since > INSIGHT_POLL_MAX_MS) {
+        stopInsight();
+        return;
+      }
+      const ctl = new AbortController();
+      pollAbort.current = ctl;
+      const next = (errs: number) => {
+        pollTimer.current = setTimeout(() => pollInsight(token, errs), INSIGHT_POLL_MS);
+      };
+      getArticulationStatus(ins.attemptId, d.current.profileId, ctl.signal)
+        .then((r) => {
+          if (insightToken.current !== token) return;
+          if (r.status === 'pending') return next(0);
+          if (r.status === 'ready') {
+            ins.status = 'ready';
+            setInsightPending(false);
+            tryDeliverRef.current();
+            return;
+          }
+          stopInsight(); // none / delivered / unknown
+        })
+        .catch(() => {
+          if (insightToken.current !== token) return;
+          if (errors + 1 >= INSIGHT_MAX_ERRORS) stopInsight();
+          else next(errors + 1);
+        });
+    },
+    [stopInsight],
+  );
+
+  /**
+   * Track a newly accepted upload. An insight still in flight for the same sound is kept: analysis takes longer
+   * than one practice cycle, so replacing it would starve delivery. Newer attempts are still analysed and stored
+   * for history and notes; they just aren't tracked here.
+   */
+  const trackInsight = useCallback(
+    (attemptId: string, sound: SoundId, accepted: Promise<boolean>) => {
+      const current = insightRef.current;
+      if (current && current.sound === sound) return;
+      stopInsight();
+      const token = insightToken.current;
+      void accepted.then(
+        (ok) => {
+          if (!ok || insightToken.current !== token) return;
+          const st = stateRef.current;
+          if (st === 'idle' || st === 'ended' || st === 'error') return;
+          insightRef.current = { attemptId, sound, since: Date.now(), status: 'pending' };
+          setInsightPending(true);
+          pollInsight(token, 0);
+        },
+        () => undefined,
+      );
+    },
+    [pollInsight, stopInsight],
+  );
+
   /* ---------------- audio events ---------------- */
 
   const onSegmentStart = useCallback(() => {
@@ -246,6 +390,7 @@ export function useSessionDirector(deps: DirectorDeps) {
           beginListening();
           return;
         }
+        if (outcome.insight) trackInsight(outcome.attemptId, soundRef.current, outcome.insight);
         await dispatch({ kind: 'attempt_feedback', attemptId: outcome.attemptId, currentSound: soundRef.current, coach: outcome.coach });
         return;
       }
@@ -259,7 +404,7 @@ export function useSessionDirector(deps: DirectorDeps) {
       // An attempt with no capture behind it (the start was missed): nothing to grade.
       beginListening();
     },
-    [beginListening, dispatch, setState],
+    [beginListening, dispatch, setState, trackInsight],
   );
 
   const onBargeIn = useCallback(() => {
@@ -294,6 +439,7 @@ export function useSessionDirector(deps: DirectorDeps) {
     prepareTeacher();
     setError(null);
     setHeard(null);
+    stopInsight();
     setState('starting');
     const my = ++runRef.current;
     startAbort.current?.abort();
@@ -335,6 +481,10 @@ export function useSessionDirector(deps: DirectorDeps) {
     () => () => {
       runRef.current++;
       startAbort.current?.abort();
+      insightToken.current++;
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+      pollAbort.current?.abort();
+      if (deliverTimer.current) clearTimeout(deliverTimer.current);
       if (silenceTimer.current) clearTimeout(silenceTimer.current);
       if (sessionId.current || stateRef.current !== 'idle') {
         const a = d.current.audio;
@@ -354,6 +504,7 @@ export function useSessionDirector(deps: DirectorDeps) {
     statusLabel: STATUS_LABEL[state],
     error,
     heard,
+    insightPending,
     turnSource,
     begin,
     control,

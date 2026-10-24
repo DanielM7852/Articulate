@@ -22,6 +22,7 @@ from app.live.history import LearnerContext
 from app.live.notes import miss_counts
 from app.live.orchestrator import LiveDeps
 from app.live.schemas import (
+    AnalysisReadyEvent,
     AttemptFeedbackEvent,
     ControlEvent,
     SessionStartRequest,
@@ -361,7 +362,9 @@ def _advance(state: SessionState) -> None:
     state.silence_count = 0
 
 
-async def take_turn(deps: LiveDeps, store: SessionStore, req: SessionTurnRequest) -> SessionTurn:
+async def take_turn(
+    deps: LiveDeps, store: SessionStore, req: SessionTurnRequest, insights: Any = None
+) -> SessionTurn:
     started = time.perf_counter()
     state = store.get(req.sessionId, req.profileId)
     event = req.event
@@ -373,9 +376,24 @@ async def take_turn(deps: LiveDeps, store: SessionStore, req: SessionTurnRequest
     state.silence_count = 0
     if isinstance(event, ControlEvent):
         return _control(state, event, started)
+    if isinstance(event, AnalysisReadyEvent):
+        return _analysis_ready(state, event, insights, started)
     if isinstance(event, AttemptFeedbackEvent):
         return await _feedback(deps, state, event, started)
     return await _utterance(deps, state, event, started)
+
+
+def _analysis_ready(state: SessionState, event: AnalysisReadyEvent, insights: Any, started: float) -> SessionTurn:
+    """Deliver the stored insight line (validated in app.live.insight); no model call, not an attempt.
+
+    Anything but a ready entry of this profile and sound yields a scripted line that never mentions the tongue.
+    """
+    state.unclear_streak = 0
+    entry = insights.get_insight(event.attemptId, state.profile_id) if insights is not None else None
+    if entry is not None and entry["status"] == "ready" and entry["sound"] == state.sound and entry.get("say"):
+        insights.mark_insight_delivered(event.attemptId)
+        return _turn(state, entry["say"], "prompt_attempt", state.sound, entry.get("source") or "agent", started)
+    return _turn(state, tp.KEEP_GOING_LINE, "prompt_attempt", state.sound, "scripted", started)
 
 
 def _silence(state: SessionState, started: float) -> SessionTurn:

@@ -269,8 +269,24 @@ class SilenceEvent(BaseModel):
     seconds: float = Field(ge=0, le=3600)
 
 
+class AnalysisReadyEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    kind: Literal["analysis_ready"]
+    attemptId: str
+    currentSound: SoundId
+
+    @field_validator("attemptId")
+    @classmethod
+    def _attempt(cls, value: str) -> str:
+        if not valid_attempt_id(value):
+            raise ValueError("attemptId must be a UUID")
+        return value
+
+
 TalkEvent = Annotated[
-    UtteranceEvent | AttemptFeedbackEvent | ControlEvent | SilenceEvent, Field(discriminator="kind")
+    UtteranceEvent | AttemptFeedbackEvent | ControlEvent | SilenceEvent | AnalysisReadyEvent,
+    Field(discriminator="kind"),
 ]
 
 

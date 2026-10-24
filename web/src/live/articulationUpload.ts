@@ -45,10 +45,10 @@ export interface ArticulationUploadArgs {
   signal?: AbortSignal;
 }
 
-export async function uploadArticulation(args: ArticulationUploadArgs): Promise<void> {
+export async function uploadArticulation(args: ArticulationUploadArgs): Promise<boolean> {
   try {
     let pcm = args.pcm;
-    if (pcm.length < MIN_SAMPLES) return;
+    if (pcm.length < MIN_SAMPLES) return false;
     let startMs = args.captureStartMonotonicMs;
     if (pcm.length > MAX_SAMPLES) {
       const drop = pcm.length - MAX_SAMPLES;
@@ -76,12 +76,20 @@ export async function uploadArticulation(args: ArticulationUploadArgs): Promise<
         body: encodePcm16Wav(pcm),
         signal: ctl.signal,
       });
-      if (!res.ok) console.debug('articulation upload rejected', res.status);
+      if (!res.ok) {
+        console.debug('articulation upload rejected', res.status);
+        return false;
+      }
+      // 202 {accepted: true} means analysis was queued; 200 {accepted: false} means it was not.
+      if (res.status !== 202) return false;
+      const body = (await res.json()) as { accepted?: unknown };
+      return body.accepted === true;
     } finally {
       clearTimeout(timer);
       args.signal?.removeEventListener('abort', onAbort);
     }
   } catch (e) {
     console.debug('articulation upload failed', e);
+    return false;
   }
 }

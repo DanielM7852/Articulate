@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     live_coach_effort: str = "medium"
     live_notes_effort: str = "high"
     live_talk_effort: str = "medium"
+    live_insight_model: str = "claude-opus-5-5"
+    live_insight_effort: str = "high"
+    live_insight_timeout_s: float = 45.0
+    insight_ttl_s: float = 900.0
     live_therapist_name: str = "Ava"
     live_session_ttl_s: float = 3600.0
     live_coach_timeout_s: float = 15.0
