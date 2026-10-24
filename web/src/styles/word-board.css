@@ -1,0 +1,648 @@
+/* ---------- Word board (wb-) ----------
+ * The word game board: zone chips spelling the word above a tongue-space plot (same
+ * projection, grid and ink as the vowel graph), a cursor whose size is loudness, fill is
+ * voicing and ring is lip shape, and a tuner strip that slides in for tuner zones.
+ * Everything that moves per frame is written by the board's rAF loop (transform, d,
+ * stroke-dashoffset); CSS only animates state changes. Light theme tokens from tokens.css.
+ */
+.wb {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  height: 100%;
+  min-height: 340px;
+}
+
+/* ---------- Zone chips ---------- */
+.wb-zones {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.wb-chip {
+  position: relative;
+  min-width: 58px;
+  height: 66px;
+  padding: 6px 12px 8px;
+  border-radius: var(--radius-card);
+  border: 1.5px solid var(--color-line);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-muted);
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, opacity 200ms ease,
+    transform 220ms var(--ease-out), box-shadow 200ms ease;
+}
+.wb-chip-letter {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+}
+.wb-chip[data-state='active'] {
+  border-color: var(--color-navy);
+  border-width: 2px;
+  background: var(--color-navy-soft);
+  color: var(--color-navy);
+  transform: translateY(-3px);
+  box-shadow: 0 6px 14px rgba(32, 62, 104, 0.14);
+}
+.wb-chip[data-state='hit'] {
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+.wb-chip[data-state='partial'] {
+  border-color: var(--color-warn);
+  border-style: dashed;
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+}
+.wb-chip[data-state='miss'] {
+  border-style: dashed;
+  border-color: var(--color-navy-mist);
+  color: var(--color-ink);
+}
+.wb-chip[data-state='skipped'] {
+  opacity: 0.5;
+  border-style: dotted;
+}
+.wb[data-mode='idle'] .wb-chip {
+  opacity: 0.62;
+}
+.wb[data-mode='idle'] .wb-chip[data-state='skipped'] {
+  opacity: 0.4;
+}
+
+/* State badge: a second, non-colour cue (check, half disc, open ring). */
+.wb-chip-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: none;
+}
+.wb-chip[data-state='hit'] .wb-chip-badge {
+  display: block;
+  background: var(--color-success)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M5 9.4l2.6 2.6L13 6.6' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 18px no-repeat;
+  animation: wb-pop 320ms var(--ease-out);
+}
+.wb-chip[data-state='partial'] .wb-chip-badge {
+  display: block;
+  background: linear-gradient(90deg, var(--color-warn) 50%, var(--color-surface) 50%);
+  border: 2px solid var(--color-warn);
+}
+.wb-chip[data-state='miss'] .wb-chip-badge {
+  display: block;
+  background: var(--color-surface);
+  border: 2px solid var(--color-navy-mist);
+}
+
+/* Focus (the zone Ava is coaching): a soft pulsing outline. */
+.wb-chip[data-focus='true'] {
+  border-color: var(--color-navy);
+  box-shadow: 0 0 0 3px rgba(32, 62, 104, 0.22);
+  animation: wb-focus-pulse 1.6s ease-in-out infinite;
+}
+
+/* Kind glyphs under the letter */
+.wb-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 10px;
+  gap: 1px;
+}
+.wb-glyph--stop {
+  position: relative;
+  width: 22px;
+}
+.wb-stop-half {
+  width: 3px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.75;
+  transition: transform 160ms var(--ease-out);
+}
+.wb-stop-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--color-success);
+  opacity: 0;
+}
+.wb-glyph--stop.is-flash .wb-stop-half:first-child {
+  animation: wb-release-left 520ms var(--ease-out);
+}
+.wb-glyph--stop.is-flash .wb-stop-half:last-child {
+  animation: wb-release-right 520ms var(--ease-out);
+}
+.wb-glyph--stop.is-flash .wb-stop-spark {
+  animation: wb-spark 520ms var(--ease-out);
+}
+.wb-glyph-meter {
+  width: 5px;
+  height: 11px;
+  border-radius: 2px;
+  border: 1.5px solid currentColor;
+  background: linear-gradient(0deg, var(--color-success) 38%, transparent 38%);
+  opacity: 0.85;
+}
+.wb-glyph-ellipse {
+  width: 16px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px dashed currentColor;
+  opacity: 0.85;
+}
+
+/* ---------- Board ---------- */
+.wb-board {
+  position: relative;
+  min-height: 260px;
+  border-radius: var(--radius-panel);
+  background: var(--color-cream);
+  border: 1px solid var(--color-line);
+  overflow: hidden;
+}
+.wb-plot {
+  position: absolute;
+  inset: 44px 24px 36px 44px;
+}
+.wb-backdrop,
+.wb-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.wb-grid {
+  stroke: var(--color-line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.wb-space {
+  fill: none;
+  stroke: var(--color-navy-mist);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Vowel target: an ellipse that fills its outline while the cursor dwells inside. */
+.wb-target-area {
+  fill: rgba(203, 215, 230, 0.22);
+  stroke: var(--color-navy-mist);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  transition: fill 240ms ease, stroke 240ms ease, opacity 240ms ease;
+}
+.wb-target-fill {
+  fill: none;
+  stroke: var(--color-success);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+}
+.wb-target-label {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  text-anchor: middle;
+  fill: var(--color-navy-mist);
+  transition: fill 200ms ease;
+}
+.wb-target[data-active='true'] .wb-target-area,
+.wb-target[data-focus='true'] .wb-target-area {
+  fill: rgba(203, 215, 230, 0.36);
+  stroke: var(--color-navy);
+}
+.wb-target[data-active='true'] .wb-target-label,
+.wb-target[data-focus='true'] .wb-target-label {
+  fill: var(--color-navy);
+}
+.wb-target[data-state='hit'] .wb-target-area {
+  fill: rgba(53, 100, 85, 0.14);
+  stroke: var(--color-success);
+}
+.wb-target[data-state='hit'] .wb-target-label {
+  fill: var(--color-success);
+}
+.wb-target[data-state='partial'] .wb-target-area {
+  stroke: var(--color-warn);
+}
+.wb-board[data-inside='true'] .wb-target[data-active='true'] .wb-target-area,
+.wb-board[data-inside='true'] .wb-target[data-focus='true'] .wb-target-area {
+  fill: rgba(53, 100, 85, 0.16);
+  stroke: var(--color-success);
+}
+.wb-target[data-focus='true'] .wb-target-area {
+  stroke-width: 2.5;
+  animation: wb-target-pulse 1.6s ease-in-out infinite;
+}
+.wb[data-mode='idle'] .wb-target:not([data-focus='true']) {
+  opacity: 0.6;
+}
+/* Approach ring: shrinks onto the target when its zone becomes active. Hit burst: one expanding ring. */
+.wb-approach,
+.wb-burst {
+  fill: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  pointer-events: none;
+}
+.wb-approach {
+  stroke: var(--color-navy);
+  stroke-width: 2;
+  opacity: 0;
+  animation: wb-approach 560ms var(--ease-out);
+}
+.wb-burst {
+  stroke: var(--color-success);
+  stroke-width: 3;
+  opacity: 0;
+  animation: wb-burst 520ms var(--ease-out);
+}
+
+/* Ink: tapered ribbons from the trail helpers (see VowelGraph). */
+.wb-ink path {
+  fill: var(--color-navy);
+  stroke: none;
+  opacity: 0.6;
+}
+.wb-ink--ghost path {
+  fill: var(--color-navy-mist);
+  opacity: 0.9;
+}
+
+/* Live cursor: dot sized by loudness, solid while voiced, hollow when not; lip ring around it. */
+.wb-cursor,
+.wb-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 80px;
+  height: 80px;
+  margin: -40px 0 0 -40px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  will-change: transform;
+  transition: opacity 240ms ease;
+}
+.wb-cursor[data-shown='false'],
+.wb-ghost[data-shown='false'] {
+  opacity: 0;
+}
+.wb-dot {
+  grid-area: 1 / 1;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--color-navy);
+  border: 3px solid var(--color-navy);
+  box-shadow: 0 0 0 4px rgba(203, 215, 230, 0.6), 0 2px 6px rgba(32, 62, 104, 0.25);
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 200ms ease;
+}
+.wb-cursor[data-voiced='false'] .wb-dot {
+  background: var(--color-cream);
+  box-shadow: 0 0 0 3px rgba(203, 215, 230, 0.45);
+}
+.wb-board[data-inside='true'] .wb-cursor[data-voiced='true'] .wb-dot {
+  background: var(--color-success);
+  border-color: var(--color-success);
+  box-shadow: 0 0 0 4px rgba(53, 100, 85, 0.2), 0 2px 6px rgba(53, 100, 85, 0.25);
+}
+.wb-lip {
+  grid-area: 1 / 1;
+  width: 80px;
+  height: 80px;
+  overflow: visible;
+}
+.wb-lip ellipse {
+  fill: none;
+  stroke: var(--color-warn);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  transition: opacity 200ms ease;
+}
+
+/* Ghost cursor: Ava's example, dashed and translucent so it never reads as the learner. */
+.wb-ghost-dot {
+  grid-area: 1 / 1;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px dashed var(--color-navy);
+  background: rgba(203, 215, 230, 0.7);
+  transition: background-color 160ms ease, transform 200ms var(--ease-out);
+}
+.wb-ghost[data-voiced='false'] .wb-ghost-dot {
+  background: transparent;
+  transform: scale(0.8);
+}
+
+/* Sits low in the plot (very open jaw), clear of the targets. */
+.wb-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 24px 8px;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 240ms ease;
+}
+.wb-board[data-cursor='true'] .wb-empty,
+.wb[data-mode='demo'] .wb-empty {
+  opacity: 0;
+}
+
+.wb-axis {
+  position: absolute;
+  font-size: 12px;
+  color: var(--color-muted);
+  pointer-events: none;
+}
+.wb-axis--x {
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.wb-axis--y {
+  left: 12px;
+  top: 12px;
+}
+.wb-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(10px) saturate(160%);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-navy);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.wb-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-navy-mist);
+}
+.wb[data-mode='live'] .wb-status::before {
+  background: var(--color-success);
+}
+.wb[data-mode='demo'] .wb-status::before {
+  background: var(--color-navy);
+}
+
+/* ---------- Tuner strip ----------
+ * Overlays the board's front edge (where "track" has no target) and slides in, so the
+ * plot never re-lays out when a tuner zone starts or ends. */
+.wb-tuner {
+  position: absolute;
+  left: 10px;
+  top: 40px;
+  bottom: 34px;
+  width: 128px;
+  padding: 10px 10px 12px;
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1.5px solid var(--color-line);
+  box-shadow: var(--shadow-panel);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  justify-items: center;
+  gap: 8px;
+  opacity: 0;
+  transform: translateX(-24px);
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 280ms var(--ease-out), border-color 200ms ease;
+}
+.wb-tuner[data-open='true'] {
+  opacity: 1;
+  transform: none;
+}
+.wb-tuner[data-focus='true'] {
+  border-color: var(--color-navy);
+  animation: wb-focus-pulse 1.6s ease-in-out infinite;
+}
+.wb-tuner[data-state='hit'] {
+  border-color: var(--color-success);
+}
+.wb-tuner-label {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  line-height: 1;
+  color: var(--color-navy);
+}
+.wb-tuner-body {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 0;
+  height: 100%;
+}
+.wb-meter-wrap {
+  position: relative;
+  width: 36px;
+  height: 100%;
+  min-height: 80px;
+}
+.wb-meter {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-navy-mist);
+  overflow: hidden;
+}
+.wb-meter-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(53, 100, 85, 0.2);
+  border-top: 2px dashed var(--color-success);
+}
+.wb-meter-fill {
+  position: absolute;
+  inset: 0;
+  background: rgba(53, 100, 85, 0.5);
+  transform: scaleY(0);
+  transform-origin: bottom;
+}
+/* Moves by translateY(-pos * 100%) of the meter height; the needle sits on its bottom edge. */
+.wb-needle-track {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  will-change: transform;
+  transform: translateY(-50%);
+}
+.wb-needle {
+  position: absolute;
+  left: -7px;
+  right: -7px;
+  bottom: -3px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-navy);
+  box-shadow: 0 0 0 2px var(--color-surface), 0 2px 6px rgba(32, 62, 104, 0.3);
+  transition: background-color 160ms ease, opacity 200ms ease;
+}
+.wb-tuner[data-live='false'] .wb-needle {
+  opacity: 0.3;
+}
+.wb-tuner[data-inband='true'] .wb-needle {
+  background: var(--color-success);
+}
+.wb-tuner-arrow {
+  align-self: center;
+  color: var(--color-navy);
+  display: grid;
+  place-items: center;
+  animation: wb-nudge-down 1.4s ease-in-out infinite;
+}
+.wb-tuner[data-push='high'] .wb-tuner-arrow {
+  animation-name: wb-nudge-up;
+}
+.wb-tuner[data-inband='true'] .wb-tuner-arrow {
+  color: var(--color-success);
+  animation: none;
+}
+.wb-tuner-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--color-ink);
+  text-align: center;
+}
+
+/* ---------- Motion ---------- */
+@keyframes wb-pop {
+  from { transform: scale(0.4); }
+  to { transform: scale(1); }
+}
+@keyframes wb-focus-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(32, 62, 104, 0.22); }
+  50% { box-shadow: 0 0 0 7px rgba(32, 62, 104, 0.08); }
+}
+@keyframes wb-target-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.45; }
+}
+@keyframes wb-approach {
+  from { transform: scale(1.9); opacity: 0; }
+  30% { opacity: 0.55; }
+  to { transform: scale(1); opacity: 0; }
+}
+@keyframes wb-burst {
+  from { transform: scale(1); opacity: 0.8; }
+  to { transform: scale(1.4); opacity: 0; }
+}
+@keyframes wb-release-left {
+  0% { transform: translateX(0); }
+  30% { transform: translateX(-5px); }
+  100% { transform: translateX(0); }
+}
+@keyframes wb-release-right {
+  0% { transform: translateX(0); }
+  30% { transform: translateX(5px); }
+  100% { transform: translateX(0); }
+}
+@keyframes wb-spark {
+  0% { opacity: 0; transform: scale(0.3); }
+  25% { opacity: 1; transform: scale(1.3); }
+  100% { opacity: 0; transform: scale(0.6); }
+}
+@keyframes wb-nudge-down {
+  0%, 100% { transform: translateY(-2px); }
+  50% { transform: translateY(3px); }
+}
+@keyframes wb-nudge-up {
+  0%, 100% { transform: translateY(2px); }
+  50% { transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-chip,
+  .wb-tuner {
+    transition: background-color 120ms linear, border-color 120ms linear, color 120ms linear, opacity 120ms linear;
+  }
+  .wb-chip[data-state='active'] {
+    transform: none;
+  }
+  .wb-tuner {
+    transform: none;
+  }
+  .wb-chip[data-focus='true'],
+  .wb-tuner[data-focus='true'],
+  .wb-target[data-focus='true'] .wb-target-area,
+  .wb-tuner-arrow,
+  .wb-chip-badge {
+    animation: none !important;
+  }
+  .wb-approach,
+  .wb-burst {
+    display: none;
+  }
+  /* Releases still show, as a brief colour change instead of motion. */
+  .wb-glyph--stop.is-flash .wb-stop-half {
+    animation: none;
+    background: var(--color-success);
+    opacity: 1;
+  }
+  .wb-glyph--stop.is-flash .wb-stop-spark {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .wb-chip {
+    min-width: 48px;
+    height: 58px;
+    padding: 4px 9px 6px;
+  }
+  .wb-chip-letter {
+    font-size: 24px;
+  }
+  .wb-plot {
+    inset: 44px 16px 32px 36px;
+  }
+  .wb-tuner {
+    width: 108px;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .wb-status {
+    background: var(--color-surface);
+    backdrop-filter: none;
+  }
+}
