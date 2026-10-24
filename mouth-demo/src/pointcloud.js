@@ -18,20 +18,30 @@ const COLOR_HALO = "#CBD7E6";
 const COLOR_GREY = "#DADFD9";
 
 // dots per square metre of surface, by mesh class; and an overall cap
-const DENSITY = { full: 230000, eyes: 360000, teeth: 260000, hair: 70000 };
+const DENSITY = { full: 230000, eyes: 360000, teeth: 260000, hair: 230000 };
 const MAX_DOTS = 320000;
 // Even spacing: candidates are generated at OVERSAMPLE x the density, then accepted only
 // if no accepted dot lies within SPACING / sqrt(density) of them (dart throwing).
 const OVERSAMPLE = 4;
 const SPACING = 0.82;
-const DOT = { radius: 0.00068, mouthSwell: 0.3, holdSwell: 0.25, rimSwell: 0.12, minPx: 1.5, maxPx: 7 }; // metres; px limits in CSS pixels
+const DOT = { radius: 0.00068, mouthSwell: 0.1, holdSwell: 0.08, rimSwell: 0.12, minPx: 1.5, maxPx: 7 }; // metres; px limits in CSS pixels
 const KIND = { head: 0, hair: 1, eyes: 2, teeth: 3 };
-const SIZE_MUL = { full: 1, hair: 0.85, eyes: 0.8, teeth: 0.8 };
+const SIZE_MUL = { full: 1, hair: 1.15, eyes: 0.8, teeth: 0.8 };
+// hair reads as a dark mass so its silhouette frames the face: base = navy * base, highlights scaled by spec
+const HAIR_TONE = { base: 0.42, spec: 0.25 };
+// teeth: a soft grey-navy, not a bright white slit between the lips
+const TEETH_TONE = { navyMix: 0.78, spec: 0.35 };
+// Lips are the darkest skin texels, so they get the largest dots; cap that near the mouth so a smile
+// (which squeezes the lips vertically) does not pile them into a heavy, scaly band.
+const LIP_SIZE_CAP = 1.15;
 const MOUTH_RADIUS_MUL = 1.6;
 const BOTTOM_FADE = 0.06; // metres of soft fade at the lowest part of the head
 const HAIR_FADE = 0.08; // metres above the head bottom: the long hair fades out
 // thin the fringe in front of the forehead so the face reads (same shape as the hologram style)
-const FRINGE = { zStartFrac: 0.62, band: 0.07, sideFrac: 0.75, sideSoft: 0.03, yDrop: 0.05, ySoft: 0.03, strength: 0.9 };
+const FRINGE = { zStartFrac: 0.62, band: 0.03, sideFrac: 0.75, sideSoft: 0.03, yDrop: 0.05, ySoft: 0.03, strength: 1.0 };
+// scalp cap: head dots above a soft hairline take the hair tone, so the crown reads as one dark mass with the
+// hair cards instead of a pale scalp ringed by hair (same shape as the hologram style's "cap" hair mode)
+const SCALP = { hairlineDrop: 0.085, soft: 0.011, temple: 0.045, nape: 0.17 }; // metres
 /**
  * Pointer interaction: a displacement field, not a hole. Each dot near the pointer's
  * ray has a target displacement that falls off as a Gaussian of its distance to the
@@ -60,6 +70,32 @@ const TEX = { l0: 0.25, l1: 1.0, dark: 1.5, bright: 0.65, max: 1024 };
 const DENSITY_WEIGHT = { tone: 1.4, curvature: 1.6, curvatureRad: 0.5 }; // curvatureRad: normal spread (radians) that counts as fully curved
 // lighting by surface orientation: shadowed dots larger and darker, lit dots smaller and brighter (tone -> size)
 const LIGHT = { sizeShadow: 1.22, sizeLit: 0.82, shadeShadow: 0.78, shadeLit: 1.08 };
+/**
+ * Assembly transitions (intro and outro), computed in the vertex shader so they cost nothing on the CPU.
+ * Every dot has a fixed start point in a wide shell around the head (aFly.xyz, relative to the head centre,
+ * mostly off screen and behind) and a random phase (aFly.w). One progress uniform sweeps across the dots as
+ * a staggered wave (chin first, broken up by the phase); each dot eases home along a spiral around the
+ * vertical axis. The dissolve is a looser motion, not a rewind: top first, dots drift outward and up with a
+ * slow curl, shrinking and fading.
+ */
+const FLY = {
+  radius: [0.22, 0.6], // metres from the head centre: the start shell
+  flatY: 0.7, // squash the shell vertically, so most dots come in from the sides
+  depth: 0.6, // squash the shell toward the camera axis...
+  back: 0.3, // ...and push it behind the head (metres), so few dots pass near the camera
+  spread: 0.6, // share of the timeline used to stagger the dots; the rest is each dot's own flight
+  random: 0.25, // stagger key: 0 is a clean bottom-up wave, 1 is fully random
+  swirl: 1.2, // radians of spiral around the vertical axis over one flight
+  fadeIn: 0.3, // share of a dot's own flight spent fading in
+  flightSize: 0.55, // dot size far from home (grows to 1 on arrival)
+  near: [0.18, 0.32], // metres from the camera: dots passing closer than this fade out
+  // timeline progress at which the depth prepass returns: it hides the far side and the eye and mouth interiors,
+  // but dots arriving from behind would vanish into it, so it waits until nearly every dot is home
+  prepassAt: 0.78,
+  eyesIn: 0.08 // timeline share over which the eyes and teeth fade back in after that
+};
+const DISSOLVE = { spread: 0.6, random: 0.3, out: 0.07, outZ: 0.3, up: 0.16, curl: 0.035, fadeStart: 0.1, fadeEnd: 0.9, shrink: 0.45 };
+const REDUCED_FADE_MS = 300; // reduced motion: a plain crossfade, no travel
 
 /** Luminance lookup into a mesh's colour map, or null when there is none. */
 function makeLumSampler(mesh) {
@@ -93,10 +129,17 @@ function makeLumSampler(mesh) {
 const VERT = /* glsl */ `
 attribute vec3 aNormal;
 attribute vec4 aInfo; // x: size multiplier, y: kind, z: mouth weight, w: alpha
+attribute vec4 aFly; // xyz: fly-in start relative to the head centre, w: per-dot random in [0, 1)
 uniform float uProj; // device pixels per metre at one metre
 uniform float uDpr;
 uniform float uRadius;
 uniform float uHold;
+uniform float uProg; // progress of the current transition, 0..1
+uniform float uMode; // 0: fly-in (uProg 1 is assembled), 1: dissolve (uProg 1 is gone)
+uniform float uTravel; // 1: dots travel; 0: reduced motion, a plain crossfade
+uniform float uBackFade; // while the depth prepass is off: hide settled dots behind the head's centre plane
+uniform vec3 uCenter;
+uniform vec2 uYRange;
 varying float vRim;
 varying float vKind;
 varying float vMouth;
@@ -104,24 +147,68 @@ varying float vAlpha;
 varying float vLit;
 
 void main() {
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vec3 p = position;
+  float fade = 1.0;
+  float grow = 1.0;
+  float settled = 1.0; // weight of the far-side hiding (prepass off): 1 at home, 0 far away
+  bool moving = uMode > 0.5 || uProg < 1.0;
+  if (moving) {
+    float yN = clamp((position.y - uYRange.x) / max(uYRange.y - uYRange.x, 1e-3), 0.0, 1.0);
+    if (uTravel < 0.5) {
+      fade = uMode > 0.5 ? 1.0 - uProg : uProg;
+    } else if (uMode < 0.5) {
+      // fly-in: a wave from the chin up, broken up by each dot's phase
+      float key = mix(yN, aFly.w, ${FLY.random.toFixed(2)});
+      float q = clamp((uProg - key * ${FLY.spread.toFixed(2)}) / ${(1 - FLY.spread).toFixed(2)}, 0.0, 1.0);
+      float rq = 1.0 - q;
+      float e = 1.0 - rq * rq * rq; // ease-out cubic: arrives fast, settles softly
+      float ang = ${FLY.swirl.toFixed(2)} * (1.0 - e);
+      vec3 rel = mix(position - uCenter, aFly.xyz, 1.0 - e);
+      float cs = cos(ang);
+      float sn = sin(ang);
+      p = uCenter + vec3(cs * rel.x + sn * rel.z, rel.y, cs * rel.z - sn * rel.x);
+      fade = smoothstep(0.0, ${FLY.fadeIn.toFixed(2)}, q);
+      grow = mix(${FLY.flightSize.toFixed(2)}, 1.0, e);
+      // eyeballs and teeth read right only behind the prepass: hide them as they land, fade them in once it is back
+      if (aInfo.y > 1.5) fade *= mix(1.0 - e, 1.0, smoothstep(${FLY.prepassAt.toFixed(2)}, ${(FLY.prepassAt + FLY.eyesIn).toFixed(2)}, uProg));
+      settled = e;
+    } else {
+      // dissolve: top first; drift outward and up with a slow curl, shrinking and fading
+      float key = mix(1.0 - yN, aFly.w, ${DISSOLVE.random.toFixed(2)});
+      float q = clamp((uProg - key * ${DISSOLVE.spread.toFixed(2)}) / ${(1 - DISSOLVE.spread).toFixed(2)}, 0.0, 1.0);
+      float e = q * q; // ease-in: lets go gently, then drifts away
+      float ph = aFly.w * 6.2832 + q * 2.5;
+      vec3 outward = normalize(position - uCenter + vec3(0.0, 0.0, 1e-4)) * vec3(1.0, 1.0, ${DISSOLVE.outZ.toFixed(2)}); // little toward the camera
+      p = position + e * (outward * ${DISSOLVE.out.toFixed(3)} + vec3(0.0, ${DISSOLVE.up.toFixed(3)}, 0.0) + vec3(sin(ph), 0.0, cos(ph)) * ${DISSOLVE.curl.toFixed(3)});
+      fade = 1.0 - smoothstep(${DISSOLVE.fadeStart.toFixed(2)}, ${DISSOLVE.fadeEnd.toFixed(2)}, q);
+      grow = 1.0 - ${DISSOLVE.shrink.toFixed(2)} * q;
+    }
+  }
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  if (moving) {
+    if (uBackFade > 0.0) {
+      float cz = (modelViewMatrix * vec4(uCenter, 1.0)).z;
+      fade *= 1.0 - uBackFade * settled * smoothstep(0.0, 0.03, cz - mv.z);
+    }
+    fade *= smoothstep(${FLY.near[0].toFixed(2)}, ${FLY.near[1].toFixed(2)}, -mv.z);
+  }
   vec3 n = normalize(normalMatrix * aNormal);
   vec3 toEye = normalize(-mv.xyz);
   float facing = abs(dot(n, toEye));
   float rim = pow(1.0 - clamp(facing, 0.0, 1.0), 2.0);
   // key light from the upper left, in view space; hair cards are two-sided, so take the lit side
   float lambert = dot(n, normalize(vec3(-0.45, 0.6, 0.75)));
-  if (vKind > 0.5 && vKind < 1.5) lambert = abs(lambert);
+  if (aInfo.y > 0.5 && aInfo.y < 1.5) lambert = abs(lambert);
   float lit = smoothstep(-0.15, 0.85, lambert);
   float sizeLight = mix(${LIGHT.sizeShadow.toFixed(2)}, ${LIGHT.sizeLit.toFixed(2)}, lit);
-  float r = uRadius * aInfo.x * sizeLight * (1.0 + ${DOT.mouthSwell.toFixed(2)} * aInfo.z + uHold * ${DOT.holdSwell.toFixed(2)} * aInfo.z + ${DOT.rimSwell.toFixed(2)} * rim);
+  float r = uRadius * aInfo.x * sizeLight * grow * (1.0 + ${DOT.mouthSwell.toFixed(2)} * aInfo.z + uHold * ${DOT.holdSwell.toFixed(2)} * aInfo.z + ${DOT.rimSwell.toFixed(2)} * rim);
   // capped so a dot lifted toward the camera does not balloon
   gl_PointSize = clamp(2.0 * r * uProj / -mv.z, ${DOT.minPx.toFixed(1)}, ${DOT.maxPx.toFixed(1)} * uDpr);
   gl_Position = projectionMatrix * mv;
   vRim = rim;
   vKind = aInfo.y;
   vMouth = aInfo.z;
-  vAlpha = aInfo.w;
+  vAlpha = aInfo.w * fade;
   vLit = lit;
 }
 `;
@@ -140,17 +227,24 @@ void main() {
   vec2 q = gl_PointCoord * 2.0 - 1.0;
   float d = length(q);
   float cov = 1.0 - smoothstep(0.82, 1.0, d);
-  if (cov < 0.02) discard;
+  if (cov < 0.02 || vAlpha < 0.004) discard; // (settled dots never go below 0.02)
   // each dot is a tiny sphere lit from the upper left; the surface's own lighting (vLit) sets its overall tone
   vec3 sn = vec3(q, sqrt(max(1.0 - d * d, 0.0)));
   float lit = clamp(dot(sn, normalize(vec3(-0.45, 0.55, 0.7))), 0.0, 1.0);
   float shade = mix(0.55, 1.15, lit) * mix(${LIGHT.shadeShadow.toFixed(2)}, ${LIGHT.shadeLit.toFixed(2)}, vLit);
   float spec = 0.35 * pow(lit, 10.0) * (0.4 + 0.6 * vLit);
+  float rimGlow = 0.2 * vRim;
   vec3 base = uColNavy;
-  if (vKind > 2.5) base = mix(uColGrey, uColNavy, 0.25);
-  else if (vKind > 1.5) base = uColNavy * 0.75;
-  else if (vKind > 0.5) base = uColNavy * 0.82;
-  vec3 col = base * shade + uColHalo * (spec + 0.2 * vRim) + uColHalo * 0.08 * vMouth;
+  if (vKind > 2.5) {
+    base = mix(uColGrey, uColNavy, ${TEETH_TONE.navyMix.toFixed(2)});
+    spec *= ${TEETH_TONE.spec.toFixed(2)};
+  } else if (vKind > 1.5) base = uColNavy * 0.75;
+  else if (vKind > 0.5) {
+    base = uColNavy * ${HAIR_TONE.base.toFixed(2)};
+    spec *= ${HAIR_TONE.spec.toFixed(2)};
+    rimGlow = 0.0;
+  }
+  vec3 col = base * shade + uColHalo * (spec + rimGlow) + uColHalo * 0.04 * vMouth;
   gl_FragColor = vec4(col, cov * vAlpha);
   #include <colorspace_fragment>
 }
@@ -172,6 +266,33 @@ function halton(i, b) {
     i = Math.floor(i / b);
   }
   return r;
+}
+
+/** Deterministic hash of a dot index into [0, 1). */
+function hash01(i, salt) {
+  let h = (Math.imul(i + 1, 0x9e3779b9) + Math.imul(salt, 0x632be5ab)) | 0;
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+/** Fly-in start points around the head centre (xyz) and a random phase (w), fixed per dot index. */
+function makeFlyStarts(n) {
+  const out = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    const u = 2 * hash01(i, 1) - 1;
+    const phi = 2 * Math.PI * hash01(i, 2);
+    const s = Math.sqrt(1 - u * u);
+    const r = FLY.radius[0] + (FLY.radius[1] - FLY.radius[0]) * Math.sqrt(hash01(i, 3));
+    out[i * 4] = s * Math.cos(phi) * r;
+    out[i * 4 + 1] = u * FLY.flatY * r;
+    out[i * 4 + 2] = s * Math.sin(phi) * r * FLY.depth - FLY.back;
+    out[i * 4 + 3] = hash01(i, 4);
+  }
+  return out;
 }
 
 const smooth = (a, b, x) => {
@@ -264,7 +385,7 @@ function makeDeformer(mesh) {
   return { out, update };
 }
 
-export function createPointCloud({ renderer, scene, camera, canvas, root, anchor, reducedMotion = false }) {
+export function createPointCloud({ renderer, scene, camera, canvas, root, anchor, reducedMotion = false, startDispersed = false }) {
   let reduced = !!reducedMotion;
   let active = false;
   let disposed = false;
@@ -297,6 +418,11 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   const halfW = (hb.max.x - hb.min.x) / 2;
   const fringeZ = hb.min.z + (hb.max.z - hb.min.z) * FRINGE.zStartFrac;
   const fringeY = hb.max.y - FRINGE.yDrop;
+  const scalpY = hb.max.y - SCALP.hairlineDrop;
+  const scalpMask = (p) => {
+    const y0 = scalpY - SCALP.temple * smooth(0.045, 0.085, Math.abs(p.x)) - SCALP.nape * (1 - smooth(-0.03, 0, p.z));
+    return smooth(y0 - SCALP.soft, y0 + SCALP.soft, p.y);
+  };
   const mouthC = anchor?.restCenter ?? new THREE.Vector3(0, 1.55, 0.09);
   const mouthR = (anchor?.radius ?? 0.03) * MOUTH_RADIUS_MUL;
 
@@ -361,6 +487,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     const nb = new THREE.Vector3();
     const ncv = new THREE.Vector3();
     const weighted = e.cls !== "hair";
+    const isScalp = e.cls === "full" && /head/i.test(e.mesh.name);
 
     // 1. candidates, several per final dot, in a random order so acceptance is unbiased.
     // Each triangle's density is raised by the darkness of its texture and by its curvature
@@ -484,6 +611,12 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         const v = w0 * uv.getY(ia) + w1 * uv.getY(ib) + w2 * uv.getY(ic);
         const l = smooth(TEX.l0, TEX.l1, lum(u, v));
         size *= TEX.dark + (TEX.bright - TEX.dark) * l;
+        if (mouth > 0) size += (Math.min(size, sizeMul * LIP_SIZE_CAP) - size) * mouth;
+      }
+      let dotKind = kind;
+      if (isScalp && Math.random() < scalpMask(P)) {
+        dotKind = KIND.hair;
+        size = SIZE_MUL.hair;
       }
       const tkey = `${ei}:${cand[i]}:${cand[i + 1]}`; // a directed edge belongs to one triangle in a consistently wound mesh
       let tid = uniqIndex.get(tkey);
@@ -494,7 +627,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       }
       dotTri.push(tid);
       bary.push(cand[i + 3], cand[i + 4], cand[i + 5]);
-      info.push(size, kind, mouth, alpha);
+      info.push(size, dotKind, mouth, alpha);
       kept++;
     }
     perClass[e.mesh.name || e.cls] = `${e.cls}: ${kept} dots, ${nc} candidates, area ${areas.get(e).sum.toFixed(4)} m²`;
@@ -527,11 +660,18 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   geometry.setAttribute("position", posAttr);
   geometry.setAttribute("aNormal", nrmAttr);
   geometry.setAttribute("aInfo", new THREE.BufferAttribute(new Float32Array(info), 4));
+  geometry.setAttribute("aFly", new THREE.BufferAttribute(makeFlyStarts(count), 4));
   const uniforms = {
     uProj: { value: 1000 },
     uDpr: { value: 1 },
     uRadius: { value: DOT.radius },
     uHold: { value: 0 },
+    uProg: { value: 1 },
+    uMode: { value: 0 },
+    uTravel: { value: 1 },
+    uBackFade: { value: 0 },
+    uCenter: { value: new THREE.Vector3().copy(mouthC) },
+    uYRange: { value: new THREE.Vector2(minY, hb.max.y) },
     uColNavy: { value: new THREE.Color(COLOR_NAVY) },
     uColHalo: { value: new THREE.Color(COLOR_HALO) },
     uColGrey: { value: new THREE.Color(COLOR_GREY) }
@@ -632,7 +772,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   /** Set each nearby dot's target displacement from the pointer's ray and motion. */
   function scatter(dtSec) {
     frameId++;
-    if (!pointer.on || reduced) return;
+    if (!pointer.on || reduced || !settledHome()) return;
     rayO.setFromMatrixPosition(camera.matrixWorld);
     rayD.set(pointer.x, pointer.y, 0.5).unproject(camera).sub(rayO).normalize();
     rayHit.copy(rayD).multiplyScalar(FOCUS).add(rayO);
@@ -821,10 +961,111 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     nrmAttr.needsUpdate = true;
   }
 
+  // ---- assembly transitions: state on the CPU, motion in the vertex shader ----
+  // mode 0 is the fly-in (p 1 = assembled), mode 1 the dissolve (p 1 = gone)
+  const fly = { mode: startDispersed ? 1 : 0, p: 1, anim: null }; // anim: { to, dur, assemble, resolve }
+  const settledHome = () => !fly.anim && fly.mode === 0 && fly.p >= 1;
+  const gone = () => (fly.mode === 1 ? fly.p >= 1 : fly.p <= 0);
+
+  function applyFly() {
+    const empty = !fly.anim && gone();
+    uniforms.uProg.value = fly.p;
+    uniforms.uMode.value = fly.mode;
+    uniforms.uTravel.value = reduced ? 0 : 1;
+    // The depth prepass hides the far side and the eye and mouth interiors. Early in the fly-in it would also
+    // hide dots in flight behind an invisible head, so it is off then and the shader hides settled dots on the
+    // far side instead. The dissolve keeps it: dots leave the surface outward, so they stay in front of it.
+    const prepassOn = active && !empty && (fly.mode === 1 || fly.p >= FLY.prepassAt || reduced);
+    uniforms.uBackFade.value = prepassOn ? 0 : 1;
+    points.visible = active && !empty;
+    for (const e of entries) if (e.prepass) e.prepass.visible = e.visible && prepassOn;
+  }
+
+  function endFly(done) {
+    const a = fly.anim;
+    if (!a) return;
+    fly.anim = null;
+    if (done) {
+      fly.mode = a.assemble ? 0 : 1;
+      fly.p = 1;
+    }
+    applyFly();
+    a.resolve(done);
+  }
+
+  /** Resolves true when the head is assembled (or gone), false if another transition interrupts it. */
+  function transition(assemble, durationMs) {
+    if (disposed) return Promise.resolve(false);
+    endFly(false);
+    if (gone()) {
+      fly.mode = 1;
+      fly.p = 1;
+    }
+    if (assemble ? settledHome() : gone()) {
+      applyFly();
+      return Promise.resolve(true);
+    }
+    if (!active) {
+      fly.mode = assemble ? 0 : 1;
+      fly.p = 1;
+      applyFly();
+      return Promise.resolve(true);
+    }
+    // From rest, start the full motion; part-way through the other one, run that one backwards (no jump).
+    if (assemble && gone()) {
+      fly.mode = 0;
+      fly.p = 0;
+    } else if (!assemble && settledHome()) {
+      fly.mode = 1;
+      fly.p = 0;
+    }
+    const to = assemble ? (fly.mode === 0 ? 1 : 0) : fly.mode === 1 ? 1 : 0;
+    const dur = reduced ? REDUCED_FADE_MS : Math.max(1, +durationMs || 0);
+    return new Promise((resolve) => {
+      fly.anim = { to, dur, assemble, resolve };
+      applyFly();
+    });
+  }
+
+  function stepFly(dtMs) {
+    const a = fly.anim;
+    const d = Math.max(0, dtMs || 0) / a.dur;
+    fly.p = a.to > fly.p ? Math.min(a.to, fly.p + d) : Math.max(a.to, fly.p - d);
+    if (fly.p === a.to) endFly(true);
+    else applyFly();
+  }
+
+  /** Head centre and height for the shader, from a sparse sample of the live dots. */
+  function measureFly() {
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let z0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    let z1 = -Infinity;
+    for (let i = 0; i < count; i += 61) {
+      const x = positions[i * 3];
+      const y = positions[i * 3 + 1];
+      const z = positions[i * 3 + 2];
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+      if (z < z0) z0 = z;
+      if (z > z1) z1 = z;
+    }
+    if (!(x1 >= x0)) return;
+    uniforms.uCenter.value.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    uniforms.uYRange.value.set(y0, y1);
+  }
+
   function setActive(on) {
     if (disposed) return;
     active = !!on;
-    points.visible = active;
+    if (!active && fly.anim) {
+      fly.p = fly.anim.to;
+      endFly(true);
+    }
     for (const h of hidden) h.mesh.visible = active ? false : h.visible;
     for (const e of entries) {
       if (active) {
@@ -833,7 +1074,6 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
           if (!e.prepass) e.prepass = makePrepass(e);
           syncPrepass(e);
           if (e.mesh.parent && e.prepass.parent !== e.mesh.parent) e.mesh.parent.add(e.prepass);
-          e.prepass.visible = e.visible;
         }
         e.mesh.visible = false;
       } else {
@@ -841,6 +1081,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         e.mesh.visible = e.visible;
       }
     }
+    applyFly(); // points and prepass visibility
   }
 
   return {
@@ -852,6 +1093,19 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       return active;
     },
     setActive,
+    /** "assembled" | "dispersed" | "assembling" | "dispersing" */
+    get assembly() {
+      if (fly.anim) return fly.anim.assemble ? "assembling" : "dispersing";
+      return settledHome() ? "assembled" : "dispersed";
+    },
+    /** Fly the dots in from around the stage and build the head. */
+    assemble(opts) {
+      return transition(true, opts?.durationMs ?? 1600);
+    },
+    /** Dissolve the head: dots drift outward and up and fade. */
+    disperse(opts) {
+      return transition(false, opts?.durationMs ?? 1100);
+    },
     setHold(v) {
       uniforms.uHold.value = Math.max(0, Math.min(1, v || 0));
     },
@@ -863,10 +1117,12 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         isActive.fill(0);
         activeCount = 0;
       }
+      applyFly();
     },
     /** Call after the driver and head pose have been updated for this frame, before render. */
     update(dtMs) {
       if (!active || disposed) return;
+      if (!fly.anim && gone()) return; // nothing on stage: skip the deform entirely
       const t0 = performance.now();
       const dtSec = Math.min(0.05, Math.max(0, (dtMs || 0) / 1000));
       root.updateMatrixWorld(true);
@@ -878,6 +1134,10 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       scatter(dtSec);
       springs(dtSec);
       place();
+      if (fly.anim) {
+        measureFly();
+        stepFly(dtMs);
+      }
       renderer.getDrawingBufferSize(size);
       uniforms.uProj.value = size.y / 2 / Math.tan(THREE.MathUtils.degToRad((camera.fov || 30) / 2));
       uniforms.uDpr.value = renderer.getPixelRatio();
@@ -887,6 +1147,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     },
     dispose() {
       if (disposed) return;
+      endFly(false);
       disposed = true;
       setActive(false);
       canvas.removeEventListener("pointermove", onMove);

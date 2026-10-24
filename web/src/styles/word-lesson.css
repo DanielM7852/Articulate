@@ -1,0 +1,80 @@
+/* ---------- Word lesson (wl-) ----------
+ * The practice-studio frame (lp-): one heading row, then Ava on the left (about 40%) and the word
+ * board on the right. Ava's caption has its own row under the stage (the frame's caption row), so it
+ * never covers the side cutaway or the board.
+ */
+.wl-stage {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+}
+.wl-board {
+  display: flex;
+  flex-direction: column;
+}
+/* The board's own root (WordBoard renders .wb) fills the pane. */
+.wl-board > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Caption row: a stable two-line height so the stage does not jump as lines change. */
+.wl-caption {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+}
+.wl-caption .cap {
+  max-width: min(900px, 100%);
+}
+/* TeacherCaptions brings its own card; in the caption row it reads as plain caption text. */
+.wl-caption .teacher-captions {
+  font-size: 17px;
+  line-height: 1.45;
+  color: var(--color-ink);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
+.wl-pill {
+  cursor: default;
+}
+button.wl-pill {
+  cursor: pointer;
+}
+.wl-pill.is-warn {
+  border-color: var(--color-warn-soft);
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+}
+.wl-pill.is-warn svg {
+  color: var(--color-warn);
+}
+.wl-status {
+  display: flex;
+  align-items: center;
+}
+.wl-status-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-navy);
+}
+
+/* Phones: Ava on top, the board below; pills wrap instead of overflowing. */
+@media (max-width: 720px) {
+  .wl-stage {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(200px, 38%) minmax(0, 1fr);
+  }
+  .wl-stage .lp-pane + .lp-pane {
+    border-left: 0;
+    border-top: 1px solid var(--color-line);
+  }
+  .wl-caption .teacher-captions {
+    font-size: 15px;
+  }
+  .wl-guide .lp-pills {
+    flex-wrap: wrap;
+    right: 16px;
+  }
+}

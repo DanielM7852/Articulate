@@ -3,7 +3,7 @@
 import math
 import statistics
 
-from app.live.schemas import AudioFrame, AudioScore, LipFrame, VideoScore
+from app.live.schemas import AudioFrame, AudioScore, LipFrame, VideoScore, WordAttempt, WordScore
 from app.live.targets import SOUND_EXPECTATION, TARGETS, normalized_distance
 
 MIN_VOICED_FRAMES = 8
@@ -114,3 +114,32 @@ def score_video(sound: str, frames: list[LipFrame]) -> VideoScore | None:
         expectation=expectation,
         verdict=_lip_verdict(sound, rounding, spread, width, opening, jaw),
     )
+
+
+# ---- Word attempts (the board scores each zone on the device; the server only rolls them up) ----
+
+# A skipped zone was never produced, so it counts as a miss for the roll-up and the weakest zone.
+_MISSING = ("miss", "skipped")
+
+
+def score_word(attempt: WordAttempt) -> WordScore:
+    """Zone verdicts pass through unchanged. weakestZoneId: first miss/skipped, else first partial, else None.
+
+    verdict: insufficient when capture quality is unclear; on_target when every zone hit; close when nothing
+    was missed but some zone was partial; off otherwise.
+    """
+    zones = list(attempt.zones)
+    hits = sum(1 for z in zones if z.verdict == "hit")
+    if attempt.quality != "usable":
+        return WordScore(word=attempt.word, verdict="insufficient", zoneCount=len(zones), hitCount=hits,
+                         weakestZoneId=None, zones=zones, lipUsable=attempt.lipUsable)
+    missed = next((z.zoneId for z in zones if z.verdict in _MISSING), None)
+    partial = next((z.zoneId for z in zones if z.verdict == "partial"), None)
+    if missed is not None:
+        verdict = "off"
+    elif partial is not None:
+        verdict = "close"
+    else:
+        verdict = "on_target"
+    return WordScore(word=attempt.word, verdict=verdict, zoneCount=len(zones), hitCount=hits,
+                     weakestZoneId=missed or partial, zones=zones, lipUsable=attempt.lipUsable)

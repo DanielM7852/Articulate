@@ -4,6 +4,8 @@ export type FormantEstimate = {
   valid: true;
   f1: number;
   f2: number;
+  /** The next resonance above F2 with a formant-like bandwidth, when one lies within 1500–4000 Hz. */
+  f3?: number;
   confidence: number;
   rms: number;
   periodicity: number;
@@ -21,6 +23,9 @@ export interface EstimatorSettings {
 }
 
 export const DEFAULT_SETTINGS: EstimatorSettings = { ceilingHz: 5500, minimumRms: 0.008 };
+
+/** Frames whose autocorrelation peak falls below this are rejected as `unvoiced`. */
+export const VOICING_THRESHOLD = 0.65;
 
 function periodicityOf(samples: Float64Array, rate: number): number {
   let best = 0;
@@ -150,15 +155,16 @@ export function estimateFormants(
     if (!Number.isFinite(value)) return { valid: false, reason: 'invalid', rms: 0, periodicity: 0 };
     if (Math.abs(value) >= 0.995) clipped++;
   }
-  if (clipped / frame.length > 0.03) return { valid: false, reason: 'clipped', rms: 0, periodicity: 0 };
   const samples = resample(frame, sampleRate, settings.ceilingHz * 2);
   const rate = settings.ceilingHz * 2;
   const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
   for (let i = 0; i < samples.length; i++) samples[i] -= mean;
   const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+  // A clipped frame still reports its level and voicing; only its formants are withheld.
+  if (clipped / frame.length > 0.03) return { valid: false, reason: 'clipped', rms, periodicity: periodicityOf(samples, rate) };
   if (rms < settings.minimumRms) return { valid: false, reason: 'quiet', rms, periodicity: 0 };
   const periodicity = periodicityOf(samples, rate);
-  if (periodicity < 0.65) return { valid: false, reason: 'unvoiced', rms, periodicity };
+  if (periodicity < VOICING_THRESHOLD) return { valid: false, reason: 'unvoiced', rms, periodicity };
   const emphasized = new Float64Array(samples.length);
   const emphasis = Math.exp(-2 * Math.PI * 50 / rate);
   for (let i = 1; i < samples.length; i++) {
@@ -166,7 +172,7 @@ export function estimateFormants(
     emphasized[i] = (samples[i] - emphasis * samples[i - 1]) * window;
   }
   const poles = resonances(burg(emphasized, 10), rate);
-  const [first, second] = poles.filter(({ frequency, bandwidth }) => frequency > 180 && frequency < 5000 && bandwidth > 15 && bandwidth < 600);
+  const [first, second, third] = poles.filter(({ frequency, bandwidth }) => frequency > 180 && frequency < 5000 && bandwidth > 15 && bandwidth < 600);
   // Noise can broaden the real F1 past the bandwidth limit; relabelling would then report F2 as F1 and F3 as F2.
   const maskedF1 = first && poles.some(({ frequency, bandwidth }) => frequency > 180 && frequency < first.frequency && bandwidth >= 600);
   // Likewise a broadened F2 would promote F3; clean front vowels' spare broad pole sits near F2 (≥0.7×), not this far below.
@@ -175,5 +181,9 @@ export function estimateFormants(
     return { valid: false, reason: 'uncertain', rms, periodicity };
   }
   const confidence = Math.max(0, Math.min(1, periodicity * (1 - Math.max(first.bandwidth, second.bandwidth) / 1200)));
-  return { valid: true, f1: first.frequency, f2: second.frequency, confidence, rms, periodicity };
+  // F3 rides along with an accepted F1/F2 and never affects acceptance. Clean vowels' spare pole between F2 and F3
+  // is broad (≥600 Hz, already filtered out); a noise-broadened F3 lets a 400–600 Hz spare pole take the slot, so
+  // F3 must be as sharp as a real one rather than promoting that spare.
+  const f3 = third && third.bandwidth < 400 && third.frequency >= 1500 && third.frequency <= 4000 ? third.frequency : undefined;
+  return { valid: true, f1: first.frequency, f2: second.frequency, ...(f3 === undefined ? {} : { f3 }), confidence, rms, periodicity };
 }

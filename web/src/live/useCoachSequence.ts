@@ -7,6 +7,8 @@ import type { CueId, LiveCoachResponse } from './liveCoach';
  * Plays a live coach response: the teacher speaks the caption (Cartesia, browser fallback) while the
  * avatar either lip-syncs in front view, or, when the decision asks for a cue, swings to the side
  * cutaway and loops the cue (the cue owns the mouth, so no lip sync) and then returns to front view.
+ * A side view with no cue (word coaching on tongue sounds, which have no mouth-demo cue) turns to the
+ * cutaway and lip-syncs the line there, holds it at least one cue length, then returns to front view.
  * Every step checks a run token, so cancel() or a newer run() stops speech and resets the demo safely.
  */
 export const CUE_MIN_MS = 2500; // at least one full cue loop
@@ -20,7 +22,10 @@ export interface SequenceOptions {
   narration: boolean;
 }
 
-/** One therapist line: the caption, plus an optional side-view cue that owns the mouth while it plays. */
+/**
+ * One therapist line: the caption, plus an optional side-view cue that owns the mouth while it plays.
+ * showSideView with cueId null: side cutaway with lip sync and no cue.
+ */
 export interface SequenceLine {
   text: string;
   cueId: CueId | null;
@@ -127,6 +132,19 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
     [cancel],
   );
 
+  /** Drive the avatar's mouth from the teacher's audio clock; cancel() and the line's end stop it. */
+  const lipSync = useCallback((avatar: MouthReferenceHandle, sp: TeacherSpeech) => {
+    const handle = avatar.speak({ clock: () => sp.clock(), timeline: { words: [...sp.words], phonemes: [...sp.phonemes] } });
+    if (!handle) return;
+    const offTimeline = sp.on('timeline', (added) => handle.append(added));
+    const offEnd = sp.on('end', () => handle.end());
+    live.current.stopLip = () => {
+      offTimeline();
+      offEnd();
+      handle.stop();
+    };
+  }, []);
+
   /** Speak any therapist line (coach feedback or a session-director turn). Resolves when finished or cancelled. */
   const speakLine = useCallback(
     async (line: SequenceLine, opts: SequenceOptions): Promise<void> => {
@@ -142,6 +160,7 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
       setCaption(text);
       setRunning(true);
       const wantCue = line.showSideView && line.cueId !== null;
+      const wantSide = line.showSideView && line.cueId === null;
 
       // Speak first; the avatar work happens in parallel with the audio.
       let sp: TeacherSpeech | null = null;
@@ -154,7 +173,7 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
       try {
         ensureRef.current();
         let demo = getDemoRef.current();
-        if (!demo?.ready && (wantCue || opts.narration)) {
+        if (!demo?.ready && (wantCue || wantSide || opts.narration)) {
           const until = Date.now() + DEMO_WAIT_MS;
           while (alive() && Date.now() < until) {
             demo = getDemoRef.current();
@@ -181,23 +200,31 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
           if (!alive()) return;
           avatar.stop();
           await avatar.setView('front');
+        } else if (wantSide && avatar) {
+          live.current.touchedDemo = true;
+          avatar.stop();
+          await avatar.setView('side');
+          if (!alive()) return;
+          const sideStart = Date.now();
+          if (sp) {
+            lipSync(avatar, sp);
+            await sp.done;
+            if (!alive()) return;
+          }
+          const left = (sp ? CUE_MIN_MS : CUE_SILENT_MS) - (Date.now() - sideStart);
+          if (left > 0) await sleep(left);
+          if (!alive()) return;
+          live.current.stopLip?.();
+          live.current.stopLip = null;
+          await avatar.setView('front');
         } else if (sp) {
           if (avatar) {
             live.current.touchedDemo = true;
             avatar.stop(); // a playing cue would own the mouth and block lip sync
-            const handle = avatar.speak({ clock: () => sp!.clock(), timeline: { words: [...sp.words], phonemes: [...sp.phonemes] } });
-            if (handle) {
-              const offTimeline = sp.on('timeline', (added) => handle.append(added));
-              const offEnd = sp.on('end', () => handle.end());
-              live.current.stopLip = () => {
-                offTimeline();
-                offEnd();
-                handle.stop();
-              };
-            }
+            lipSync(avatar, sp);
           }
           await sp.done;
-        } else if (wantCue) {
+        } else if (wantCue || wantSide) {
           // Cue requested but the avatar never loaded: captions alone carry the message.
           await sleep(CUE_SILENT_MS);
         }
@@ -211,7 +238,7 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
         }
       }
     },
-    [cancel],
+    [cancel, lipSync],
   );
 
   const run = useCallback(

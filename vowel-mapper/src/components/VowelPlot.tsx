@@ -1,8 +1,12 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { VowelPoint } from '../audio/tracker';
 import { PLOT, projectVowel } from './plot';
-import { buildTrail, sampleKey, trailOpacity } from './trail';
+import { buildRibbons, buildTrail, sampleKey, trailHead, trailOpacity } from './trail';
 import { useTrailAnimation } from './useTrailAnimation';
+
+/** Ribbon widths in plot units: a tapered comet while live, an even line once finished. */
+const INK_WIDTH = 6;
+const STATIC_WIDTH = 3.5;
 
 export interface VowelPlotProps {
   trace: VowelPoint[];
@@ -33,11 +37,12 @@ export function VowelPlot({ trace, point, faded, live = false, overlay }: VowelP
   }, []);
   // Compensate for the SVG viewBox so labels retain their CSS-pixel size.
   const textScale = Math.max(1, 800 / Math.max(1, width));
-  const { now, arrivals, reducedMotion } = useTrailAnimation(trace, point, live);
+  // Cosmetic only: the eased head and the ink never feed tracking; data-f1/f2 stay the accepted point.
+  const { now, arrivals, headMs, reducedMotion } = useTrailAnimation(trace, point, live);
   const geometry = useMemo(() => buildTrail(trace, point, !reducedMotion), [trace, point, reducedMotion]);
   const opacity = (sample: VowelPoint) => live ? trailOpacity(now - (arrivals.get(sampleKey(sample)) ?? now)) : 1;
-  const strokes = geometry.filter((stroke) => opacity(stroke.to) > 0);
-  const cursor = point ? projectVowel(point) : null;
+  const ribbons = buildRibbons(geometry, headMs, (sample) => live ? INK_WIDTH * opacity(sample) : STATIC_WIDTH);
+  const cursor = point ? trailHead(geometry, headMs) ?? projectVowel(point) : null;
   const cursorOpacity = point ? opacity(point) * (faded ? 0.2 : 1) : 0;
   return (
     <div className="plot-wrap" ref={container}>
@@ -52,10 +57,6 @@ export function VowelPlot({ trace, point, faded, live = false, overlay }: VowelP
           <clipPath id={`${id}-clip`}>
             <rect x={PLOT.left} y={PLOT.top} width={PLOT.width} height={PLOT.height} rx="16" />
           </clipPath>
-          {live && strokes.map((stroke) => <linearGradient key={stroke.key} id={`${id}-${stroke.key}`} gradientUnits="userSpaceOnUse" x1={stroke.start.x} y1={stroke.start.y} x2={stroke.end.x} y2={stroke.end.y}>
-            <stop offset="0" stopColor="#7197f2" stopOpacity={opacity(stroke.from) * 0.8} />
-            <stop offset="1" stopColor="#7197f2" stopOpacity={opacity(stroke.to) * 0.8} />
-          </linearGradient>)}
         </defs>
         <rect x={PLOT.left} y={PLOT.top} width={PLOT.width} height={PLOT.height} rx="16" fill="#f6f9ff" stroke="#dbe4f0" />
         <rect x={PLOT.left} y={PLOT.top} width={PLOT.width} height={PLOT.height} rx="16" fill={`url(#${id}-grid)`} />
@@ -76,13 +77,12 @@ export function VowelPlot({ trace, point, faded, live = false, overlay }: VowelP
         <text className="axis-unit" x="798" y="480" textAnchor="end" style={{ fontSize: 10 * textScale }}>F2 · Hz</text>
         <g clipPath={`url(#${id}-clip)`}>
           {typeof overlay === 'function' ? overlay(textScale) : overlay}
-          {strokes.map((stroke) => <path
-            key={stroke.key}
-            d={stroke.d}
+          {ribbons.map((ribbon) => <path
+            key={ribbon.key}
+            d={ribbon.d}
             className="vowel-trail"
-            data-segment={stroke.to.segment}
-            stroke={live ? `url(#${id}-${stroke.key})` : '#7197f2'}
-            opacity={live ? 1 : 0.75}
+            data-segment={ribbon.segment}
+            fillOpacity={live ? 0.8 : 0.75}
           />)}
           {cursor && cursorOpacity > 0 && <g data-testid="cursor" data-f1={point?.f1} data-f2={point?.f2} className={`vowel-cursor${faded ? ' is-faded' : ''}`} opacity={cursorOpacity} transform={`translate(${cursor.x} ${cursor.y})`}>
             <circle r="20" className="cursor-halo" />

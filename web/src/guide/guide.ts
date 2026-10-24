@@ -23,15 +23,24 @@ function node() {
   return mount;
 }
 
+export interface AcquireOptions {
+  /**
+   * This screen opens on an empty stage and calls assemble() itself. The first load starts dispersed;
+   * a guide that is already assembled dissolves away. Without it, a dispersed guide assembles again,
+   * so every other screen finds the head in place.
+   */
+  startDispersed?: boolean;
+}
+
 /** Show the guide inside `host`. Resolves with the live demo; rejects if it cannot load. */
-export function acquireGuide(host: HTMLElement): Promise<MouthDemo> {
+export function acquireGuide(host: HTMLElement, { startDispersed = false }: AcquireOptions = {}): Promise<MouthDemo> {
   const el = node();
   host.append(el);
   holder = host;
   if (!loading) {
     loading = import('@mouth-demo/src/mouth-demo.js')
       // The particle head is the default look; `?style=hologram` on the page URL compares the painted lattice.
-      .then((m) => m.createMouthDemo(el, { avatarUrl, controls: false, style: 'particles' }))
+      .then((m) => m.createMouthDemo(el, { avatarUrl, controls: false, style: 'particles', startDispersed }))
       .catch((err: unknown) => {
         loading = null; // allow a retry on the next screen
         el.replaceChildren();
@@ -39,7 +48,12 @@ export function acquireGuide(host: HTMLElement): Promise<MouthDemo> {
       });
   }
   return loading.then((demo) => {
-    if (holder === host) demo.resume();
+    if (holder === host) {
+      demo.resume();
+      const away = demo.assembly === 'dispersed' || demo.assembly === 'dispersing';
+      if (startDispersed && !away) void demo.disperse();
+      else if (!startDispersed && away) void demo.assemble();
+    }
     return demo;
   });
 }

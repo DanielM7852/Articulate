@@ -7,8 +7,9 @@ Everything it says is checked here, and any failure means the deterministic fall
 import re
 from typing import Any
 
-from app.live.schemas import AudioScore, ClientSummary, CoachDecision, EvidenceItem, VideoScore
+from app.live.schemas import AudioScore, ClientSummary, CoachDecision, EvidenceItem, VideoScore, WordAttempt, WordScore
 from app.live.targets import SOUND_CUE, SOUND_SPELLING
+from app.live.words import ZONE_CUE, ZoneInfo, word_info
 
 CAPTION_MAX = 240
 CAPTION_MAX_SENTENCES = 3
@@ -65,7 +66,7 @@ def _number_tokens(candidates: dict[str, float | str], fields: list[str]) -> set
         value = candidates.get(name)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             tokens.update({f"{round(value, 2):g}", f"{round(value, 1):g}", str(int(round(value))), f"{value:.2f}", f"{value:.1f}"})
-            if name == "audio.inTargetFraction":
+            if name.endswith("Fraction"):  # audio.inTargetFraction, word.<zone>.inBandFraction, ...
                 tokens.add(str(int(round(value * 100))))
     return tokens
 
@@ -163,4 +164,184 @@ def fallback_decision(
             caption = "Let's take a short break, then come back to it."
     fields = [f for f in fields if f in candidates]
     decision = CoachDecision(observation=observation, caption=caption, cueId=cue_id, nextAction=action, evidenceFields=fields)
+    return decision, [EvidenceItem(field=f, value=candidates[f]) for f in fields]
+
+
+# ---- Word mode ----
+#
+# Evidence field names are flattened: word.verdict, word.hitCount, word.zoneCount, word.weakestZoneId,
+# word.durationMs, and per zone word.<zoneId>.verdict, word.<zoneId>.dwellMs and word.<zoneId>.<key> for every
+# key in that zone's evidence (f1Median, inBandFraction, burstDetected, spreadMean, ...).
+
+WORD_CAPTION_MAX = 200
+WORD_CAPTION_MAX_SENTENCES = 2
+WORD_PRAISE_MAX_SENTENCES = 1
+
+_PRAISE = re.compile(
+    r"\b(nice|great|good|well done|lovely|excellent|perfect|beautiful|awesome|brilliant|wonderful|fantastic|amazing|super)\b",
+    re.IGNORECASE,
+)
+# Deaf and hard-of-hearing learners: instructions are about the body and the board, never about listening.
+_LISTEN = re.compile(r"\b(listen\w*|hear\w*|sounds? like)\b", re.IGNORECASE)
+_QUOTES_OPEN = "\"'“‘"
+_QUOTES_CLOSE = "\"'”’"
+
+
+def word_evidence_candidates(word: WordAttempt, score: WordScore) -> dict[str, float | str]:
+    raw: dict[str, Any] = {
+        "word.verdict": score.verdict,
+        "word.hitCount": score.hitCount,
+        "word.zoneCount": score.zoneCount,
+        "word.weakestZoneId": score.weakestZoneId,
+        "word.durationMs": int(round(word.durationMs)),
+    }
+    for zone in word.zones:
+        raw[f"word.{zone.zoneId}.verdict"] = zone.verdict
+        raw[f"word.{zone.zoneId}.dwellMs"] = int(round(zone.dwellMs))
+        for key, value in zone.evidence.items():
+            raw[f"word.{zone.zoneId}.{key}"] = value
+    out: dict[str, float | str] = {}
+    for key, value in raw.items():
+        if value is None:
+            continue
+        out[key] = round(value, 2) if isinstance(value, float) else value
+    return out
+
+
+def zone_info(word: WordAttempt, zone_id: str) -> ZoneInfo | None:
+    """Server copy of the zone (label, hint, position); a generic entry for words the server does not know."""
+    info = word_info(word.word)
+    if info is not None:
+        found = info.zone(zone_id)
+        if found is not None:
+            return found
+    zone = next((z for z in word.zones if z.zoneId == zone_id), None)
+    if zone is None:
+        return None
+    generic = "Watch the side view, then try once more."
+    return ZoneInfo(zone.zoneId, zone.phoneme, zone.phoneme, zone.kind, generic, generic, "")
+
+
+def _mentions_label(text: str, label: str) -> bool:
+    """A zone label counts as mentioned when quoted, or written as "the <label>" or "<label> sound"."""
+    lab = re.escape(label)
+    pattern = rf"([{_QUOTES_OPEN}]{lab}[{_QUOTES_CLOSE}])|\bthe\s+{lab}\b|\b{lab}\s+sound\b"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def validate_word_decision(
+    decision: CoachDecision,
+    word: WordAttempt,
+    score: WordScore,
+    candidates: dict[str, float | str],
+) -> list[EvidenceItem]:
+    """Every vowel-mode rule that applies to words, plus the word rules. Raises DecisionError on any violation."""
+    zone_ids = {z.zoneId for z in word.zones}
+    focus = decision.focusZoneId
+    if focus is not None and focus not in zone_ids:
+        raise DecisionError("focus_zone_unknown")
+    if decision.cueId is not None and (focus is None or ZONE_CUE.get(focus) != decision.cueId):
+        raise DecisionError("cue_not_for_zone")
+    if score.verdict == "insufficient" and (decision.cueId is not None or decision.nextAction != "retry"):
+        raise DecisionError("insufficient_capture_needs_retry")
+    fields = list(dict.fromkeys(decision.evidenceFields))
+    if any(f not in candidates for f in fields):
+        raise DecisionError("unknown_evidence_field")
+    if not fields:
+        fields = ["word.verdict"]
+    observation = decision.observation.strip()
+    caption = decision.caption.strip()
+    if not observation or len(observation) > OBSERVATION_MAX:
+        raise DecisionError("observation_length")
+    if not caption or len(caption) > WORD_CAPTION_MAX or _sentences(caption) > WORD_CAPTION_MAX_SENTENCES:
+        raise DecisionError("caption_length")
+    text = f"{observation} {caption}"
+    allowed = _number_tokens(candidates, fields)
+    if any(n not in allowed for n in _NUMBER.findall(text)):
+        raise DecisionError("number_not_in_evidence")
+    if _SHAMING.search(text):
+        raise DecisionError("shaming_language")
+    if not word.lipUsable and _BODY.search(text):
+        raise DecisionError("body_claim_without_video")
+    # Tongue instructions are the point of word coaching; claims about what the tongue did are not measured.
+    if _TONGUE_CLAIM.search(text):
+        raise DecisionError("tongue_claim")
+    if _LISTEN.search(text):
+        raise DecisionError("listening_language")
+    sentences = [x for x in re.split(r"(?<=[.!?])\s+", caption) if x.strip()]
+    if sum(1 for x in sentences if _PRAISE.search(x)) > WORD_PRAISE_MAX_SENTENCES:
+        raise DecisionError("too_much_praise")
+    mentions_word = re.search(rf"\b{re.escape(word.word)}\b", caption, re.IGNORECASE) is not None
+    if focus is not None:
+        info = zone_info(word, focus)
+        if not (mentions_word or (info is not None and _mentions_label(caption, info.label))):
+            raise DecisionError("caption_misses_focus")
+    elif not mentions_word:
+        raise DecisionError("caption_misses_word")
+    return [EvidenceItem(field=f, value=candidates[f]) for f in fields]
+
+
+def word_show_side_view(focus_zone_id: str | None, next_action: str) -> bool:
+    """Word coaching is about the tongue, so any retry with a focus zone turns Ava to the side cutaway."""
+    return focus_zone_id is not None and next_action == "retry"
+
+
+_INSUFFICIENT = {
+    "clipped": ("The capture was too loud to read clearly.", "That was a bit loud for me. Say {word} once more, a little softer."),
+    "too-short": ("The capture was too short to read every part.", "That went by quickly. Say {word} once more, at an easy pace."),
+}
+_INSUFFICIENT_DEFAULT = (
+    "The capture did not have enough clear voice to read.",
+    "I couldn't catch {word} that time. Say it once more, clear and steady.",
+)
+
+
+def _first_sentence(text: str) -> str:
+    parts = [x for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x.strip()]
+    return parts[0] if parts else text.strip()
+
+
+def word_fallback_line(word: WordAttempt, score: WordScore) -> tuple[str, str, str | None]:
+    """(observation, caption, focusZoneId) built only from the verdicts and the zone hints.
+
+    web/src/live/wordCoach.ts builds the same caption when the backend cannot be reached; keep them in sync.
+    """
+    name = word.word
+    if score.verdict == "insufficient":
+        obs, cap = _INSUFFICIENT.get(word.qualityReason or "", _INSUFFICIENT_DEFAULT)
+        return obs, cap.format(word=name), None
+    if score.weakestZoneId is None:
+        return f"The board marked every part of {name} as hit.", f"Every part of {name} landed. Nice work.", None
+    zone_id = score.weakestZoneId
+    zone = next(z for z in word.zones if z.zoneId == zone_id)
+    info = zone_info(word, zone_id)
+    assert info is not None
+    where = f" {info.position}" if info.position else ""
+    hint = _first_sentence(info.hint if word.lipUsable else info.hint_no_camera)
+    if zone.verdict == "partial":
+        observation = f"The board marked the {info.label}{where} as partly there."
+        lead = f"The {info.label}{where} was faint." if zone.kind == "stop" else f"The {info.label}{where} was nearly there."
+    else:
+        observation = f"The board marked the {info.label}{where} as missed."
+        lead = (
+            f"The {info.label}{where} went missing."
+            if zone.kind == "stop" or zone.verdict == "skipped"
+            else f"The {info.label}{where} didn't reach its target yet."
+        )
+    return observation, f"{lead} {hint}", zone_id
+
+
+def word_fallback_decision(
+    word: WordAttempt,
+    score: WordScore,
+    candidates: dict[str, float | str],
+) -> tuple[CoachDecision, list[EvidenceItem]]:
+    observation, caption, focus = word_fallback_line(word, score)
+    action = "next_sound" if score.verdict == "on_target" else "retry"
+    cue = ZONE_CUE.get(focus) if focus is not None and action == "retry" else None
+    wanted = ["word.verdict"] + ([f"word.{focus}.verdict"] if focus else [])
+    fields = [f for f in wanted if f in candidates]
+    decision = CoachDecision(
+        observation=observation, caption=caption, cueId=cue, nextAction=action, evidenceFields=fields, focusZoneId=focus
+    )
     return decision, [EvidenceItem(field=f, value=candidates[f]) for f in fields]

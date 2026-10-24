@@ -58,18 +58,16 @@
   fill: rgba(53, 100, 85, 0.16);
   stroke: var(--color-success);
 }
+/* Ink: one filled ribbon per stroke, built in CSS pixels (see buildRibbons). Live ink
+ * tapers with age into a comet tail; a single fill per stroke means no seams. */
 .vg-trail {
-  fill: none;
-  stroke: var(--color-navy);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  fill: var(--color-navy);
+  stroke: none;
   opacity: 0.38;
-  vector-effect: non-scaling-stroke;
 }
 
 .vg-trail.is-live {
-  opacity: 0.8;
+  opacity: 0.72;
 }
 
 .vg-label {
@@ -86,8 +84,9 @@
   color: var(--color-navy);
 }
 
-/* Cursor: dot plus hold ring. Position comes from the tracker at about 40 Hz;
- * a short linear transition bridges frames without lagging behind the voice. */
+/* Cursor: dot plus hold ring. The tracker delivers positions in steps; the trail
+ * clock eases the displayed position along the ink every frame (about 60 ms time
+ * constant, snapping under reduced motion), so transform has no CSS transition. */
 .vg-cursor {
   position: absolute;
   left: 0;
@@ -98,7 +97,7 @@
   display: grid;
   place-items: center;
   will-change: transform;
-  transition: transform 90ms linear, opacity 240ms ease;
+  transition: opacity 240ms ease;
 }
 .vg-cursor.is-faded {
   opacity: 0.3;

@@ -1,9 +1,14 @@
 import { DEFAULT_SETTINGS, type EstimatorSettings } from './estimator';
+import type { BurstOnset } from './bursts';
 import type { SpectralCues } from './cues';
 import type { TrackedFrame } from './tracker';
 
-/** A tracked frame plus experimental diagnostic cues. */
-export type AnalyzedFrame = TrackedFrame & { cues?: SpectralCues | null };
+/**
+ * A tracked frame plus experimental diagnostic cues and, on the one frame whose new samples hold a stop
+ * release, the burst onset. Frames arrive every 25 ms (50 ms windows), voiced or not; `timestampMs` is the
+ * end of the frame on the capture's sample clock, counted from when the engine started receiving audio.
+ */
+export type AnalyzedFrame = TrackedFrame & { cues?: SpectralCues | null; burst?: BurstOnset | null };
 
 export interface MicrophoneSession {
   stop(): void;
@@ -12,7 +17,10 @@ export interface MicrophoneSession {
 }
 
 export interface CaptureOptions {
-  /** A supplied stream belongs to the caller and is never stopped here. */
+  /**
+   * A supplied stream belongs to the caller and is never stopped here. Sessions on the same supplied stream
+   * with the same settings share one audio graph and worker, so they receive identical frames and timestamps.
+   */
   stream?: MediaStream;
   settings?: EstimatorSettings;
   signal?: AbortSignal;
@@ -20,8 +28,78 @@ export interface CaptureOptions {
   onError(error: Error): void;
 }
 
+interface SharedEngine {
+  settings: EstimatorSettings;
+  listeners: Set<Pick<CaptureOptions, 'onFrame' | 'onError'>>;
+  controller: AbortController;
+  ready: Promise<MicrophoneSession>;
+}
+
+const sharedEngines = new Map<MediaStream, SharedEngine>();
+
+const cancelled = () => new DOMException('Capture cancelled', 'AbortError');
+
 /** Owns the audio graph and worker; owns the microphone only when it requests it. */
 export async function createMicrophoneSession(options: CaptureOptions): Promise<MicrophoneSession> {
+  const { stream, signal } = options;
+  const settings = options.settings ?? DEFAULT_SETTINGS;
+  const engine = stream && sharedEngines.get(stream);
+  if (!stream || (engine && (engine.settings.ceilingHz !== settings.ceilingHz || engine.settings.minimumRms !== settings.minimumRms))) {
+    return openEngine(options);
+  }
+  if (signal?.aborted) throw cancelled();
+  const shared = engine ?? shareEngine(stream, settings);
+  const listener = { onFrame: options.onFrame, onError: options.onError };
+  shared.listeners.add(listener);
+  // The last session to leave stops the engine; aborting its signal runs the engine's cleanup at any stage.
+  const leave = () => {
+    signal?.removeEventListener('abort', leave);
+    if (!shared.listeners.delete(listener) || shared.listeners.size) return;
+    if (sharedEngines.get(stream) === shared) sharedEngines.delete(stream);
+    shared.controller.abort();
+  };
+  signal?.addEventListener('abort', leave, { once: true });
+  try {
+    const session = await new Promise<MicrophoneSession>((resolve, reject) => {
+      const abort = () => reject(cancelled());
+      signal?.addEventListener('abort', abort, { once: true });
+      shared.ready.then(resolve, reject).finally(() => signal?.removeEventListener('abort', abort));
+    });
+    return { stop: leave, sampleRate: session.sampleRate, deviceLabel: session.deviceLabel };
+  } catch (error) {
+    leave();
+    throw error;
+  }
+}
+
+function shareEngine(stream: MediaStream, settings: EstimatorSettings): SharedEngine {
+  const listeners: SharedEngine['listeners'] = new Set();
+  const controller = new AbortController();
+  const forget = () => {
+    if (sharedEngines.get(stream)?.listeners === listeners) sharedEngines.delete(stream);
+  };
+  const ready = openEngine({
+    stream,
+    settings,
+    signal: controller.signal,
+    onFrame: (frame) => listeners.forEach((listener) => {
+      // One subscriber's failure must not starve the others; rethrow outside the loop so it still surfaces.
+      try { listener.onFrame(frame); } catch (error) { setTimeout(() => { throw error; }); }
+    }),
+    onError: (error) => {
+      forget();
+      const notified = [...listeners];
+      listeners.clear();
+      notified.forEach((listener) => listener.onError(error));
+    },
+  });
+  ready.catch(forget);
+  const shared = { settings, listeners, controller, ready };
+  sharedEngines.set(stream, shared);
+  return shared;
+}
+
+async function openEngine(options: CaptureOptions): Promise<MicrophoneSession> {
   if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) {
     throw new Error('Microphone access needs a supported browser on localhost or HTTPS.');
   }
