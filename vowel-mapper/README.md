@@ -53,7 +53,8 @@ do not auto-normalize speakers or define individualized target zones.
   caller supplies a stream, `stop()` disconnects this analysis graph but **does
   not stop the caller's tracks**. Otherwise it owns and releases the microphone.
 - `src/components/VowelPlot.tsx`: display-only plot receiving `trace`, `point`,
-  and `faded`. Copy it with `plot.ts`, the point type, and relevant styles.
+  `faded`, and optional `live`. Copy it with `plot.ts`, `trail.ts`,
+  `useTrailAnimation.ts`, the point type, and relevant styles.
 - `src/useVowelSession.ts` and `src/App.tsx`: standalone testing wrapper, with
   Start/Finish, errors, counters, and a bounded in-memory recent trace.
 
@@ -61,6 +62,32 @@ Jordan can pass the shell's microphone stream to the capture API, and pass
 tracked points into `VowelPlot`. Omkar's future handoff should summarize an
 explicit target-vowel attempt. Do not average a free glide into a single vowel.
 No coach, Convex, target scoring, or anatomical outline is integrated yet.
+
+## Cursor trail
+
+The standalone app passes `live` while the microphone is running. Each vocal
+segment draws a smooth ribbon with an age gradient and a three-second lifetime.
+The head always uses the latest accepted measurement directly: interpolation
+adds **zero buffered audio frames / 0 ms of intentional smoothing delay**.
+Display scheduling still depends on React and the browser's next paint; these
+checks do not measure microphone-to-screen latency on real hardware.
+
+Curves use monotone cubic tangents to avoid overshooting accepted coordinates,
+and never join different acoustic segments. All geometry is cosmetic; audio
+thresholds, accepted measurements, calibration and scoring are untouched.
+
+Fading runs independently of worker packets. Arrival times map session-relative
+audio timestamps onto the presentation clock, so a suspended AudioContext cannot
+revive old ink when it resumes. Fully faded paths and gradients leave the SVG;
+the animation stops after the last point expires. Background tabs pause animation
+and recompute age on return. Reduced motion uses straight strokes and a 10 Hz
+fade. Ink and the cursor stay inside the plot's clip path.
+
+With `live={false}` (the default), the supplied trace is held statically. Finish
+uses this mode to show all retained history (up to 18 seconds / 360 samples),
+even history that already faded during live tracking. Restart clears history;
+reset, Finish and unmount cancel outstanding animation work. This checkout has no
+game mode, so game integration and scoring replay were not exercised here.
 
 ## Audio approach
 
@@ -97,6 +124,11 @@ npx playwright install chromium
 npm run test:e2e
 MAPPER_PREVIEW=1 npm run test:e2e -- --grep 'synthetic microphone'
 ```
+
+Set `MAPPER_PORT` to use another test-server port when 5173 is occupied, for
+example `$env:MAPPER_PORT='5188'` in PowerShell. The trail component browser
+tests use a deterministic clock to cover gradients, silence/stalls, held vowels,
+segment breaks, Finish, restart, unmount, background tabs and reduced motion.
 
 Unit tests use independently specified source/filter synthetic vowels, noise,
 silence, clipping, invalid input, smoothing/gaps/jumps, and axis orientation.

@@ -2,7 +2,8 @@ import { defineConfig } from '@playwright/test';
 import { resolve } from 'node:path';
 
 const preview = process.env.MAPPER_PREVIEW === '1';
-const baseURL = `http://127.0.0.1:${preview ? 5174 : 5173}`;
+const port = Number(process.env.MAPPER_PORT ?? (preview ? 5174 : 5173));
+const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: './e2e',
@@ -20,7 +21,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: preview ? 'npm run preview -- --port 5174 --strictPort' : 'npm run dev -- --port 5173 --strictPort',
+    command: `npm run ${preview ? 'preview' : 'dev'} -- --port ${port} --strictPort`,
     url: baseURL,
     reuseExistingServer: !process.env.CI && !preview,
   },

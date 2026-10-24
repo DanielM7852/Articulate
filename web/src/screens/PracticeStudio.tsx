@@ -442,6 +442,7 @@ export default function PracticeStudio() {
         statusLabel={trackingLabel(tracking.status, mic.status)}
         holdSec={tracking.holdSec}
         hidden={!assistanceOn}
+        live={tracking.status !== 'off' && tracking.status !== 'error'}
       />
     </div>
   );
