@@ -1,17 +1,19 @@
-"""Insight lane: one validated therapist line that compares the learner's last try with their own best tries.
+"""Insight lane: one validated therapist line that compares the learner's last try with a reference or their best tries.
 
 This is the ONLY place the word "tongue" may reach a learner about their own attempt. A line exists only
-when the articulation gate emitted a claim (SPARC and formants agree versus the learner's on_target anchors).
-The wording is a comparison with the learner's best tries, the instruction matches the claim's direction, and
-it never contradicts the sound's target facts (talk_prompts.ARTICULATION). Anything else falls back to a template.
+when the articulation gate emitted a claim (SPARC and formants agree, versus the reference range of correct
+productions and/or the learner's on_target anchors). The wording is a comparison ("Compared with a clear ee"
+for basis reference/both, "Compared with your best ee tries" for basis self), the instruction matches the
+claim's direction, and it never contradicts the sound's target facts (talk_prompts.ARTICULATION). Anything else
+falls back to a template.
 
-Claim -> text (direction describes where the tongue was relative to the learner's best tries):
+Claim -> text (direction describes where the tongue was relative to the comparison):
 
-  direction        finding (no opposite-direction words)     instruction words      allowed for
-  lower            "was not quite as high"                   lift/raise/higher      ee, oo  (ah dropped: lifting contradicts low)
-  higher           "rose a little more than on those"        lower/relax/drop       ee, oo, ah
-  further_back     "sat a little closer to the throat"       forward/front          ee, ah  (oo dropped: oo is back)
-  further_forward  "sat a little closer to your teeth"       back                   oo, ah  (ee dropped: ee is front)
+  direction        finding self / reference                          instruction words      allowed for
+  lower            "was not quite as high" (both)                    lift/raise/higher      ee, oo  (ah dropped: lifting contradicts low)
+  higher           "rose a little more than on those" / "...than mine"  lower/relax/drop    ee, oo, ah
+  further_back     "sat a little closer to the throat" (both)        forward/front          ee, ah  (oo dropped: oo is back)
+  further_forward  "sat a little closer to your teeth" (both)        back                   oo, ah  (ee dropped: ee is front)
 
 A claim that is not allowed for its sound is dropped (no insight, status "none").
 """
@@ -34,7 +36,7 @@ INSIGHT_MAX_TOKENS = 6000
 RECENT_MAX = 5
 
 _COMPARISON = re.compile(
-    r"\b(best|strongest|good)\b[^.!?]{0,30}\b(tries|attempts|ones|try)\b|\bearlier\b", re.IGNORECASE
+    r"\b(best|strongest|good)\b[^.!?]{0,30}\b(tries|attempts|ones|try)\b|\bearlier\b|\ba clear (?:ee|oo|ah)\b", re.IGNORECASE
 )
 _TONGUE = re.compile(r"\btongue\b", re.IGNORECASE)
 
@@ -51,6 +53,14 @@ _WORD_RE = {k: re.compile(rf"\b(?:{v})\b", re.IGNORECASE) for k, v in _WORDS.ite
 _FINDING = {
     "lower": "your tongue was not quite as high",
     "higher": "your tongue rose a little more than on those",
+    "further_back": "your tongue sat a little closer to the throat",
+    "further_forward": "your tongue sat a little closer to your teeth",
+}
+# Findings for claims compared with the reference voices (basis "reference" or "both"); "I" is the therapist,
+# whose voice is part of the reference set, so beyond the whole range also means beyond the therapist.
+_FINDING_REFERENCE = {
+    "lower": "your tongue was not quite as high",
+    "higher": "your tongue rose a little more",
     "further_back": "your tongue sat a little closer to the throat",
     "further_forward": "your tongue sat a little closer to your teeth",
 }
@@ -81,6 +91,8 @@ def claim_allowed(sound: str, claim: dict) -> bool:
 
 
 def finding_text(sound: str, claim: dict) -> str:
+    if claim.get("basis") in ("reference", "both"):
+        return f"Compared with a clear {tp.SPELL[sound]}, {_FINDING_REFERENCE[claim['direction']]}."
     return f"Compared with your best {tp.SPELL[sound]} tries, {_FINDING[claim['direction']]}."
 
 

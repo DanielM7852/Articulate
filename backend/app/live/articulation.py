@@ -1,11 +1,15 @@
 """Deterministic articulation features from a SPARC/Silero bundle, and a corroboration gate.
 
-A tongue claim is emitted only when SPARC and the acoustic formants agree, relative to the
-learner's own on_target attempts. When in doubt, no claim. No model involved.
+A tongue claim is emitted only when SPARC and the acoustic formants agree. SPARC is compared with a
+reference range of correct productions (articulation_reference.json, built from Cartesia voices) and,
+when the learner has on_target attempts, also with those. When in doubt, no claim. No model involved.
 """
 
+import json
 import math
 import statistics
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 SCHEMA = "articulate.articulation/1"
@@ -25,6 +29,15 @@ TONGUE_DELTA = 0.35
 # Minimum log-ratio formant change versus the anchor (~8%) that must agree in direction with SPARC.
 FORMANT_DELTA = 0.08
 ANCHOR_COUNT = 3
+# SPARC distance (EMA units) a try must lie beyond the min/max of the reference voices' values to count as
+# clearly outside the range of correct productions. Within the margin of a range edge: no claim.
+# Clear ee productions left out of the reference (Ava's voice, a Windows TTS voice) measured ~0.6 below the
+# reference minimum, so the margin sits above that: only large misses (e.g. an ah-shaped ee) are claimed.
+REF_MARGIN = 0.7
+MIN_REFERENCE_VOICES = 3
+REFERENCE_VERSION = 1
+REFERENCE_PATH = Path(__file__).with_name("articulation_reference.json")
+_DEFAULT = object()
 CLAIM_VERDICTS = ("close", "off")
 
 _FEATURES = ("tongueHeight", "tongueFront", "jawOpen", "lipForward", "lipAperture")
@@ -154,16 +167,106 @@ def _anchor_median(values: list[Any]) -> float | None:
     return statistics.median(nums) if nums else None
 
 
-def _claim(dimension: str, direction: str, ids: list, sparc: float, formant: float) -> dict:
+def _claim(dimension: str, direction: str, basis: str, ids: list, sparc: float, formant: float) -> dict:
     return {
-        "part": "tongue", "dimension": dimension, "direction": direction, "comparedTo": ids,
+        "part": "tongue", "dimension": dimension, "direction": direction, "basis": basis, "comparedTo": ids,
         "sparcDelta": round(sparc, 3), "formantDelta": round(formant, 3),
     }
 
 
-def _claims(attempt: dict, older: list[Any]) -> list[dict]:
+@lru_cache(maxsize=4)
+def _load(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("v") != REFERENCE_VERSION or not isinstance(data.get("sounds"), dict):
+        return None
+    return data
+
+
+def load_reference(path: Path | None = None) -> dict | None:
+    """The reference ranges, or None when the file is missing, unreadable or of another version. Never raises."""
+    try:
+        return _load(Path(path) if path is not None else REFERENCE_PATH)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _ref_range(reference: Any, sound: Any, feature: str) -> tuple[float, float] | None:
+    sounds = reference.get("sounds") if isinstance(reference, dict) else None
+    entry = sounds.get(sound) if isinstance(sounds, dict) and isinstance(sound, str) else None
+    if not isinstance(entry, dict):
+        return None
+    n, stats = _num(entry.get("n")), entry.get(feature)
+    if n is None or n < MIN_REFERENCE_VOICES or not isinstance(stats, dict):
+        return None
+    lo, hi = _num(stats.get("min")), _num(stats.get("max"))
+    return None if lo is None or hi is None or lo > hi else (lo, hi)
+
+
+def _reference_claims(attempt: dict, reference: Any) -> dict[str, dict]:
+    artic = attempt["artic"]
+    sound = attempt.get("sound")
+    f1, f2 = _num(attempt.get("f1Offset")), _num(attempt.get("f2Offset"))
+    height, front = _num(artic.get("tongueHeight")), _num(artic.get("tongueFront"))
+    out: dict[str, dict] = {}
+    rng = _ref_range(reference, sound, "tongueHeight")
+    if rng and height is not None and f1 is not None:
+        lo, hi = rng
+        if height < lo - REF_MARGIN and f1 >= FORMANT_DELTA:
+            out["height"] = _claim("height", "lower", "reference", ["reference"], height - lo, f1)
+        elif height > hi + REF_MARGIN and f1 <= -FORMANT_DELTA:
+            out["height"] = _claim("height", "higher", "reference", ["reference"], height - hi, f1)
+    rng = _ref_range(reference, sound, "tongueFront")
+    if rng and front is not None and f2 is not None:
+        lo, hi = rng
+        if front < lo - REF_MARGIN and f2 <= -FORMANT_DELTA:
+            out["frontness"] = _claim("frontness", "further_back", "reference", ["reference"], front - lo, f2)
+        elif front > hi + REF_MARGIN and f2 >= FORMANT_DELTA:
+            out["frontness"] = _claim("frontness", "further_forward", "reference", ["reference"], front - hi, f2)
+    return out
+
+
+def _claims(attempt: dict, older: list[Any], reference: Any = None) -> list[dict]:
     if attempt.get("audioVerdict") not in CLAIM_VERDICTS:
         return []
+    own = _self_claims(attempt, older)
+    ref = _reference_claims(attempt, reference) if reference else {}
+    claims = []
+    for dim in ("height", "frontness"):
+        s, r = own.get(dim), ref.get(dim)
+        if s and r:
+            if s["direction"] == r["direction"]:
+                claims.append({**s, "basis": "both", "comparedTo": ["reference", *s["comparedTo"]]})
+        elif r:
+            claims.append(r)
+        elif s and _beyond_reference(attempt, reference, s):
+            claims.append(s)
+    return claims
+
+
+_DIM_FEATURE = {"height": "tongueHeight", "frontness": "tongueFront"}
+_DIRECTION_SIGN = {"lower": -1, "further_back": -1, "higher": 1, "further_forward": 1}
+
+
+def _beyond_reference(attempt: dict, reference: Any, claim: dict) -> bool:
+    """A self-only claim survives a usable reference only if the learner is past the range edge in that direction.
+
+    Inside the range of correct productions, SPARC does not explain the miss, so no tongue advice is given.
+    """
+    feature = _DIM_FEATURE[claim["dimension"]]
+    rng = _ref_range(reference, attempt.get("sound"), feature) if reference else None
+    if not rng:
+        return True
+    value = _num(attempt["artic"].get(feature))
+    if value is None:
+        return False
+    lo, hi = rng
+    return value < lo if _DIRECTION_SIGN[claim["direction"]] < 0 else value > hi
+
+
+def _self_claims(attempt: dict, older: list[Any]) -> dict[str, dict]:
     artic = attempt["artic"]
     f1, f2 = _num(attempt.get("f1Offset")), _num(attempt.get("f2Offset"))
     height, front = _num(artic.get("tongueHeight")), _num(artic.get("tongueFront"))
@@ -173,32 +276,37 @@ def _claims(attempt: dict, older: list[Any]) -> list[dict]:
         and _artic_ok(o.get("artic")) and _num(o.get("f1Offset")) is not None and _num(o.get("f2Offset")) is not None
     ][:ANCHOR_COUNT]
     if not anchors:
-        return []
+        return {}
     ids = [a.get("attemptId") for a in anchors]
     base_h = _anchor_median([a["artic"].get("tongueHeight") for a in anchors])
     base_x = _anchor_median([a["artic"].get("tongueFront") for a in anchors])
     base_f1 = _anchor_median([a["f1Offset"] for a in anchors])
     base_f2 = _anchor_median([a["f2Offset"] for a in anchors])
-    claims = []
+    claims: dict[str, dict] = {}
 
     if None not in (height, f1, base_h, base_f1):
         dh, d1 = height - base_h, f1 - base_f1
         if dh <= -TONGUE_DELTA and d1 >= FORMANT_DELTA:
-            claims.append(_claim("height", "lower", ids, dh, d1))
+            claims["height"] = _claim("height", "lower", "self", ids, dh, d1)
         elif dh >= TONGUE_DELTA and d1 <= -FORMANT_DELTA:
-            claims.append(_claim("height", "higher", ids, dh, d1))
+            claims["height"] = _claim("height", "higher", "self", ids, dh, d1)
 
     if None not in (front, f2, base_x, base_f2):
         dx, d2 = front - base_x, f2 - base_f2
         if dx <= -TONGUE_DELTA and d2 <= -FORMANT_DELTA:
-            claims.append(_claim("frontness", "further_back", ids, dx, d2))
+            claims["frontness"] = _claim("frontness", "further_back", "self", ids, dx, d2)
         elif dx >= TONGUE_DELTA and d2 >= FORMANT_DELTA:
-            claims.append(_claim("frontness", "further_forward", ids, dx, d2))
+            claims["frontness"] = _claim("frontness", "further_forward", "self", ids, dx, d2)
     return claims
 
 
-def annotate_attempts(attempts: list[dict]) -> list[dict]:
-    """Replace each attempt's "artic" with "articulation" (newest-first input; input not mutated)."""
+def annotate_attempts(attempts: list[dict], reference: Any = _DEFAULT) -> list[dict]:
+    """Replace each attempt's "artic" with "articulation" (newest-first input; input not mutated).
+
+    reference: loaded reference ranges; by default the packaged file (if any); None disables it.
+    """
+    if reference is _DEFAULT:
+        reference = load_reference()
     items = list(attempts) if isinstance(attempts, list) else []
     out = []
     for i, attempt in enumerate(items):
@@ -211,6 +319,6 @@ def annotate_attempts(attempts: list[dict]) -> list[dict]:
             reason = artic.get("reason") if isinstance(artic, dict) else None
             new["articulation"] = {"quality": "insufficient", "reason": reason or "no_features"}
         else:
-            new["articulation"] = {"quality": "ok", "claims": _claims(attempt, items[i + 1:])}
+            new["articulation"] = {"quality": "ok", "claims": _claims(attempt, items[i + 1:], reference)}
         out.append(new)
     return out

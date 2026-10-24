@@ -19,7 +19,9 @@ _NOTES_TIMEOUT_FLOOR_S = 30.0
 _SHAMING = re.compile(r"\b(wrong|bad|fail(?:ed|s|ure)?|incorrect)\b", re.IGNORECASE)
 _TONGUE_CLAIM = re.compile(r"\btongue\b", re.IGNORECASE)
 _COMPARISON = re.compile(
-    r"\b(best|strongest|good)\b[^.!?]{0,30}\b(tries|attempts|ones)\b|\bearlier\b", re.IGNORECASE
+    r"\b(best|strongest|good)\b[^.!?]{0,30}\b(tries|attempts|ones)\b|\bearlier\b"
+    r"|\b(?:the\s+)?model\b|\ba clear (?:ee|oo|ah)\b",
+    re.IGNORECASE,
 )
 _OBSERVATION = re.compile(r"\bI\s+(?:can\s+|could\s+)?(?:see|saw|noticed|watched|spotted)\b", re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r"[.!?;]+")
@@ -34,7 +36,7 @@ def has_articulation_claims(attempts: list[dict[str, Any]]) -> bool:
 
 
 def _model_attempts(attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Attempts as sent to the model: articulation claims keep only part/dimension/direction (no numeric deltas)."""
+    """Attempts as sent to the model: articulation claims keep only part/dimension/direction/basis (no numeric deltas)."""
     out = []
     for a in attempts:
         art = a.get("articulation")
@@ -42,7 +44,7 @@ def _model_attempts(attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
             out.append(a)
             continue
         claims = [
-            {k: c[k] for k in ("part", "dimension", "direction") if k in c}
+            {k: c[k] for k in ("part", "dimension", "direction", "basis") if k in c}
             for c in (art.get("claims") or [])
             if isinstance(c, dict)
         ]

@@ -58,3 +58,17 @@ def test_model_payload_has_no_deltas():
     sent = json.dumps(notes._model_attempts(attempts(True)))
     assert "sparcDelta" not in sent and "formantDelta" not in sent and "0.7312" not in sent
     assert "direction" in sent
+
+
+def test_claims_allow_model_comparison():
+    text = "On some ee tries the tongue sat lower than in the model ee."
+    assert notes._validate(draft(text), attempts(True)).summary == text
+    with pytest.raises(DecisionError):
+        notes._validate(draft(text), attempts(False))
+
+
+def test_model_attempts_keep_basis_not_numbers():
+    a = attempts(True)
+    a[0]["articulation"]["claims"] = [{**CLAIM, "basis": "reference"}]
+    sent = notes._model_attempts(a)[0]["articulation"]["claims"][0]
+    assert sent["basis"] == "reference" and "sparcDelta" not in sent
