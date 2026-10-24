@@ -1,4 +1,4 @@
-import type { Attempt, Assistance } from '../state/types';
+import type { Assistance, Attempt, Plan, SoundId } from '../state/types';
 import { SOUNDS } from '../state/types';
 
 /**
@@ -17,25 +17,46 @@ export interface CoachResponse {
   nextCue: string;
   nextAction: 'repeat' | 'simplify' | 'change-cue' | 'reduce-assistance' | 'next-context' | 'repair-capture';
   evidence: string[];
+  /** Next lesson for this learner. Absent when the response is the offline wording. */
+  plan?: Plan;
 }
 
 const COACH_URL = (import.meta.env.VITE_COACH_URL as string | undefined) || '/v1/coach';
 
-export async function analyzeAttempt(attempt: Attempt, history: Attempt[]): Promise<CoachResponse> {
+export async function analyzeAttempt(
+  attempt: Attempt,
+  history: Attempt[],
+  context?: { learnerId?: string | null; plan?: Plan },
+): Promise<CoachResponse> {
   try {
     const res = await fetch(COACH_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ attempt, history }),
+      body: JSON.stringify({
+        attempt,
+        history,
+        learnerId: context?.learnerId || undefined,
+        plan: context?.plan,
+      }),
     });
     if (res.ok) {
       const body = (await res.json()) as CoachResponse;
-      return { ...body, source: body.source === 'local' ? 'local' : 'agent' };
+      const plan = readPlan(body.plan);
+      return { ...body, plan, source: body.source === 'local' ? 'local' : 'agent' };
     }
   } catch {
     /* fall through to local response */
   }
   return localResponse(attempt, history);
+}
+
+function readPlan(value: Plan | undefined): Plan | undefined {
+  if (!value) return undefined;
+  const sounds: SoundId[] = ['i', 'u', 'a'];
+  const paces: Plan['pace'][] = ['unhurried', 'steady', 'flexible'];
+  const assistance: Plan['assistance'][] = ['cue-target', 'target-only', 'none'];
+  if (!sounds.includes(value.sound) || !paces.includes(value.pace) || !assistance.includes(value.assistance)) return undefined;
+  return { sound: value.sound, pace: value.pace, assistance: value.assistance };
 }
 
 function localResponse(a: Attempt, history: Attempt[]): CoachResponse {

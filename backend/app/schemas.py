@@ -143,6 +143,7 @@ class CartesiaHandoff(BaseModel):
     next_action: NextAction
     reference_segment_replay: ReferenceReplay | None = None
     capture_limitations: list[str] = Field(default_factory=list)
+    delivery_id: str | None = None
 
 
 class RetrievalInfo(BaseModel):
@@ -168,6 +169,7 @@ class Timings(BaseModel):
     compare_ms: float | None = None
     retrieve_ms: float | None = None
     reason_ms: float | None = None
+    spacetime_commit_ms: float | None = None
 
 
 class ComparisonResult(BaseModel):
@@ -219,6 +221,7 @@ class HealthResponse(BaseModel):
     anthropic_configured: bool
     moss_configured: bool
     cartesia_configured: bool
+    spacetimedb_configured: bool = False
     audio_retained_by_default: bool = False
 
 

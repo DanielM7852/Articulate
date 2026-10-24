@@ -24,7 +24,7 @@ export default function SignIn() {
       setError('That email and password don’t match the demo account.');
       return;
     }
-    signIn(MOCK_ACCOUNT.name, false);
+    signIn(MOCK_ACCOUNT.name, false, email.trim() || MOCK_ACCOUNT.email);
     navigate('/welcome');
   }
 

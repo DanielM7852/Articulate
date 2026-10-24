@@ -14,6 +14,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import Settings
 from app.errors import CoachValidationError
+from app.reasoning.learner_progress import (
+    LessonPlan,
+    LessonProgress,
+    counts_for,
+    empty_progress,
+    load_progress,
+    record_attempt,
+)
 
 logger = logging.getLogger(__name__)
 _VOWEL_TIMEOUT_S = 25.0
@@ -38,7 +46,9 @@ _SYSTEM = (
     "Use only the facts in the user message. "
     "Do not add durations, scores, diagnoses, or descriptions of the body. "
     "Do not use the words tongue, lip, lips, jaw, palate, or pronunciation. "
-    "Write one or two short sentences and no markdown."
+    "Write one or two short sentences and no markdown. "
+    "Set plan_choice to one of the permitted values. "
+    "Do not mention plan_choice, attempt counts, or the next lesson in the observation."
 )
 
 
@@ -65,6 +75,8 @@ class VowelCoachRequest(BaseModel):
 
     attempt: VowelAttempt
     history: list[VowelAttempt] = Field(default_factory=list)
+    learnerId: str | None = None
+    plan: LessonPlan | None = None
 
 
 class VowelCoachResponse(BaseModel):
@@ -74,12 +86,19 @@ class VowelCoachResponse(BaseModel):
     nextCue: str
     nextAction: NextAction
     evidence: list[str]
+    plan: LessonPlan | None = None
 
 
 class VowelPhrasing(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     observation: str = Field(min_length=1, max_length=500)
+    plan_choice: Literal["keep", "simplify", "reduce", "advance"] | None = None
+
+
+_NEXT_SOUND = {"i": "u", "u": "a", "a": "i"}
+_LESS_HELP = {"cue-target": "target-only", "target-only": "none", "none": "none"}
+PlanChoice = Literal["keep", "simplify", "reduce", "advance"]
 
 
 def local_response(attempt: VowelAttempt, history: list[VowelAttempt]) -> VowelCoachResponse:
@@ -156,23 +175,111 @@ def local_response(attempt: VowelAttempt, history: list[VowelAttempt]) -> VowelC
     )
 
 
+def choose_plan(
+    attempt: VowelAttempt,
+    current: LessonPlan,
+    progress: LessonProgress,
+) -> tuple[PlanChoice, dict[PlanChoice, LessonPlan]]:
+    """Return the default move and the moves Claude is allowed to pick."""
+
+    counts = counts_for(progress, attempt.sound)
+    usable = counts.usable + (1 if attempt.quality == "usable" and attempt.attemptId not in progress.counted_attempt_ids else 0)
+    unclear_before = counts.unclear
+    options: dict[PlanChoice, LessonPlan] = {"keep": current}
+    if attempt.feeling == "too-hard" or unclear_before >= 2:
+        options["simplify"] = LessonPlan(sound=current.sound, pace="unhurried", assistance="cue-target")
+    can_reduce = (
+        attempt.quality == "usable"
+        and attempt.kind == "guided"
+        and attempt.usableVoicedSec >= 2
+        and current.assistance != "none"
+        and attempt.feeling != "too-hard"
+    )
+    if can_reduce:
+        options["reduce"] = current.model_copy(update={"assistance": _LESS_HELP[current.assistance]})
+    can_advance = (
+        attempt.quality == "usable"
+        and current.assistance == "none"
+        and usable >= 2
+        and attempt.feeling != "too-hard"
+    )
+    if can_advance:
+        options["advance"] = LessonPlan(sound=_NEXT_SOUND[current.sound], pace=current.pace, assistance="cue-target")
+    if attempt.quality == "unclear":
+        default: PlanChoice = "keep"
+    elif "simplify" in options and attempt.feeling == "too-hard":
+        default = "simplify"
+    elif "reduce" in options:
+        default = "reduce"
+    elif "advance" in options:
+        default = "advance"
+    elif "simplify" in options:
+        default = "simplify"
+    else:
+        default = "keep"
+    return default, options
+
+
+def _apply_plan(grounded: VowelCoachResponse, attempt: VowelAttempt, choice: PlanChoice, plan: LessonPlan) -> VowelCoachResponse:
+    action: NextAction = {
+        "keep": "repair-capture" if attempt.quality == "unclear" else "repeat",
+        "simplify": "simplify",
+        "reduce": "reduce-assistance",
+        "advance": "next-context",
+    }[choice]
+    cue = grounded.nextCue
+    spelled = _SOUNDS[attempt.sound]["spelled"]
+    if choice == "simplify":
+        cue = "Let’s keep it gentle: hold the sound for just a second or two, with the reference visible."
+    elif choice == "reduce":
+        cue = f"Next try stays on “{spelled}”, with fewer cues than this one."
+    elif choice == "advance":
+        nxt = _SOUNDS[plan.sound]
+        cue = f"Next lesson is “{nxt['spelled']}”, as in “{nxt['example']}”, with the reference visible."
+    return grounded.model_copy(update={"nextAction": action, "nextCue": cue, "plan": plan})
+
+
 async def coach_attempt(settings: Settings, body: VowelCoachRequest, client=None) -> VowelCoachResponse:
-    grounded = local_response(body.attempt, body.history)
-    if client is None and not settings.anthropic_configured:
-        return grounded
-    try:
-        phrasing = await asyncio.wait_for(
-            asyncio.to_thread(_phrase, settings, body.attempt, grounded, client),
-            timeout=max(settings.reasoning_timeout_s, _VOWEL_TIMEOUT_S),
-        )
-        _check_phrasing(phrasing.observation, grounded.evidence)
-    except Exception as exc:  # noqa: BLE001 - any model failure keeps the screen's own wording
-        logger.warning("vowel coach kept the local wording: %s", type(exc).__name__)
-        return grounded
-    return grounded.model_copy(update={"observation": phrasing.observation.strip(), "source": "agent"})
+    current = body.plan or LessonPlan(sound=body.attempt.sound, pace="unhurried", assistance=body.attempt.assistance)
+    stored = load_progress(settings.store_dir, body.learnerId) if body.learnerId else None
+    already = stored is not None and body.attempt.attemptId in stored.counted_attempt_ids and stored.plan is not None
+    progress = stored or empty_progress(body.learnerId or "anonymous")
+    if stored is None:
+        for earlier in body.history[-20:]:
+            bucket = progress.sounds.get(earlier.sound)
+            if bucket is None or earlier.attemptId in progress.counted_attempt_ids:
+                continue
+            if earlier.quality == "usable":
+                bucket.usable += 1
+            else:
+                bucket.unclear += 1
+            progress.counted_attempt_ids.append(earlier.attemptId)
+    if already:
+        default, options = "keep", {"keep": stored.plan}
+    else:
+        default, options = choose_plan(body.attempt, current, progress)
+    grounded = _apply_plan(local_response(body.attempt, body.history), body.attempt, default, options[default])
+    choice = default
+    if client is not None or settings.anthropic_configured:
+        try:
+            phrasing = await asyncio.wait_for(
+                asyncio.to_thread(_phrase, settings, body.attempt, grounded, sorted(options), client),
+                timeout=max(settings.reasoning_timeout_s, _VOWEL_TIMEOUT_S),
+            )
+            _check_phrasing(phrasing.observation, grounded.evidence)
+            if phrasing.plan_choice in options:
+                choice = phrasing.plan_choice
+            grounded = _apply_plan(grounded, body.attempt, choice, options[choice]).model_copy(
+                update={"observation": phrasing.observation.strip(), "source": "agent"}
+            )
+        except Exception as exc:  # noqa: BLE001 - any model failure keeps the screen's own wording
+            logger.warning("vowel coach kept the local wording: %s", type(exc).__name__)
+    if body.learnerId and not already:
+        record_attempt(settings.store_dir, body.learnerId, body.attempt, options[choice], body.history)
+    return grounded
 
 
-def _phrase(settings: Settings, attempt: VowelAttempt, grounded: VowelCoachResponse, client):
+def _phrase(settings: Settings, attempt: VowelAttempt, grounded: VowelCoachResponse, permitted: list[str], client):
     active = client or _build_client(settings)
     sound = _SOUNDS[attempt.sound]
     facts = "\n".join(
@@ -181,7 +288,8 @@ def _phrase(settings: Settings, attempt: VowelAttempt, grounded: VowelCoachRespo
             f"example={sound['example']}",
             *grounded.evidence,
             f"next_action={grounded.nextAction}",
-            "Write the observation from these facts only.",
+            f"permitted_plan_choices={','.join(permitted)}",
+            "Write the observation from the measured facts only.",
         ]
     )
     response = active.messages.parse(

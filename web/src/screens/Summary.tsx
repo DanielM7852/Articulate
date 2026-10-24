@@ -22,7 +22,7 @@ export default function Summary() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, audio, setAudio, signOut, learnerName } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, audio, setAudio, signOut, learnerName, learnerEmail } = useAppState();
 
   // Refresh the learner's notes once when the session summary opens; non-blocking, failures ignored.
   useEffect(() => {
@@ -74,7 +74,8 @@ export default function Summary() {
     addAttempt(attempt);
     setLatest(attempt);
     setAnalyzing(true);
-    const res = await analyzeAttempt(attempt, history);
+    const res = await analyzeAttempt(attempt, history, { learnerId: learnerEmail, plan });
+    if (res.plan) updatePlan(res.plan);
     setCoach(res);
     setAnalyzing(false);
   }

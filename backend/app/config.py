@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     cartesia_version: str = "2026-08-14"
     cartesia_model_id: str = "sonic-3.6"
     store_dir: str = ".local_store"
+    spacetimedb_url: str = "http://127.0.0.1:3000"
+    spacetimedb_database: str = ""
+    spacetimedb_token: str | None = None
     overall_timeout_s: float = 45.0
     reasoning_timeout_s: float = 12.0
     audio_timeout_s: float = 30.0
@@ -99,6 +102,10 @@ class Settings(BaseSettings):
     @property
     def cartesia_configured(self) -> bool:
         return bool(self.cartesia_api_key and self.resolved_cartesia_voice_id)
+
+    @property
+    def spacetimedb_configured(self) -> bool:
+        return bool(self.spacetimedb_database and self.spacetimedb_token)
 
     @property
     def cors_origin_list(self) -> list[str]:
