@@ -178,14 +178,14 @@ def mint_tts_token(
     expires_in: int = STREAM_TOKEN_TTL_S,
     client: httpx.Client | None = None,
 ) -> dict:
-    """Mint a short-lived browser token for Cartesia's TTS WebSocket. The API key stays on the server."""
+    """Mint a short-lived browser token for Cartesia's TTS WebSocket and STT. The API key stays on the server."""
 
     headers = {
         "Authorization": f"Bearer {settings.cartesia_api_key or ''}",
         "Cartesia-Version": settings.cartesia_version,
         "Content-Type": "application/json",
     }
-    body = {"grants": {"tts": True}, "expires_in": expires_in}
+    body = {"grants": {"tts": True, "stt": True}, "expires_in": expires_in}
     failure = ArticulateError("cartesia_token_failed", "Cartesia did not return a token.", status_code=502)
     owns_client = client is None
     active = client or httpx.Client(timeout=TOKEN_TIMEOUT_S)

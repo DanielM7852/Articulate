@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     live_notes_model: str = "claude-sonnet-5-5"
     live_coach_effort: str = "medium"
     live_notes_effort: str = "high"
+    live_talk_effort: str = "medium"
+    live_therapist_name: str = "Ava"
+    live_session_ttl_s: float = 3600.0
     live_coach_timeout_s: float = 15.0
     live_history_limit: int = 12
     moss_project_id: str | None = None

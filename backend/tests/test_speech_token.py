@@ -1,5 +1,7 @@
 """Short-lived Cartesia token route for browser streaming speech."""
 
+import json
+
 import httpx
 from fastapi.testclient import TestClient
 
@@ -41,6 +43,7 @@ def test_token_configured_returns_fields_and_no_key(tmp_path):
     assert seen["url"] == "https://api.cartesia.ai/access-token"
     assert seen["auth"] == f"Bearer {KEY}"
     assert b'"expires_in":120' in seen["body"].replace(b" ", b"")
+    assert json.loads(seen["body"])["grants"] == {"tts": True, "stt": True}
     assert KEY not in response.text
 
 

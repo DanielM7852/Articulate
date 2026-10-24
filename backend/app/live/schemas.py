@@ -1,7 +1,7 @@
 """Wire models for /v1/live/*. Field names are the contract with the web client."""
 
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -196,3 +196,125 @@ class LearnerNotes(BaseModel):
     attemptsConsidered: int = 0
     source: Literal["agent", "fallback"]
     persisted: bool = False
+
+
+# ---- Therapist-led conversation sessions (/v1/live/session/*) ----
+
+TalkAction = Literal["demonstrate", "prompt_attempt", "await_reply", "next_sound", "end_session"]
+TalkIntent = Literal["question", "request_demo", "ready", "skip", "stop", "smalltalk", "unclear"]
+TurnSource = Literal["agent", "fallback", "scripted"]
+ControlName = Literal["ready", "show_again", "skip", "end"]
+
+
+class SessionStartRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    profileId: str
+    displayName: str = Field(max_length=80)
+    sounds: list[SoundId] | None = Field(default=None, min_length=1, max_length=3)
+
+    @field_validator("profileId")
+    @classmethod
+    def _profile(cls, value: str) -> str:
+        if not valid_profile_id(value):
+            raise ValueError("profileId must match [A-Za-z0-9_.:@-]{1,64}")
+        return value
+
+
+class CoachSummaryEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    caption: str = Field(max_length=600)
+    cueId: CueId | None = None
+    nextAction: NextAction
+    audioVerdict: AudioVerdict
+    videoVerdict: VideoVerdict | None = None
+
+
+class UtteranceEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    kind: Literal["utterance"]
+    text: str = Field(max_length=300)  # STT transcript: untrusted
+    currentSound: SoundId
+
+
+class AttemptFeedbackEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    kind: Literal["attempt_feedback"]
+    attemptId: str
+    currentSound: SoundId
+    coach: CoachSummaryEvent
+
+    @field_validator("attemptId")
+    @classmethod
+    def _attempt(cls, value: str) -> str:
+        if not valid_attempt_id(value):
+            raise ValueError("attemptId must be a UUID")
+        return value
+
+
+class ControlEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    kind: Literal["control"]
+    control: ControlName
+
+
+class SilenceEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    kind: Literal["silence"]
+    seconds: float = Field(ge=0, le=3600)
+
+
+TalkEvent = Annotated[
+    UtteranceEvent | AttemptFeedbackEvent | ControlEvent | SilenceEvent, Field(discriminator="kind")
+]
+
+
+class SessionTurnRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    sessionId: str
+    profileId: str
+    event: TalkEvent
+
+    @field_validator("sessionId")
+    @classmethod
+    def _session(cls, value: str) -> str:
+        if not valid_attempt_id(value):
+            raise ValueError("sessionId must be a UUID")
+        return value
+
+    @field_validator("profileId")
+    @classmethod
+    def _profile(cls, value: str) -> str:
+        if not valid_profile_id(value):
+            raise ValueError("profileId must match [A-Za-z0-9_.:@-]{1,64}")
+        return value
+
+
+class SessionTurn(BaseModel):
+    sessionId: str
+    say: str = Field(max_length=260)
+    action: TalkAction
+    sound: SoundId
+    cueId: CueId | None = None
+    showSideView: bool = False
+    source: TurnSource
+    timingsMs: dict[str, int] | None = None
+
+
+class TalkDraft(BaseModel):
+    """Model output for one conversation turn. Code validates it and decides the final action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    say: str = Field(min_length=1, max_length=600)
+    action: TalkAction
+    sound: SoundId
+    cueId: CueId | None = None
+    showSideView: bool = False
+    intent: TalkIntent | None = None

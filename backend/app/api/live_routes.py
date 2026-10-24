@@ -1,11 +1,20 @@
-"""POST /v1/live/coach and /v1/live/notes. Provider failures never surface as 500s."""
+"""POST /v1/live/coach, /notes, /session/start and /session/turn. Provider failures never surface as 500s."""
 
 from fastapi import APIRouter, BackgroundTasks, Request
 
 from app.live.notes import update_notes
 from app.live.orchestrator import LiveDeps, coach_attempt
 from app.live.runtime import get_runtime
-from app.live.schemas import LearnerNotes, LiveCoachRequest, LiveCoachResponse, NotesRequest
+from app.live.schemas import (
+    LearnerNotes,
+    LiveCoachRequest,
+    LiveCoachResponse,
+    NotesRequest,
+    SessionStartRequest,
+    SessionTurn,
+    SessionTurnRequest,
+)
+from app.live.session import get_store, start_session, take_turn
 
 router = APIRouter(prefix="/v1/live")
 
@@ -31,3 +40,15 @@ async def live_coach(body: LiveCoachRequest, request: Request, background: Backg
 @router.post("/notes", response_model=LearnerNotes)
 async def live_notes(body: NotesRequest, request: Request) -> LearnerNotes:
     return await update_notes(_deps(request), body.profileId)
+
+
+@router.post("/session/start", response_model=SessionTurn)
+async def live_session_start(body: SessionStartRequest, request: Request) -> SessionTurn:
+    deps = _deps(request)
+    return await start_session(deps, get_store(deps, request.app), body)
+
+
+@router.post("/session/turn", response_model=SessionTurn)
+async def live_session_turn(body: SessionTurnRequest, request: Request) -> SessionTurn:
+    deps = _deps(request)
+    return await take_turn(deps, get_store(deps, request.app), body)
