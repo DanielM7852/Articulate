@@ -1,5 +1,9 @@
 import { DEFAULT_SETTINGS, type EstimatorSettings } from './estimator';
+import type { SpectralCues } from './cues';
 import type { TrackedFrame } from './tracker';
+
+/** A tracked frame plus experimental diagnostic cues. */
+export type AnalyzedFrame = TrackedFrame & { cues?: SpectralCues | null };
 
 export interface MicrophoneSession {
   stop(): void;
@@ -12,7 +16,7 @@ export interface CaptureOptions {
   stream?: MediaStream;
   settings?: EstimatorSettings;
   signal?: AbortSignal;
-  onFrame(frame: TrackedFrame): void;
+  onFrame(frame: AnalyzedFrame): void;
   onError(error: Error): void;
 }
 
@@ -79,7 +83,7 @@ export async function createMicrophoneSession(options: CaptureOptions): Promise<
     };
     worker.onerror = failure;
     capture.onprocessorerror = failure;
-    worker.onmessage = (event: MessageEvent<TrackedFrame>) => {
+    worker.onmessage = (event: MessageEvent<AnalyzedFrame>) => {
       busy = false;
       if (!closed) options.onFrame(event.data);
     };

@@ -86,8 +86,29 @@ fade. Ink and the cursor stay inside the plot's clip path.
 With `live={false}` (the default), the supplied trace is held statically. Finish
 uses this mode to show all retained history (up to 18 seconds / 360 samples),
 even history that already faded during live tracking. Restart clears history;
-reset, Finish and unmount cancel outstanding animation work. This checkout has no
-game mode, so game integration and scoring replay were not exercised here.
+reset, Finish and unmount cancel outstanding animation work.
+
+## Zone game (first slice, provisional)
+
+The **Game** switch above the plot turns the mapper into an osu!-style practice round.
+A warm-up holds eee, ah and oo; each zone is centred on the median of that phase's
+tracked points with a radius in log-frequency space (no textbook values). Four words
+follow (`ah` hold, `hi`, `how`, `we` glides). Consonants such as *h* are visual cues,
+never scored. Each note ends as **hit**, **miss**, or **not heard clearly** (too few
+accepted frames; never counted as a miss). Timing is visual only, and self-paced is the
+default; timed rings are optional. A hit means "reached the zone you set," not a
+judgement of speech.
+
+- `src/game/zones.ts`, `calibration.ts`, `beatmap.ts`, `run.ts`: pure TypeScript driven
+  only by `TrackedFrame`s, unit-tested in `tests/game.test.ts`.
+- `src/game/GameMode.tsx`, `GameOverlay.tsx`, `game.css`: UI. The overlay draws through
+  `VowelPlot`'s `overlay` slot with `projectVowel`; frames arrive via
+  `useVowelSession(settings, { onFrame })`.
+- `e2e/game.spec.ts` drives the round with switchable synthetic vowels through the real
+  worklet/worker/tracker path.
+
+`MAPPER_PORT` picks the dev/preview port (and the port Playwright starts or reuses), for
+example `MAPPER_PORT=5175 npm run dev` or `MAPPER_PORT=5175 npm run test:e2e`.
 
 ## Audio approach
 
