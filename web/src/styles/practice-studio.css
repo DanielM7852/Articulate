@@ -66,10 +66,6 @@
   overflow: hidden;
   background: var(--color-cream);
 }
-.lp-tile-body > .slot {
-  height: 100%;
-  border-radius: inherit;
-}
 .lp-tile-foot {
   display: flex;
   align-items: center;

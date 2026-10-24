@@ -34,6 +34,8 @@ export function useMicrophone() {
   const [elapsed, setElapsed] = useState(0);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [noiseLevel, setNoiseLevel] = useState<'quiet' | 'noisy' | null>(null);
+  /** The open MediaStream, as state so other analyses (F1/F2 tracking) can subscribe to it. */
+  const [stream, setStream] = useState<MediaStream | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -103,6 +105,7 @@ export function useMicrophone() {
           },
         });
         streamRef.current = stream;
+        setStream(stream);
         const ctx = new AudioContext();
         ctxRef.current = ctx;
         const src = ctx.createMediaStreamSource(stream);
@@ -135,6 +138,7 @@ export function useMicrophone() {
     recorderRef.current?.state === 'recording' && recorderRef.current.stop();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setStream(null);
     ctxRef.current?.close().catch(() => undefined);
     ctxRef.current = null;
     analyserRef.current = null;
@@ -208,7 +212,7 @@ export function useMicrophone() {
     elapsed,
     devices,
     noiseLevel,
-    stream: streamRef.current,
+    stream,
     start,
     stop,
     beginRecording,
