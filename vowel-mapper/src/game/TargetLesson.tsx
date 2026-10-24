@@ -6,18 +6,19 @@ import { centre, outline } from '../reference/check';
 import type { useVowelSession } from '../useVowelSession';
 import type { FrameListener } from './GameMode';
 import {
-  CHECK_PROMPTS, RINGS, TARGET_STEPS, TargetRound, VoiceCheck,
-  type Place, type TargetNote, type TargetSnapshot, type TargetSound, type TargetStep, type VoiceCheckState, type VoiceProfile,
+  RINGS, TARGET_STEPS, TargetRound, VoiceCheck,
+  type CheckPrompt, type Place, type TargetNote, type TargetSnapshot, type TargetSound, type TargetStep, type VoiceCheckState, type VoiceGroup, type VoiceProfile,
 } from './targets';
 import './targets.css';
 
 const RECENT_TRACE_MS = 3000;
 const REF = { ee: 'iy', ah: 'ah' } as const;
 const SOUND = { ee: 'eee', ah: 'ah' } as const;
+const GROUPS: [VoiceGroup, string][] = [['men', 'Man'], ['women', 'Woman'], ['boys', 'Boy'], ['girls', 'Girl']];
 
 type Stage =
   | { kind: 'intro' }
-  | { kind: 'checking'; state: VoiceCheckState | null }
+  | { kind: 'checking'; prompts: readonly CheckPrompt[]; state: VoiceCheckState | null }
   | { kind: 'failed'; missed: string[] }
   | { kind: 'ready' }
   | { kind: 'playing'; snapshot: TargetSnapshot }
@@ -40,6 +41,8 @@ interface Props {
 export function TargetLesson({ session, frames, point, tracking, lessonPicker, saved, onChecked }: Props) {
   const [profile, setProfile] = useState<VoiceProfile | null>(null);
   const [place, setPlace] = useState<Place>(saved?.place ?? 'quiet');
+  const [canSayWords, setCanSayWords] = useState(true);
+  const [group, setGroup] = useState<VoiceGroup | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: 'intro' });
   const engine = useRef<Engine | null>(null);
 
@@ -48,7 +51,7 @@ export function TargetLesson({ session, frames, point, tracking, lessonPicker, s
     if (!current) return;
     if (current.kind === 'check') {
       const state = current.check.push(frame);
-      if (state.kind !== 'done') { setStage({ kind: 'checking', state }); return; }
+      if (state.kind !== 'done') { setStage({ kind: 'checking', prompts: current.check.prompts, state }); return; }
       engine.current = null;
       if (state.ok) {
         onChecked(state.profile);
@@ -81,8 +84,10 @@ export function TargetLesson({ session, frames, point, tracking, lessonPicker, s
     if (session.phase !== 'running' && session.phase !== 'requesting') void session.start();
   };
   const beginCheck = () => {
-    engine.current = { kind: 'check', check: new VoiceCheck(place) };
-    setStage({ kind: 'checking', state: null });
+    if (!canSayWords && !group) return;
+    const check = new VoiceCheck(place, canSayWords ? { kind: 'words' } : { kind: 'uh', group: group! });
+    engine.current = { kind: 'check', check };
+    setStage({ kind: 'checking', prompts: check.prompts, state: null });
     ensureMicrophone();
   };
   const reuse = () => {
@@ -132,7 +137,7 @@ export function TargetLesson({ session, frames, point, tracking, lessonPicker, s
         <VowelPlot trace={trace} point={point} faded={!tracking && session.phase !== 'finished'}
           overlay={shown ? (textScale) => <TargetOverlay profile={shown} snapshot={snapshot} active={step?.sound} textScale={textScale} /> : undefined} />
         <div className="map-caption" data-testid="target-caption">
-          {shown ? <><span className="tg-start-key" />Where you started <span className="caption-divider">/</span> Targets sized to your voice · American English reference</>
+          {shown ? <><span className="tg-start-key" />Where you started <span className="caption-divider">/</span> Targets sized to your voice{shown.sizing === 'approximate' ? ' (approximate)' : ''} · American English reference</>
             : <><span className="legend-dot" />Your sound. Targets appear after the voice check.</>}
         </div>
       </section>
@@ -144,13 +149,24 @@ export function TargetLesson({ session, frames, point, tracking, lessonPicker, s
         {stage.kind === 'intro' && <>
           <div className="status-copy game-copy" role="status" aria-live="polite">
             <h2 data-testid="game-status">Size the targets to your voice</h2>
-            <p>Say five short words and hold each vowel for about a second. This measures how big your voice is, not how well you speak.</p>
+            <p>Hold a few short sounds for about a second each. This measures how big your voice is, not how well you speak.</p>
           </div>
           <div className="tg-places" role="group" aria-label="Where are you?">
             {(['quiet', 'noisy'] as const).map((value) => <button key={value} type="button" aria-pressed={place === value} onClick={() => setPlace(value)}>{value === 'quiet' ? 'Quiet room' : 'Noisy room'}</button>)}
           </div>
           {place === 'noisy' && <p className="game-caveat">In a noisy room, <strong>eee</strong> is shown but not scored. Noise and raised voices shift it. <strong>ah</strong> is still scored.</p>}
-          <div className="controls"><button type="button" className="button-primary" onClick={beginCheck}>Start voice check</button></div>
+          <p className="tg-question">Can you say “head”, “had” and “heard”?</p>
+          <div className="tg-places" role="group" aria-label="Can you say head, had and heard?">
+            <button type="button" aria-pressed={canSayWords} onClick={() => setCanSayWords(true)}>Yes</button>
+            <button type="button" aria-pressed={!canSayWords} onClick={() => setCanSayWords(false)}>Not yet</button>
+          </div>
+          {!canSayWords && <>
+            <p className="tg-question">Pick the closest voice. You’ll hold one relaxed “uh”.</p>
+            <div className="tg-places tg-groups" role="group" aria-label="Closest voice">
+              {GROUPS.map(([value, label]) => <button key={value} type="button" aria-pressed={group === value} onClick={() => setGroup(value)}>{label}</button>)}
+            </div>
+          </>}
+          <div className="controls"><button type="button" className="button-primary" onClick={beginCheck} disabled={!canSayWords && !group}>Start voice check</button></div>
           {saved && <div className="tg-reuse">
             <span>Same place as last time? <small>{saved.place === 'quiet' ? 'Quiet room' : 'Noisy room'} · {ago(saved.measuredAt)}</small></span>
             <button type="button" className="button-secondary" onClick={reuse}>Skip, use last check</button>
@@ -158,7 +174,7 @@ export function TargetLesson({ session, frames, point, tracking, lessonPicker, s
           {lessonPicker}
         </>}
 
-        {stage.kind === 'checking' && <CheckPanel state={stage.state} micOn={micOn} requesting={session.phase === 'requesting'} onCancel={stop} />}
+        {stage.kind === 'checking' && <CheckPanel prompts={stage.prompts} state={stage.state} micOn={micOn} requesting={session.phase === 'requesting'} onCancel={stop} />}
 
         {stage.kind === 'failed' && <>
           <div className="status-copy game-copy" role="status" aria-live="polite">
@@ -173,6 +189,7 @@ export function TargetLesson({ session, frames, point, tracking, lessonPicker, s
             <h2 data-testid="game-status">Your targets are ready</h2>
             <p>Hold each vowel and see which ring you reach. Ring 1 is closest. The hollow dot is where you started.</p>
           </div>
+          {profile.sizing === 'approximate' && <p className="game-caveat" data-testid="approximate-note">Targets are sized approximately, from your “uh” and the voice you picked. A speech-language pathologist can help check them.</p>}
           {profile.place === 'noisy' && <p className="game-caveat" data-testid="noisy-note">Noisy room: <strong>eee</strong> is shown but not scored.</p>}
           <div className="controls"><button type="button" className="button-primary" onClick={play}>Play</button></div>
           <button type="button" className="game-text-button" onClick={() => setStage({ kind: 'intro' })}>Redo voice check</button>
@@ -197,9 +214,9 @@ function ago(ms: number) {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
 }
 
-function CheckPanel({ state, micOn, requesting, onCancel }: { state: VoiceCheckState | null; micOn: boolean; requesting: boolean; onCancel: () => void }) {
+function CheckPanel({ prompts, state, micOn, requesting, onCancel }: { prompts: readonly CheckPrompt[]; state: VoiceCheckState | null; micOn: boolean; requesting: boolean; onCancel: () => void }) {
   const index = state && state.kind !== 'done' ? state.index : 0;
-  const prompt = CHECK_PROMPTS[index];
+  const prompt = prompts[index];
   const collecting = state?.kind === 'collecting' ? state : null;
   const [title, hint] = requesting ? ['Allow microphone access', 'Look for your browser’s microphone permission prompt.']
     : !state || !micOn ? ['Starting the microphone', 'The check begins as soon as audio arrives.']
@@ -207,7 +224,7 @@ function CheckPanel({ state, micOn, requesting, onCancel }: { state: VoiceCheckS
     : [`Next: “${prompt.word}”`, 'Take a breath. Start when the prompt changes.'];
   return <>
     <ol className="game-phases tg-phases" aria-label="Voice check words">
-      {CHECK_PROMPTS.map((p, i) => <li key={p.word} className={i < index ? 'is-done' : i === index ? 'is-active' : ''}>
+      {prompts.map((p, i) => <li key={p.word} className={i < index ? 'is-done' : i === index ? 'is-active' : ''}>
         <strong>{p.word}</strong><small>{p.start ? 'start' : 'voice size'}</small>
       </li>)}
     </ol>

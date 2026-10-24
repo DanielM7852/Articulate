@@ -1,4 +1,4 @@
-import { REFERENCE_V1 } from './data';
+import { REFERENCE_V1 } from './data.ts';
 
 export type CalibrationVowel = 'eh' | 'ae' | 'er';
 export type TargetVowel = 'iy' | 'ah';

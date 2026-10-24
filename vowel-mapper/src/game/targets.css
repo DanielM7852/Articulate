@@ -23,6 +23,9 @@
 .tg-places button[aria-pressed='true'] { background: white; color: var(--ink); box-shadow: 0 1px 3px rgb(24 44 78 / 14%); }
 .tg-places button:focus-visible { outline: 3px solid #9db6fb; outline-offset: 2px; }
 
+.tg-question { margin: 6px 0 8px; font-size: 12px; color: var(--ink); font-weight: 600; }
+.tg-groups { grid-template-columns: repeat(4, 1fr); }
+.tg-groups button { padding: 10px 4px; font-size: 13px; }
 .tg-reuse { display: grid; gap: 8px; margin: 18px 0 6px; padding: 12px; border-radius: 10px; background: #f6f9ff; font-size: 12px; color: var(--ink); }
 .tg-reuse small { display: block; margin-top: 2px; color: var(--muted); }
 
@@ -40,3 +43,4 @@
 .tg-results li { grid-template-columns: 22px minmax(40px, auto) 1fr; column-gap: 8px; }
 .tg-results span { text-align: right; }
 .tg-results small { display: block; margin-top: 2px; font-size: 10px; }
+.game-panel .controls + .game-lesson, .tg-reuse + .game-lesson { margin-top: 18px; }

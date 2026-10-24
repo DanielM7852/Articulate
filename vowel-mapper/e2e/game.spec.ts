@@ -5,7 +5,7 @@ import { vowelSignal } from '../tests/signals';
 // prompts and self-paced notes decide when each sound starts, so a fixed looping file cannot line up.
 const VOWELS = { ee: [300, 2300, 3000], ah: [750, 1200, 2600], oo: [350, 800, 2400], aw: [650, 1050, 2600], ih: [480, 1900, 2900], eh: [680, 1700, 2800], ae: [920, 1550, 2700] };
 // A voice 10% smaller than the pooled reference: head, had, heard, see, spa at reference × 0.9.
-const SCALED = { rEh: [613, 1833, 2600], rAe: [625, 1936, 2700], rEr: [484, 1375, 2300], rIy: [380, 2410, 3000], rAh: [767, 1356, 2500] };
+const SCALED = { rEh: [613, 1833, 2600], rAe: [625, 1936, 2700], rEr: [484, 1375, 2300], rIy: [380, 2410, 3000], rAh: [767, 1356, 2500], rUh: [636, 1254, 2500] };
 const screenshotDir = process.env.MAPPER_SCREENSHOTS ?? 'test-results';
 const clips = Object.fromEntries(Object.entries({ ...VOWELS, ...SCALED }).map(([name, formants]) => {
   // 0.5 s at 120 Hz pitch is a whole number of periods, so the loop seam is clean.
@@ -375,4 +375,28 @@ test('target lesson: noisy-room voice check, voice-sized rings, ee shown but not
 
   expect(await page.evaluate(() => window.localStorage.length)).toBe(0);
   expect(offDevice).toEqual([]);
+});
+
+test('target lesson: a learner who cannot say the check words holds "uh" and picks a voice, and the targets say approximate', async ({ page }) => {
+  test.setTimeout(90_000);
+  await installSyntheticMicrophone(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  const status = page.getByTestId('game-status');
+  await page.getByRole('button', { name: 'Not yet' }).click();
+  await expect(page.getByRole('button', { name: 'Start voice check' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Woman', exact: true }).click();
+  await page.screenshot({ path: `${screenshotDir}/targets-not-yet.png`, fullPage: true });
+  await page.getByRole('button', { name: 'Start voice check' }).click();
+  const prompts = [['uh', 'rUh'], ['see', 'rIy'], ['spa', 'rAh']] as const;
+  for (const [i, [word, sound]] of prompts.entries()) {
+    await expect(status).toHaveText(new RegExp(`^Say “${word}”`), { timeout: 15000 });
+    await say(page, sound);
+    const next = prompts[i + 1];
+    await expect(status).toHaveText(next ? `Next: “${next[0]}”` : 'Your targets are ready', { timeout: 10000 });
+    await say(page, null);
+  }
+  await expect(page.getByTestId('approximate-note')).toBeVisible();
+  await expect(page.getByTestId('target-caption')).toContainText('Targets sized to your voice (approximate)');
+  for (const sound of ['ee', 'ah']) await expect(page.getByTestId(`target-${sound}`).locator('polygon')).toHaveCount(3);
 });

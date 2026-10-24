@@ -1,5 +1,6 @@
 import type { TrackedFrame, VowelPoint } from '../audio/tracker';
 import { distance, factorFrom, holdValue, type CalibrationVowel, type TargetVowel } from '../reference/check';
+import { VOICE_SIZE_V1 } from '../reference/data';
 
 type Formants = { f1: number; f2: number };
 
@@ -31,21 +32,31 @@ export interface VoiceProfile {
   /** Natural-log voice multiplier: every target is drawn at exp(factor) × the reference. */
   factor: number;
   place: Place;
+  /** "words": from head / had / heard. "approximate": from one held "uh" and a chosen voice group. */
+  sizing: 'words' | 'approximate';
   /** Where the player's ee and ah were before practice. Shown, never used as a target. */
   start: Partial<Record<TargetSound, Formants>>;
   measuredAt: number;
 }
 
-export interface CheckPrompt { word: string; ref: CalibrationVowel | TargetVowel; letters: [string, string, string]; say: string; start?: TargetSound }
+export interface CheckPrompt { word: string; ref: CalibrationVowel | TargetVowel | 'uh'; say: string; start?: TargetSound }
 
+const STARTS: CheckPrompt[] = [
+  { word: 'see', ref: 'iy', say: 'eeee', start: 'ee' },
+  { word: 'spa', ref: 'ah', say: 'ahhh', start: 'ah' },
+];
 /** head / had / heard set the multiplier; see / spa record the starting ee and ah. */
 export const CHECK_PROMPTS: readonly CheckPrompt[] = [
-  { word: 'head', ref: 'eh', letters: ['h', 'ea', 'd'], say: 'ehhh' },
-  { word: 'had', ref: 'ae', letters: ['h', 'a', 'd'], say: 'aaah, as in cat' },
-  { word: 'heard', ref: 'er', letters: ['h', 'ear', 'd'], say: 'errr' },
-  { word: 'see', ref: 'iy', letters: ['s', 'ee', ''], say: 'eeee', start: 'ee' },
-  { word: 'spa', ref: 'ah', letters: ['sp', 'a', ''], say: 'ahhh', start: 'ah' },
+  { word: 'head', ref: 'eh', say: 'ehhh' },
+  { word: 'had', ref: 'ae', say: 'aaah, as in cat' },
+  { word: 'heard', ref: 'er', say: 'errr' },
+  ...STARTS,
 ];
+/** For learners who can't say the check words yet: the relaxed "uh" is the easiest vowel to hold. */
+export const UH_PROMPTS: readonly CheckPrompt[] = [{ word: 'uh', ref: 'uh', say: 'uhhh, as in cup' }, ...STARTS];
+
+export type VoiceGroup = keyof typeof VOICE_SIZE_V1.groupFactor;
+export type Sizing = { kind: 'words' } | { kind: 'uh'; group: VoiceGroup };
 
 export type VoiceCheckState =
   | { kind: 'rest'; index: number; untilMs: number }
@@ -69,10 +80,13 @@ const CHECK_DEFAULTS: VoiceCheckOptions = { restMs: 1200, settleMs: 300, targetP
 export class VoiceCheck {
   readonly options: VoiceCheckOptions;
   private state: VoiceCheckState | null = null;
-  private readonly points: VowelPoint[][] = CHECK_PROMPTS.map(() => []);
+  readonly prompts: readonly CheckPrompt[];
+  private readonly points: VowelPoint[][];
 
-  constructor(readonly place: Place, options: Partial<VoiceCheckOptions> = {}) {
+  constructor(readonly place: Place, readonly sizing: Sizing = { kind: 'words' }, options: Partial<VoiceCheckOptions> = {}) {
     this.options = { ...CHECK_DEFAULTS, ...options };
+    this.prompts = sizing.kind === 'words' ? CHECK_PROMPTS : UH_PROMPTS;
+    this.points = this.prompts.map(() => []);
   }
 
   push(frame: TrackedFrame): VoiceCheckState {
@@ -87,7 +101,7 @@ export class VoiceCheck {
       if (frame.status === 'tracking' && frame.point && t - state.startedAtMs >= settleMs) bucket.push(frame.point);
       if (bucket.length >= targetPoints || t >= state.timeoutAtMs) {
         const next = state.index + 1;
-        this.state = next < CHECK_PROMPTS.length ? { kind: 'rest', index: next, untilMs: t + restMs } : this.finish();
+        this.state = next < this.prompts.length ? { kind: 'rest', index: next, untilMs: t + restMs } : this.finish();
       } else {
         this.state = { ...state, collected: bucket.length };
       }
@@ -96,14 +110,23 @@ export class VoiceCheck {
   }
 
   private finish(): VoiceCheckState {
-    const values = CHECK_PROMPTS.map((prompt, i) => ({ prompt, value: holdValue(this.points[i]) }));
+    const values = this.prompts.map((prompt, i) => ({ prompt, value: holdValue(this.points[i]) }));
     const calibration = values.filter(({ prompt }) => !prompt.start);
     const missed = calibration.filter(({ value }) => !value).map(({ prompt }) => prompt.word);
     if (missed.length) return { kind: 'done', ok: false, missed };
-    const factor = factorFrom(calibration.map(({ prompt, value }) => ({ vowel: prompt.ref as CalibrationVowel, value: value! })))!;
+    let factor: number;
+    if (this.sizing.kind === 'words') {
+      factor = factorFrom(calibration.map(({ prompt, value }) => ({ vowel: prompt.ref as CalibrationVowel, value: value! })))!;
+    } else {
+      // Amendment 3: the mean of the "uh" factor and the group's mean factor.
+      const uh = calibration[0].value!;
+      const fromUh = (Math.log(uh.f1) - VOICE_SIZE_V1.uh[0] + Math.log(uh.f2) - VOICE_SIZE_V1.uh[1]) / 2;
+      factor = (fromUh + VOICE_SIZE_V1.groupFactor[this.sizing.group]) / 2;
+    }
     const start: VoiceProfile['start'] = {};
     for (const { prompt, value } of values) if (prompt.start && value) start[prompt.start] = { f1: value.f1, f2: value.f2 };
-    return { kind: 'done', ok: true, profile: { version: 1, factor, place: this.place, start, measuredAt: this.options.now() } };
+    const sizing = this.sizing.kind === 'words' ? 'words' : 'approximate';
+    return { kind: 'done', ok: true, profile: { version: 1, factor, place: this.place, sizing, start, measuredAt: this.options.now() } };
   }
 }
 

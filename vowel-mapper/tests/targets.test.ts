@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TrackedFrame } from '../src/audio/tracker';
-import { REFERENCE_V1 } from '../src/reference/data';
+import { REFERENCE_V1, VOICE_SIZE_V1 } from '../src/reference/data';
 import {
   CHECK_PROMPTS, TargetRound, VoiceCheck, coachSummary, ringFor, targetDistance,
   type TargetStep, type VoiceProfile,
@@ -29,18 +29,18 @@ const at = (vowel: Ref, scale = 1, radii = 0) => ({
 });
 
 /** Drive a voice check where each prompt is answered by `answer(index)` (null = silence). */
-function runCheck(check: VoiceCheck, answer: (index: number) => { f1: number; f2: number } | null) {
+function runCheck(check: VoiceCheck, answer: (index: number, word: string) => { f1: number; f2: number } | null) {
   let t = 0, state = check.push(silent(t));
   while (state.kind !== 'done' && t < 120_000) {
     t += HOP;
-    const value = state.kind === 'collecting' ? answer(state.index) : null;
+    const value = state.kind === 'collecting' ? answer(state.index, check.prompts[state.index].word) : null;
     state = check.push(value ? heard(t, value.f1, value.f2) : silent(t));
   }
   return state;
 }
 
 const profile = (over: Partial<VoiceProfile> = {}): VoiceProfile => ({
-  version: 1, factor: Math.log(1.2), place: 'quiet', measuredAt: 0,
+  version: 1, factor: Math.log(1.2), place: 'quiet', sizing: 'words', measuredAt: 0,
   start: { ee: at('iy', 1.2, 1.2), ah: at('ah', 1.2, 0.8) }, ...over,
 });
 
@@ -78,7 +78,7 @@ describe('voice check', () => {
   it('sets the multiplier from head/had/heard only and keeps ee/ah as the start', () => {
     const check = new VoiceCheck('noisy');
     // ee and ah are far from the reference; they must not move the multiplier.
-    const state = runCheck(check, (i) => i < 3 ? at(CHECK_PROMPTS[i].ref, 1.2) : at(CHECK_PROMPTS[i].ref, 1.2, 2));
+    const state = runCheck(check, (i) => i < 3 ? at(CHECK_PROMPTS[i].ref as Ref, 1.2) : at(CHECK_PROMPTS[i].ref as Ref, 1.2, 2));
     expect(state.kind).toBe('done');
     if (state.kind !== 'done' || !state.ok) throw new Error('check failed');
     expect(state.profile.factor).toBeCloseTo(Math.log(1.2), 6);
@@ -87,14 +87,45 @@ describe('voice check', () => {
   });
 
   it('fails and names the calibration words it could not hear', () => {
-    const state = runCheck(new VoiceCheck('quiet'), (i) => i === 1 ? null : at(CHECK_PROMPTS[i].ref));
+    const state = runCheck(new VoiceCheck('quiet'), (i) => i === 1 ? null : at(CHECK_PROMPTS[i].ref as Ref));
     expect(state).toMatchObject({ kind: 'done', ok: false, missed: ['had'] });
   });
 
   it('still succeeds without a starting ee or ah', () => {
-    const state = runCheck(new VoiceCheck('quiet'), (i) => i >= 3 ? null : at(CHECK_PROMPTS[i].ref));
+    const state = runCheck(new VoiceCheck('quiet'), (i) => i >= 3 ? null : at(CHECK_PROMPTS[i].ref as Ref));
     if (state.kind !== 'done' || !state.ok) throw new Error('check failed');
     expect(state.profile.start).toEqual({});
+  });
+});
+
+describe('voice check without the check words', () => {
+  const uh = (scale: number) => ({ f1: Math.exp(VOICE_SIZE_V1.uh[0]) * scale, f2: Math.exp(VOICE_SIZE_V1.uh[1]) * scale });
+
+  it('asks for one held "uh", then the starting ee and ah', () => {
+    expect(new VoiceCheck('quiet', { kind: 'uh', group: 'women' }).prompts.map((p) => p.word)).toEqual(['uh', 'see', 'spa']);
+  });
+
+  it('averages the "uh" factor with the chosen group, and marks the result approximate', () => {
+    const state = runCheck(new VoiceCheck('quiet', { kind: 'uh', group: 'boys' }), (i) => i === 0 ? uh(1.2) : at(i === 1 ? 'iy' : 'ah', 1.2));
+    if (state.kind !== 'done' || !state.ok) throw new Error('check failed');
+    expect(state.profile.factor).toBeCloseTo((Math.log(1.2) + VOICE_SIZE_V1.groupFactor.boys) / 2, 6);
+    expect(state.profile.sizing).toBe('approximate');
+  });
+
+  it('never uses the starting ee or ah to size the voice', () => {
+    const far = runCheck(new VoiceCheck('quiet', { kind: 'uh', group: 'men' }), (i) => i === 0 ? uh(1) : at(i === 1 ? 'iy' : 'ah', 1.5, 3));
+    if (far.kind !== 'done' || !far.ok) throw new Error('check failed');
+    expect(far.profile.factor).toBeCloseTo(VOICE_SIZE_V1.groupFactor.men / 2, 6);
+  });
+
+  it('fails when the "uh" is not heard', () => {
+    expect(runCheck(new VoiceCheck('quiet', { kind: 'uh', group: 'girls' }), (i) => i === 0 ? null : at('ah'))).toMatchObject({ kind: 'done', ok: false, missed: ['uh'] });
+  });
+
+  it('marks the head/had/heard result as measured from words', () => {
+    const state = runCheck(new VoiceCheck('quiet'), (i) => at(CHECK_PROMPTS[i].ref as Ref));
+    if (state.kind !== 'done' || !state.ok) throw new Error('check failed');
+    expect(state.profile.sizing).toBe('words');
   });
 });
 
