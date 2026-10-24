@@ -19,7 +19,7 @@ const TH_TIMEOUT_MS = 10000;
 const SWING_MS = 1200;
 const NOTE = "Mouth demonstrations are illustrative and would be reviewed by speech therapists before real use.";
 const DRIVERS = ["auto", "talkinghead", "three"];
-const STYLES = ["hologram", "solid"];
+const STYLES = ["hologram", "porcelain", "hybrid", "solid"];
 
 function el(tag, className, text) {
   const node = document.createElement(tag);

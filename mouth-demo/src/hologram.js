@@ -9,6 +9,7 @@ const USE_BLOOM = false; // light theme renders straight, no bloom
 export const BLOOM = { strength: 0.55, radius: 0.35, threshold: 0.45 };
 const COLOR_NAVY = "#203E68";
 const COLOR_HALO = "#CBD7E6";
+const COLOR_GREY = "#DADFD9";
 const SCROLL_SPEED = 0.8; // row phase units per second (upward drift of the dot grid)
 const SWING_SCROLL_BOOST = 5; // extra scroll multiplier at full swing
 const SWING_RISE_MS = 250;
@@ -213,7 +214,105 @@ vec3 outgoingLight;
 }
 `;
 
-function patchShader(shader, uniforms, misses) {
+const PORC = {
+  light: "-0.4, 0.6, 0.7", wrapOff: 0.5, wrapDiv: 1.5, rimPow: 2.4, rimMix: 0.85,
+  lineFreq: 120.0, lineAlpha: 0.18, fadeNear: 0.035, fadeFar: 0.14, minAlpha: 0.2,
+  lipDotRowMul: 1.4, lipDotRadius: 0.42, lipHoldSwell: 0.06
+};
+
+const PORC_PARS = /* glsl */ `
+uniform float uLipDots;
+uniform vec3 uColGrey;
+`;
+
+const PORC_BODY = /* glsl */ `
+vec3 outgoingLight;
+{
+  vec3 tex = diffuseColor.rgb;
+  float y = vRestPos.y;
+  if (y > uReveal) discard;
+
+  vec3 dv = vRestPos - uMouthCenter;
+  float dMouth = length(dv);
+  float m = 1.0 - smoothstep(uMouthRadius * 0.8, uMouthRadius * 1.25, dMouth);
+
+  vec3 nrm = normalize(vHNormal);
+  vec3 V = normalize(vViewPos);
+  float ndv = abs(dot(nrm, V));
+  float rim = pow(1.0 - ndv, ${PORC.rimPow.toFixed(1)});
+
+  float lum = sqrt(max(dot(tex, vec3(0.2126, 0.7152, 0.0722)), 0.0));
+  float redness = (tex.r - max(tex.g, tex.b)) / (tex.r + 0.02);
+  // lip mask from a blurred (mip-biased) chroma sample, then a crisp fwidth-sized edge
+  vec3 texB = texture2D(map, vMapUv, 3.5).rgb;
+  float redB = (texB.r - max(texB.g, texB.b)) / (texB.r + 0.02);
+  float lw = max(fwidth(redB) * 0.75, 0.015);
+  float L = smoothstep(0.56 - lw, 0.56 + lw, redB);
+  if (uKind > 0.5) L = 0.0;
+  L *= smoothstep(0.02, 0.25, vLip);
+  L *= 1.0 - smoothstep(uMouthRadius * 1.0, uMouthRadius * 1.4, dMouth); // lips live only near the mouth
+
+  float interior = 0.0;
+  float tooth = 0.0;
+  if (uKind > 1.5) {
+    interior = 1.0;
+  } else if (uKind > 0.5) {
+    tooth = smoothstep(${TEETH.lumLo.toFixed(2)}, ${TEETH.lumHi.toFixed(2)}, lum) * (1.0 - smoothstep(${TEETH.redLo.toFixed(2)}, ${TEETH.redHi.toFixed(2)}, redness));
+    interior = 1.0 - tooth;
+  } else {
+    interior = m * (1.0 - smoothstep(${INTERIOR.lumLo.toFixed(2)}, ${INTERIOR.lumHi.toFixed(2)}, lum)) * (1.0 - L);
+    interior = smoothstep(0.35, 0.65, interior) * (1.0 - smoothstep(0.016, 0.026, dv.y)); // not the nostrils
+  }
+
+  // wrapped diffuse, fixed view-space light
+  float w = clamp((dot(nrm, normalize(vec3(${PORC.light}))) + ${PORC.wrapOff.toFixed(2)}) / ${PORC.wrapDiv.toFixed(2)}, 0.0, 1.0);
+  vec3 shadow = mix(uColGrey, uColHalo, 0.5);
+  vec3 col3 = mix(shadow, vec3(1.0), w);
+  col3 = mix(col3, uColNavy, ${PORC.rimMix.toFixed(2)} * rim);
+
+  // hairline contour isolines (constant frequency)
+  float phase = vRestPos.y * ${PORC.lineFreq.toFixed(1)};
+  float fwp = fwidth(phase) + 1e-5;
+  float dl = abs(fract(phase + 0.5) - 0.5);
+  float line = 1.0 - smoothstep(0.25 * fwp, 0.9 * fwp + 1e-4, dl);
+  line *= 1.0 - smoothstep(0.35, 0.7, fwp);
+  line *= (1.0 - m) * (1.0 - L);
+  col3 = mix(col3, uColNavy, line * ${PORC.lineAlpha.toFixed(2)});
+
+  // lips: solid navy, or fine navy dots on the porcelain base
+  float lipEdge = smoothstep(0.35, 0.65, L);
+  float lipA = lipEdge;
+  if (uLipDots > 0.5) {
+    float aD, shD, spD;
+    dotLattice(uRowFreq * ${PORC.lipDotRowMul.toFixed(2)}, ${PORC.lipDotRadius.toFixed(2)}, 0.0, uHold * ${PORC.lipHoldSwell.toFixed(2)}, 0.95, aD, shD, spD);
+    lipA = lipEdge * aD;
+  }
+  vec3 lipCol = uColNavy * mix(0.8, 1.1, w) * (1.0 - 0.18 * uHold);
+  lipCol = mix(lipCol, uColNavy * 0.7, rim * uHold);
+  col3 = mix(col3, lipCol, lipA);
+
+  // interior and teeth
+  col3 = mix(col3, uColNavy * ${INTERIOR.dark.toFixed(2)}, interior);
+  col3 = mix(col3, mix(vec3(1.0), uColHalo, (1.0 - w) * 0.7), tooth);
+
+  float edge = smoothstep(uReveal - ${REVEAL_EDGE.toFixed(3)}, uReveal, y);
+  col3 = mix(col3, uColNavy, 0.5 * edge * (1.0 - max(interior, tooth)));
+
+  // upper-face de-emphasis (nose/cheeks/chin stay solid)
+  float up = dv.y > 0.0 ? dv.y : dv.y * 0.45;
+  float dU = length(vec2(dv.x * 0.5, up));
+  float op = mix(1.0, ${PORC.minAlpha.toFixed(2)}, smoothstep(${PORC.fadeNear.toFixed(2)}, ${PORC.fadeFar.toFixed(2)}, dU));
+  op = max(op, rim * 0.5);
+  op = max(op, max(lipEdge * step(0.5, 1.0), max(interior, tooth)));
+  op = max(op, edge * 0.5);
+  float fade = smoothstep(uFade.x, uFade.y, y);
+  outgoingLight = col3;
+  diffuseColor.a = op * fade;
+  if (diffuseColor.a < 0.01) discard;
+}
+`;
+
+function patchShader(shader, uniforms, misses, porcelain) {
   Object.assign(shader.uniforms, uniforms);
   let v = shader.vertexShader;
   // meshbasic only builds normals for skinning/envmap; always build them for the rim
@@ -231,7 +330,8 @@ function patchShader(shader, uniforms, misses) {
 
   let f = shader.fragmentShader;
   f = rep(f, "uniform float opacity;", "uniform float opacity;\n" + FRAG_PARS, "frag:pars", misses);
-  f = rep(f, "vec3 outgoingLight = reflectedLight.indirectDiffuse;", FRAG_BODY, "frag:body", misses);
+  f = rep(f, "vec3 outgoingLight = reflectedLight.indirectDiffuse;", porcelain ? PORC_BODY : FRAG_BODY, "frag:body", misses);
+  if (porcelain) f = rep(f, "uniform float opacity;", "uniform float opacity;\n" + PORC_PARS, "frag:pars2", misses);
   shader.fragmentShader = f;
 }
 
@@ -256,7 +356,9 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
     uHold: { value: 0 },
     uCylC: { value: new THREE.Vector2(0, 0) },
     uColNavy: { value: new THREE.Color(COLOR_NAVY) },
-    uColHalo: { value: new THREE.Color(COLOR_HALO) }
+    uColHalo: { value: new THREE.Color(COLOR_HALO) },
+    uColGrey: { value: new THREE.Color(COLOR_GREY) },
+    uLipDots: { value: 0 }
   };
 
   // classify meshes once
@@ -342,9 +444,11 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
 
   // hologram materials: one per class, created lazily, reused across style switches
   const materials = new Map();
-  function getMaterial(e) {
+  const porcMaterials = new Map();
+  function getMaterial(e, porcelain = false) {
     const cls = e.cls;
-    if (materials.has(e)) return materials.get(e);
+    const cache = porcelain ? porcMaterials : materials;
+    if (cache.has(e)) return cache.get(e);
     const p = CLASS_PARAMS[cls];
     const mat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
@@ -365,12 +469,12 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
     };
     mat.onBeforeCompile = (shader) => {
       const misses = [];
-      patchShader(shader, { ...shared, ...own }, misses);
+      patchShader(shader, { ...shared, ...own }, misses, porcelain);
       if (misses.length) console.warn("[hologram] shader injection missed:", misses.join(", "));
     };
-    mat.customProgramCacheKey = () => "hologram-v6";
+    mat.customProgramCacheKey = () => (porcelain ? "porcelain-v1" : "hologram-v6");
     mat.userData.hologramClass = cls;
-    materials.set(e, mat);
+    cache.set(e, mat);
     return mat;
   }
 
@@ -418,14 +522,14 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
     }
   }
 
-  function applyHologram() {
+  function applyHologram(porcelain = false) {
     for (const e of entries) {
       const m = e.mesh;
       if (e.cls === "hidden") {
         m.visible = false;
         continue;
       }
-      m.material = getMaterial(e);
+      m.material = getMaterial(e, porcelain);
       m.renderOrder = HOLO_ORDER;
       if (CLASS_PARAMS[e.cls].prepass && m.parent) {
         if (!e.prepass) e.prepass = makePrepass(e);
@@ -474,9 +578,10 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
 
   function setStyle(s) {
     if (s === currentStyle || disposed) return;
-    if (s === "hologram") {
-      applyHologram();
-      currentStyle = "hologram";
+    if (s === "hologram" || s === "porcelain" || s === "hybrid") {
+      shared.uLipDots.value = s === "hybrid" ? 1 : 0;
+      applyHologram(s !== "hologram");
+      currentStyle = s;
     } else {
       restoreOriginals();
       currentStyle = "solid";
@@ -572,7 +677,7 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
       }
     },
     render() {
-      if (currentStyle === "hologram") {
+      if (currentStyle !== "solid") {
         for (const e of entries) {
           if (e.prepass) syncPrepass(e);
         }
@@ -596,6 +701,7 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
       disposed = true;
       for (const e of entries) e.prepass = null;
       for (const mt of materials.values()) mt.dispose();
+      for (const mt of porcMaterials.values()) mt.dispose();
       if (prepassMaterial) prepassMaterial.dispose();
       if (composer) {
         for (const p of composer.passes) if (p.dispose) p.dispose();
@@ -606,6 +712,6 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
   };
 
   if (reduced) fullyRevealed();
-  if (style === "hologram") setStyle("hologram");
+  if (style !== "solid") setStyle(style);
   return api;
 }

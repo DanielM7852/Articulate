@@ -20,7 +20,7 @@ function onKey(demo, e) {
   else if (key === "s") demo.setSpeed(demo.speed === 1 ? 0.5 : 1);
   else if (key === "v") demo.setView(demo.view === "side" ? "front" : "side");
   else if (key === "g") demo.toggleCalibration();
-  else if (key === "h") demo.setStyle(demo.style === "hologram" ? "solid" : "hologram");
+  else if (key === "h") { const o = ["hologram", "porcelain", "hybrid", "solid"]; demo.setStyle(o[(o.indexOf(demo.style) + 1) % o.length]); }
   else if (key === "0") demo.stop();
   else return;
   e.preventDefault();
