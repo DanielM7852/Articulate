@@ -1,6 +1,7 @@
 """Claude Sonnet 5.5 calls for live coaching and learner notes (structured output, adaptive thinking)."""
 
 import asyncio
+import logging
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -9,6 +10,33 @@ from app.config import Settings
 from app.live.decision import DecisionError
 
 T = TypeVar("T", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
+
+_EFFORTS = ("low", "medium", "high")
+_warned: set[str] = set()
+
+
+def _warn_once(key: str, message: str, *args) -> None:
+    if key not in _warned:
+        _warned.add(key)
+        logger.warning(message, *args)
+
+
+def request_options(model: str, thinking: str, effort: str) -> tuple[dict, str]:
+    """Return (extra kwargs for messages.parse, effective effort). Thinking "on" omits the param (adaptive)."""
+    extra: dict = {}
+    if str(thinking).lower() == "off":
+        if model == "claude-sonnet-5-5":
+            extra["thinking"] = {"type": "between_tools"}
+        elif model == "claude-haiku-5-5":
+            extra["thinking"] = {"type": "disabled"}
+        else:
+            _warn_once(f"model:{model}", "thinking=off is not mapped for model %s; leaving thinking at its default", model)
+        if extra and effort not in _EFFORTS:
+            _warn_once(f"effort:{effort}", "effort %s is above high and cannot be combined with thinking off; sending high", effort)
+            effort = "high"
+    return extra, effort
 
 COACH_SYSTEM = """You are a warm, concise speech coach for deaf and hard-of-hearing learners practising the vowels ee (i), oo (u) and ah (a).
 You receive measurements for ONE finished attempt, computed by code, plus the learner's recent history and notes.
@@ -40,14 +68,20 @@ def build_client(settings: Settings, timeout_s: float):
     return Anthropic(api_key=settings.anthropic_api_key, max_retries=0, timeout=timeout_s)
 
 
-def _parse(client, settings: Settings, system: str, user: str, output_format: type[T], effort: str, max_tokens: int) -> T:
+def _parse(
+    client, settings: Settings, system: str, user: str, output_format: type[T], effort: str, max_tokens: int,
+    model: str | None = None, thinking: str = "on",
+) -> T:
+    model = model or settings.anthropic_model
+    extra, effort = request_options(model, thinking, effort)
     response = client.messages.parse(
-        model=settings.anthropic_model,
+        model=model,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
         output_format=output_format,
         output_config={"effort": effort},
+        **extra,
     )
     if getattr(response, "stop_reason", None) == "refusal":
         raise ModelRefusal("model_refusal")
@@ -68,10 +102,12 @@ async def ask(
     effort: str,
     timeout_s: float,
     max_tokens: int,
+    model: str | None = None,
+    thinking: str = "on",
 ) -> T:
     """Run one structured call off the event loop with a hard timeout. Raises on any failure."""
     active = client or build_client(settings, timeout_s)
     return await asyncio.wait_for(
-        asyncio.to_thread(_parse, active, settings, system, user, output_format, effort, max_tokens),
+        asyncio.to_thread(_parse, active, settings, system, user, output_format, effort, max_tokens, model, thinking),
         timeout=timeout_s,
     )

@@ -141,7 +141,8 @@ class LiveCoachResponse(BaseModel):
     showSideView: bool
     nextAction: NextAction
     evidence: list[EvidenceItem]
-    persisted: bool = False
+    persisted: bool | None = None  # None: queued in the background
+    model: str | None = None
     timingsMs: dict[str, int] | None = None
 
 

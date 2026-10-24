@@ -9,7 +9,7 @@ from app.main import create_app
 from tests.support import make_settings
 from tests.test_live_api import SPACE, FakeClient, FakeSpacetime, body, decision
 
-TIMING_KEYS = {"frames", "history", "scoring", "llm", "validate", "persist", "total"}
+TIMING_KEYS = {"frames", "history", "scoring", "llm", "validate", "total"}
 
 
 def test_clients_created_once_and_reused_across_requests(tmp_path, monkeypatch):

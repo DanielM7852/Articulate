@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     spacetime_uri: str = "https://maincloud.spacetimedb.com"
     spacetime_database: str | None = None
     spacetime_token: str | None = None
+    live_coach_model: str = "claude-sonnet-5-5"
+    live_coach_thinking: str = "on"  # "on" (adaptive, default) or "off"
+    live_notes_model: str = "claude-sonnet-5-5"
     live_coach_effort: str = "medium"
     live_notes_effort: str = "high"
     live_coach_timeout_s: float = 15.0

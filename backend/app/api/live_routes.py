@@ -1,6 +1,6 @@
 """POST /v1/live/coach and /v1/live/notes. Provider failures never surface as 500s."""
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 
 from app.live.notes import update_notes
 from app.live.orchestrator import LiveDeps, coach_attempt
@@ -24,8 +24,8 @@ def _deps(request: Request) -> LiveDeps:
 
 
 @router.post("/coach", response_model=LiveCoachResponse)
-async def live_coach(body: LiveCoachRequest, request: Request) -> LiveCoachResponse:
-    return await coach_attempt(_deps(request), body)
+async def live_coach(body: LiveCoachRequest, request: Request, background: BackgroundTasks) -> LiveCoachResponse:
+    return await coach_attempt(_deps(request), body, background.add_task)
 
 
 @router.post("/notes", response_model=LearnerNotes)

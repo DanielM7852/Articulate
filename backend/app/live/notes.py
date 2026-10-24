@@ -111,6 +111,7 @@ async def update_notes(deps: LiveDeps, profile_id: str) -> LearnerNotes:
                 deps.settings.live_notes_effort,
                 max(deps.settings.live_coach_timeout_s, _NOTES_TIMEOUT_FLOOR_S),
                 max_tokens=12000,
+                model=deps.settings.live_notes_model,
             )
             draft = _validate(draft, attempts)
             notes = LearnerNotes(

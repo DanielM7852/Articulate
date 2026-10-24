@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -170,6 +171,8 @@ async def _decide(
                 deps.settings.live_coach_effort,
                 deps.settings.live_coach_timeout_s,
                 max_tokens=6000,
+                model=deps.settings.live_coach_model,
+                thinking=deps.settings.live_coach_thinking,
             )
             t1 = time.perf_counter()
             timings["llm"] = _ms(t0, t1)
@@ -185,7 +188,13 @@ async def _decide(
     return "fallback", decision, evidence
 
 
-async def coach_attempt(deps: LiveDeps, body: LiveCoachRequest) -> LiveCoachResponse:
+Scheduler = Callable[[Callable[[], Awaitable[None]]], None]
+
+
+async def coach_attempt(
+    deps: LiveDeps, body: LiveCoachRequest, schedule: Scheduler | None = None
+) -> LiveCoachResponse:
+    """Coach one attempt. Persistence runs after the response via `schedule` (inline when None)."""
     started = time.perf_counter()
     timings: dict[str, int] = {}
     history = deps.get_history()
@@ -213,7 +222,8 @@ async def coach_attempt(deps: LiveDeps, body: LiveCoachRequest) -> LiveCoachResp
         showSideView=show_side_view(decision.cueId, decision.nextAction),
         nextAction=decision.nextAction,
         evidence=evidence,
-        persisted=False,
+        persisted=None,
+        model=deps.settings.live_coach_model if source == "agent" else None,
     )
 
     summary = {
@@ -226,20 +236,26 @@ async def coach_attempt(deps: LiveDeps, body: LiveCoachRequest) -> LiveCoachResp
         "cueId": response.cueId,
         "nextAction": response.nextAction,
     }
-    decision_json = response.model_dump(exclude={"audio", "video", "persisted", "timingsMs"})
-    t = time.perf_counter()
-    try:
-        response.persisted = await history.record(body.profileId, body.attemptId, summary, decision_json)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("persist failed: %s", type(exc).__name__)
-        response.persisted = False
-    timings["persist"] = _ms(t, time.perf_counter())
+    decision_json = response.model_dump(exclude={"audio", "video", "persisted", "model", "timingsMs"})
+
+    async def persist() -> None:
+        try:
+            ok = await history.record(body.profileId, body.attemptId, summary, decision_json)
+            if not ok:
+                logger.warning("persist reported failure attempt=%s", body.attemptId)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("persist failed attempt=%s: %s", body.attemptId, type(exc).__name__)
+
     timings["total"] = _ms(started, time.perf_counter())
-    response.timingsMs = {k: timings[k] for k in ("frames", "history", "scoring", "llm", "validate", "persist", "total")}
+    response.timingsMs = {k: timings[k] for k in ("frames", "history", "scoring", "llm", "validate", "total")}
     logger.info(
         "live coach timings ms %s source=%s metrics=%s",
         " ".join(f"{k}={v}" for k, v in response.timingsMs.items()),
         response.source,
         response.metricsSource,
     )
+    if schedule is not None:
+        schedule(persist)
+    else:
+        await persist()
     return response

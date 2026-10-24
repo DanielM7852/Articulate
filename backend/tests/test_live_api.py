@@ -92,7 +92,7 @@ def test_agent_decision_is_used_and_grounded(tmp_path):
     assert j["cueId"] == "round-lips" and j["showSideView"] is True and j["nextAction"] == "retry"
     assert j["audio"]["verdict"] == "off" and j["video"]["verdict"] == "mismatch"
     assert j["evidence"] == [{"field": "audio.verdict", "value": "off"}, {"field": "video.verdict", "value": "mismatch"}]
-    assert j["persisted"] is True
+    assert j["persisted"] is None and j["model"] == "claude-sonnet-5-5"
     call = fake.calls[0]
     assert call["model"] == "claude-sonnet-5-5" and call["output_config"] == {"effort": "medium"}
     assert call["output_format"] is CoachDecision
@@ -223,7 +223,7 @@ def test_spacetime_path_reads_frames_and_records_turn(tmp_path):
     c = make(tmp_path, fake, httpx.MockTransport(st), anthropic_api_key="k", **SPACE)
     r = c.post("/v1/live/coach", json=body(source="spacetimedb", frames=False))
     j = r.json()
-    assert r.status_code == 200 and j["metricsSource"] == "spacetimedb" and j["persisted"] is True
+    assert r.status_code == 200 and j["metricsSource"] == "spacetimedb" and j["persisted"] is None
     assert j["audio"]["frames"] == 20 and j["video"]["verdict"] == "matches"
     assert any(f"attempt_id = '{AID}'" in q for q in st.sql)
     name, args = st.calls[0]
@@ -242,11 +242,11 @@ def test_spacetime_failure_falls_back_to_body_frames_and_persist_false(tmp_path)
 
     c = make(tmp_path, None, httpx.MockTransport(boom), **SPACE)
     j = c.post("/v1/live/coach", json=body(source="spacetimedb")).json()
-    assert j["metricsSource"] == "inline" and j["persisted"] is False and j["source"] == "fallback"
+    assert j["metricsSource"] == "inline" and j["persisted"] is None and j["source"] == "fallback"
     st = FakeSpacetime(fail_call=True)
     c = make(tmp_path, None, httpx.MockTransport(st), **SPACE)
     j = c.post("/v1/live/coach", json=body(source="spacetimedb", frames=False)).json()
-    assert j["metricsSource"] == "spacetimedb" and j["persisted"] is False
+    assert j["metricsSource"] == "spacetimedb" and j["persisted"] is None
 
 
 # ---- notes ----
