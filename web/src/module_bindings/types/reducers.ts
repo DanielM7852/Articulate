@@ -13,6 +13,7 @@ import PushMetricsReducer from "../push_metrics_reducer";
 import RecordCoachTurnReducer from "../record_coach_turn_reducer";
 import RegisterLearnerReducer from "../register_learner_reducer";
 import SetLearnerNoteReducer from "../set_learner_note_reducer";
+import SetLearnerProgressReducer from "../set_learner_progress_reducer";
 
 export type BeginAttemptParams = __Infer<typeof BeginAttemptReducer>;
 export type CommitEventParams = __Infer<typeof CommitEventReducer>;
@@ -21,4 +22,5 @@ export type PushMetricsParams = __Infer<typeof PushMetricsReducer>;
 export type RecordCoachTurnParams = __Infer<typeof RecordCoachTurnReducer>;
 export type RegisterLearnerParams = __Infer<typeof RegisterLearnerReducer>;
 export type SetLearnerNoteParams = __Infer<typeof SetLearnerNoteReducer>;
+export type SetLearnerProgressParams = __Infer<typeof SetLearnerProgressReducer>;
 

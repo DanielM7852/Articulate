@@ -41,6 +41,7 @@ import PushMetricsReducer from "./push_metrics_reducer";
 import RecordCoachTurnReducer from "./record_coach_turn_reducer";
 import RegisterLearnerReducer from "./register_learner_reducer";
 import SetLearnerNoteReducer from "./set_learner_note_reducer";
+import SetLearnerProgressReducer from "./set_learner_progress_reducer";
 
 // Import all procedure arg schemas
 
@@ -61,6 +62,7 @@ const reducersSchema = __reducers(
   __reducerSchema("record_coach_turn", RecordCoachTurnReducer),
   __reducerSchema("register_learner", RegisterLearnerReducer),
   __reducerSchema("set_learner_note", SetLearnerNoteReducer),
+  __reducerSchema("set_learner_progress", SetLearnerProgressReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

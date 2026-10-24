@@ -79,6 +79,13 @@ export const LearnerNote = __t.object("LearnerNote", {
 });
 export type LearnerNote = __Infer<typeof LearnerNote>;
 
+export const LearnerProgress = __t.object("LearnerProgress", {
+  profileId: __t.string(),
+  progress: __t.string(),
+  updatedAt: __t.timestamp(),
+});
+export type LearnerProgress = __Infer<typeof LearnerProgress>;
+
 export const MetricBatch = __t.object("MetricBatch", {
   id: __t.u64(),
   attemptId: __t.string(),
