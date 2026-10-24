@@ -67,7 +67,8 @@ async def test_timeout_and_malformed_model_fall_back(runtime):
     runtime.reasoner.decide = timeout
     await usable_attempt(runtime)
     await runtime.feedback_task
-    assert runtime.latest_decision["observation"].startswith("This attempt")
+    assert runtime.latest_decision["selection_source"] == "fallback"
+    assert runtime.latest_decision["observation_id"] == "trend.similar"
     await runtime.close()
 
 
@@ -104,21 +105,15 @@ async def test_audio_interrupts_during_synthesis(runtime):
 
 
 async def test_next_action_reduces_assistance_and_pause_is_committed(runtime):
-    from app.decisions import fallback
-
-    async def reduce(summary, generation, cues, history):
-        return fallback(summary, generation, cues).model_copy(update={"next_action": "reduce_assistance"})
-
-    runtime.reasoner.decide = reduce
-    await usable_attempt(runtime)
-    await runtime.feedback_task
+    for _ in range(3):
+        await usable_attempt(runtime)
+        await runtime.feedback_task
     assert runtime.session.assistance_level == "reduced"
     assert runtime.history[0]["assistance_level"] == "guided"
 
-    async def pause(summary, generation, cues, history):
-        return fallback(summary, generation, cues).model_copy(update={"next_action": "pause"})
-
-    runtime.reasoner.decide = pause
+    assert runtime.latest_decision["next_action"] == "reduce_assistance"
+    runtime.repository.cues = []
+    runtime.repository.cache.clear()
     await usable_attempt(runtime)
     await runtime.feedback_task
     assert runtime.session.state == "paused"

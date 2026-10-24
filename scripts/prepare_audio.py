@@ -9,7 +9,7 @@ from uuid import uuid4
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services/api"))
 from app.audio import AudioCache
 from app.config import Settings
-from app.decisions import MEASURED
+from app.decisions import prepared_captions
 from app.providers import CueRepository, Speech
 
 
@@ -22,8 +22,7 @@ async def main(mock):
     cache = AudioCache(settings.data_dir / "audio")
     try:
         await speech.open()
-        for cue in cues:
-            text = MEASURED + " " + cue.text
+        for cue, text in [(c, text) for c in cues for text in prepared_captions(c)]:
             key = cache.key(text, cue, speech.model, speech.voice)
             if cache.get(key):
                 print(f"cached {cue.id}: {key}")

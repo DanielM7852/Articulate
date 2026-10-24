@@ -59,7 +59,7 @@ def test_cue_filters_and_versions(runtime):
     assert repo.eligible("i")
     assert not repo.eligible("i", language="fr")
     assert not repo.eligible("i", difficulty="standard")
-    assert not repo.eligible("i", revision=2)
+    assert not repo.eligible("i", revision=1)
     assert not repo.eligible("i", excluded=[c.id for c in repo.eligible("i")])
     repo.settings.mock_mode = False
     assert not repo.eligible("i")  # unreviewed seed cues never enter real retrieval

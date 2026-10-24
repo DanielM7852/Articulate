@@ -9,11 +9,12 @@ from uuid import uuid4
 
 from .audio import RATE, AudioCache, pack_frame, unpack_frame
 from .config import Settings
-from .decisions import fallback, validate_decision
+from .decisions import caption_for, fallback, validate_decision
+from .coaching import assess, context_from_records, excluded_cues, retry_outcome, usable
 from .features import AcousticAdapter, summarize, synthetic_frame
 from .persistence import Outbox
 from .providers import CueRepository, Reasoner, Speech
-from .schemas import Command, Event, Session
+from .schemas import Command, CueOutcome, Event, Session
 
 logger = logging.getLogger("articulate.metrics")
 
@@ -340,15 +341,19 @@ class Runtime:
             self.emit("attempt.summary", summary.model_dump(mode="json"), durable=True)
             self.state("coaching")
             self.evaluate_previous_outcome(summary)
+            context = context_from_records(self.history[:-1], self.outcomes, self.settings.coaching_policy)
             cues = []
-            # A cue counts as unsuccessful only when a later usable attempt fails to reduce distance.
-            excluded = [o["cue_id"] for o in self.outcomes if o["result"] == "no_improvement"]
+            excluded = excluded_cues(summary, context)
+            supported = assess(summary, context)
             t = time.perf_counter()
             try:
                 async with asyncio.timeout(self.settings.provider_deadline_seconds):
-                    if "target_distance" in summary.evidence_fields:
+                    if usable(summary, context.policy):
                         cues = await self.repository.query(
-                            summary.target_id, excluded=excluded, history_revision=len(self.outcomes)
+                            summary.target_id,
+                            excluded=excluded,
+                            history_revision=len(self.outcomes),
+                            observation_text=supported[0].text,
                         )
             except Exception:
                 self.emit("provider.status", {"provider": "Moss", "status": "unavailable"})
@@ -357,38 +362,30 @@ class Runtime:
             t = time.perf_counter()
             try:
                 async with asyncio.timeout(self.settings.provider_deadline_seconds):
-                    proposed = await self.reasoner.decide(summary, generation, cues, self.outcomes)
+                    proposed = await self.reasoner.decide(summary, generation, cues, context)
                     decision = validate_decision(
                         proposed,
                         summary,
                         generation,
                         cues,
+                        context,
                         allow_demo=self.settings.mock_mode and self.settings.allow_demo_cues,
                     )
             except Exception:
                 self.emit("provider.status", {"provider": "Claude", "status": "deterministic fallback"})
                 decision = validate_decision(
-                    fallback(summary, generation, cues),
+                    fallback(summary, generation, cues, context),
                     summary,
                     generation,
                     cues,
+                    context,
                     allow_demo=self.settings.mock_mode and self.settings.allow_demo_cues,
                 )
             if (attempt, generation) != (self.attempt_id, self.generation_id):
                 return
             self.metric("validated_decision", t, mode="mock" if self.settings.mock_mode else "Claude")
             cue = next((c for c in cues if c.id == decision.cue_id), None)
-            caption = (
-                decision.observation
-                + " "
-                + (
-                    cue.text
-                    if cue
-                    else "Please check capture and try again."
-                    if decision.next_action == "repair_capture"
-                    else "No eligible cue is available for this target."
-                )
-            )
+            caption = caption_for(decision, cue)
             self.latest_decision = {
                 **decision.model_dump(mode="json"),
                 "caption": caption,
@@ -417,29 +414,27 @@ class Runtime:
                 self.state("ready")
 
     def evaluate_previous_outcome(self, summary):
-        previous = self.outcomes[-1] if self.outcomes else None
-        if (
-            previous
-            and previous["result"] == "awaiting_retry"
-            and summary.target_id == previous["target_id"]
-            and "target_distance" in summary.evidence_fields
-        ):
-            old = previous.get("distance")
-            if old is not None:
-                previous["result"] = "improved" if summary.target_distance < old else "no_improvement"
-                self.emit("provider.status", {"cue_outcome": previous}, durable=True)
+        if not self.outcomes:
+            return
+        context = context_from_records(self.history[:-1], self.outcomes, self.settings.coaching_policy)
+        updated = retry_outcome(summary, context.cue_history[-1], context)
+        if updated:
+            self.outcomes[-1] = updated.model_dump(mode="json")
+            self.emit("provider.status", {"cue_outcome": self.outcomes[-1]}, durable=True)
 
     def record_outcome(self, summary, cue):
         if cue:
             self.outcomes.append(
-                {
-                    "cue_id": cue.id,
-                    "attempt_id": str(summary.attempt_id),
-                    "target_id": summary.target_id,
-                    "distance": summary.target_distance,
-                    "result": "awaiting_retry",
-                    "assistance_level": summary.assistance_level,
-                }
+                CueOutcome(
+                    cue_id=cue.id,
+                    attempt_id=summary.attempt_id,
+                    target_id=summary.target_id,
+                    target_version=summary.target_version,
+                    source=summary.source,
+                    distance=summary.target_distance,
+                    result="awaiting_retry",
+                    assistance_level=summary.assistance_level,
+                ).model_dump(mode="json")
             )
 
     async def present_audio(self, text, cue, generation):

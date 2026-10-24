@@ -17,7 +17,7 @@ from .config import Settings
 from .controller import Conflict, Runtime, restore
 from .persistence import Outbox
 from .providers import CueRepository, Reasoner
-from .decisions import MEASURED
+from .decisions import prepared_captions
 from .schemas import TARGETS, Command
 
 
@@ -196,10 +196,10 @@ def create_app(settings: Settings | None = None):
     async def preload(session_id: UUID, request: Request):
         runtime = get_runtime(session_id, bearer(request))
         manifests = []
-        for cue in repository.eligible(runtime.session.target_id):
-            key = app.state.cache.key(
-                MEASURED + " " + cue.text, cue, runtime.speech.model, runtime.speech.voice
-            )
+        for cue, text in [
+            (c, text) for c in repository.eligible(runtime.session.target_id) for text in prepared_captions(c)
+        ]:
+            key = app.state.cache.key(text, cue, runtime.speech.model, runtime.speech.voice)
             cached = app.state.cache.get(key)
             if cached:
                 manifests.append(cached[0].model_dump())

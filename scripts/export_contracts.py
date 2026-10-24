@@ -20,6 +20,15 @@ def export():
         "AttemptSummary",
         "Cue",
         "CoachingDecision",
+        "CoachingProposal",
+        "CoachingRequest",
+        "CoachingContext",
+        "CoachingPolicy",
+        "CoachingPlan",
+        "CueOutcome",
+        "EvidenceReference",
+        "SupportedObservation",
+        "ActionOption",
         "AudioManifest",
         "Event",
         "Command",
@@ -28,7 +37,7 @@ def export():
         item = getattr(schemas, name).model_json_schema(mode="serialization")
         definitions.update(item.pop("$defs", {}))
         definitions[name] = item
-    for name in ("PoseId", "TargetId", "Action", "State"):
+    for name in ("PoseId", "TargetId", "Action", "State", "ObservationId"):
         definitions[name] = TypeAdapter(getattr(schemas, name)).json_schema()
         names.append(name)
     result = {
@@ -54,4 +63,4 @@ if __name__ == "__main__":
             raise SystemExit("Contracts drift: run python scripts/export_contracts.py and npm run contracts")
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path.write_text(text, encoding="utf-8", newline="\n")

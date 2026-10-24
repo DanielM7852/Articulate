@@ -6,6 +6,7 @@ from app import providers
 from app.config import Settings
 from app.features import summarize, synthetic_frame
 from app.decisions import fallback
+from app.schemas import CoachingContext, CoachingProposal
 
 
 async def test_moss_filter_and_stale_index_version_are_checked(runtime):
@@ -34,19 +35,38 @@ async def test_claude_gets_bounded_features_and_exact_candidates(runtime):
     runtime.settings.claude_model = "configured-test-model"
     s = summarize(uuid4(), "i", [synthetic_frame("i", n) for n in range(20)], 24000, 19200, "synthetic")
     g = uuid4()
-    cues = [runtime.repository.cues[0]]
+    cues = [runtime.repository.cues[0].model_copy(update={"review_status": "approved"})]
     captured = []
 
     async def parse(**kwargs):
         captured.append(kwargs)
-        return SimpleNamespace(parsed_output=fallback(s, g, cues))
+        selected = fallback(s, g, cues)
+        return SimpleNamespace(
+            parsed_output=CoachingProposal(
+                attempt_id=s.attempt_id,
+                generation_id=g,
+                observation_id=selected.observation_id,
+                cue_id=selected.cue_id,
+                cue_version=selected.cue_version,
+                next_action=selected.next_action,
+            )
+        )
 
     runtime.reasoner.client = SimpleNamespace(messages=SimpleNamespace(parse=parse))
-    decision = await runtime.reasoner.decide(s, g, cues, [])
+    decision = await runtime.reasoner.decide(s, g, cues, CoachingContext())
     request = json.loads(captured[0]["messages"][0]["content"])
     assert request["cues"][0]["text"] == cues[0].text
     assert request["summary"]["f1_mean"] == s.f1_mean
-    assert set(request) == {"summary", "generation_id", "observation", "cues", "recent_outcomes"}
+    assert set(request) == {
+        "summary",
+        "generation_id",
+        "attempt_id",
+        "plan",
+        "cues",
+        "recent_outcomes",
+        "policy_version",
+    }
+    assert captured[0]["output_format"] is CoachingProposal
     assert decision.generation_id == g
 
 

@@ -9,6 +9,7 @@ from urllib.parse import quote
 import httpx
 
 from .config import Settings
+from .schemas import AttemptSummary, CueOutcome
 
 
 class Outbox:
@@ -61,13 +62,39 @@ class Outbox:
         ]
         snapshot["sync_revision"] = len(journal)
         summaries = []
+        summary_by_id, outcomes_by_attempt = {}, {}
         for event in journal:
             snapshot["seq"] = max(snapshot["seq"], event["seq"])
             if event["type"] == "session.state":
                 snapshot["session"] = event["payload"]["session"]
             elif event["type"] == "attempt.summary":
-                summaries.append(event["payload"])
+                summary = {k: v for k, v in event["payload"].items() if k in AttemptSummary.model_fields}
+                summaries.append(summary)
+                summary_by_id[event["attempt_id"]] = summary
+            elif event["type"] == "coach.decision" and event["payload"].get("observation_id"):
+                decision = event["payload"]
+                summary = summary_by_id.get(event["attempt_id"])
+                if summary and decision.get("cue_id"):
+                    outcome = CueOutcome(
+                        cue_id=decision["cue_id"],
+                        attempt_id=summary["attempt_id"],
+                        target_id=summary["target_id"],
+                        target_version=summary["target_version"],
+                        source=summary["source"],
+                        distance=summary["target_distance"],
+                        assistance_level=summary["assistance_level"],
+                        result="awaiting_retry",
+                    )
+                    outcomes_by_attempt[event["attempt_id"]] = outcome.model_dump(mode="json")
+            elif event["type"] == "provider.status" and event["payload"].get("cue_outcome"):
+                outcome = event["payload"]["cue_outcome"]
+                if outcome["attempt_id"] in outcomes_by_attempt:
+                    outcomes_by_attempt[outcome["attempt_id"]] = CueOutcome.model_validate(
+                        outcome
+                    ).model_dump(mode="json")
         snapshot["history"] = summaries[-50:]
+        if outcomes_by_attempt:
+            snapshot["outcomes"] = list(outcomes_by_attempt.values())[-50:]
         return row[0], snapshot, row[2]
 
     def pending(self, session_id=None):

@@ -1,6 +1,9 @@
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+
+from .schemas import CoachingPolicy
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -19,7 +22,8 @@ class Settings(BaseSettings):
     claude_model: str = ""
     moss_project_id: str = ""
     moss_project_key: str = ""
-    moss_index: str = "articulate-cues-v1"
+    moss_index: str = "articulate-cues-v2"
+    coaching_policy: CoachingPolicy = Field(default_factory=CoachingPolicy)
     cartesia_api_key: str = ""
     cartesia_model: str = ""
     cartesia_voice: str = ""

@@ -59,13 +59,69 @@ export type F1Mean = number | null;
 export type F2Mean = number | null;
 export type TargetDistance = number | null;
 export type LipOpeningMean = number | null;
+/**
+ * @maxItems 32
+ */
 export type QualityFlags1 = string[];
-export type EvidenceFields = string[];
+/**
+ * @maxItems 16
+ */
+export type EvidenceFields =
+  | []
+  | [string]
+  | [string, string]
+  | [string, string, string]
+  | [string, string, string, string]
+  | [string, string, string, string, string]
+  | [string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string, string, string, string, string]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string
+    ];
 export type Source1 = "microphone" | "synthetic";
 export type AssistanceLevel1 = "guided" | "reduced";
 export type Id2 = string;
 export type Version1 = number;
-export type CorpusRevision = 1;
+export type CorpusRevision = 2;
 export type Text = string;
 export type TargetIds = ("i" | "u" | "aa")[];
 export type Language1 = "en";
@@ -84,10 +140,221 @@ export type PoseId2 = "vowel-i" | "vowel-u" | "vowel-aa" | "neutral";
 export type NextAction =
   "repeat" | "change_cue" | "simplify" | "reduce_assistance" | "next_target" | "pause" | "repair_capture";
 export type Narration = string | null;
+export type ObservationId =
+  | (
+      | "capture.insufficient"
+      | "capture.unavailable"
+      | "capture.usable"
+      | "target.inside"
+      | "target.outside"
+      | "trend.closer"
+      | "trend.similar"
+      | "trend.farther"
+      | "progress.ready_to_reduce"
+    )
+  | null;
+export type AttemptId2 = string;
+export type Field = "usable_duration_ms" | "usable_fraction" | "target_distance" | "f1_mean" | "f2_mean";
+export type Value = number;
+export type Evidence = EvidenceReference[];
+export type Rationale = string | null;
+export type PolicyVersion = "demo-v1";
+export type SelectionSource = "mock" | "claude" | "fallback";
+export type Version2 = "demo-v1";
+export type MinUsableDurationMs = number;
+export type MinUsableFraction = number;
+export type RegionDistance = 1;
+export type DistanceChangeThreshold = number;
+export type SuccessfulAttemptsToReduce = number;
+export type UnsuccessfulRetriesToChange = number;
+export type HistoryLimit = number;
+export type AttemptId3 = string;
+export type GenerationId1 = string;
+export type ObservationId1 =
+  | "capture.insufficient"
+  | "capture.unavailable"
+  | "capture.usable"
+  | "target.inside"
+  | "target.outside"
+  | "trend.closer"
+  | "trend.similar"
+  | "trend.farther"
+  | "progress.ready_to_reduce";
+export type CueId1 = string | null;
+export type CueVersion1 = number | null;
+export type NextAction1 =
+  "repeat" | "change_cue" | "simplify" | "reduce_assistance" | "next_target" | "pause" | "repair_capture";
+export type SchemaVersion = 1;
+export type GenerationId2 = string;
+/**
+ * @maxItems 12
+ */
+export type AttemptHistory =
+  | []
+  | [AttemptSummary]
+  | [AttemptSummary, AttemptSummary]
+  | [AttemptSummary, AttemptSummary, AttemptSummary]
+  | [AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary]
+  | [AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary]
+  | [AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary]
+  | [AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary, AttemptSummary]
+  | [
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary
+    ]
+  | [
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary
+    ]
+  | [
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary
+    ]
+  | [
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary
+    ]
+  | [
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary,
+      AttemptSummary
+    ];
+/**
+ * @maxItems 12
+ */
+export type CueHistory =
+  | []
+  | [CueOutcome]
+  | [CueOutcome, CueOutcome]
+  | [CueOutcome, CueOutcome, CueOutcome]
+  | [CueOutcome, CueOutcome, CueOutcome, CueOutcome]
+  | [CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome]
+  | [CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome]
+  | [CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome]
+  | [CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome]
+  | [CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome, CueOutcome]
+  | [
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome
+    ]
+  | [
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome
+    ]
+  | [
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome,
+      CueOutcome
+    ];
+export type CueId2 = string;
+export type AttemptId4 = string;
+export type TargetId2 = "i" | "u" | "aa";
+export type TargetVersion2 = 1;
+export type Source2 = ("microphone" | "synthetic") | null;
+export type Distance = number | null;
+export type Result = "awaiting_retry" | "improved" | "no_improvement" | "region_match" | "inconclusive";
+export type AssistanceLevel2 = "guided" | "reduced";
+export type RetryAttemptId = string | null;
+export type Id3 =
+  | "capture.insufficient"
+  | "capture.unavailable"
+  | "capture.usable"
+  | "target.inside"
+  | "target.outside"
+  | "trend.closer"
+  | "trend.similar"
+  | "trend.farther"
+  | "progress.ready_to_reduce";
+export type Text1 = string;
+export type Evidence1 = EvidenceReference[];
+export type Observations = SupportedObservation[];
+export type PreferredObservationId =
+  | "capture.insufficient"
+  | "capture.unavailable"
+  | "capture.usable"
+  | "target.inside"
+  | "target.outside"
+  | "trend.closer"
+  | "trend.similar"
+  | "trend.farther"
+  | "progress.ready_to_reduce";
+export type Action =
+  "repeat" | "change_cue" | "simplify" | "reduce_assistance" | "next_target" | "pause" | "repair_capture";
+export type CueIds = (string | null)[];
+export type Rationale1 = string;
+export type Evidence2 = EvidenceReference[];
+export type Actions = ActionOption[];
+export type PreferredAction =
+  "repeat" | "change_cue" | "simplify" | "reduce_assistance" | "next_target" | "pause" | "repair_capture";
 export type CacheKey = string;
 export type TextHash = string;
-export type CueId1 = string;
-export type CueVersion1 = number;
+export type CueId3 = string;
+export type CueVersion2 = number;
 export type ModelId = string;
 export type VoiceId = string;
 export type Language2 = string;
@@ -98,7 +365,7 @@ export type AudioLocation = string;
 export type Timings = {
   [k: string]: unknown;
 }[];
-export type SchemaVersion = 1;
+export type SchemaVersion1 = 1;
 export type Type =
   | "session.state"
   | "features.frame"
@@ -113,31 +380,41 @@ export type Type =
   | "command.ack"
   | "metrics";
 export type SessionId = string;
-export type AttemptId2 = string | null;
-export type GenerationId1 = string | null;
+export type AttemptId5 = string | null;
+export type GenerationId3 = string | null;
 export type EventId = string;
 export type Seq = number;
-export type SchemaVersion1 = 1;
+export type SchemaVersion2 = 1;
 export type CommandId = string;
 export type ExpectedRevision = number;
 export type Payload1 = Configure | Start | End | Control | Playback;
 export type Type1 = "session.configure";
-export type TargetId2 = "i" | "u" | "aa";
+export type TargetId3 = "i" | "u" | "aa";
 export type AudioEnabled1 = boolean;
-export type AssistanceLevel2 = "guided" | "reduced";
+export type AssistanceLevel3 = "guided" | "reduced";
 export type Type2 = "attempt.start";
-export type Source2 = "synthetic" | "microphone";
+export type Source3 = "synthetic" | "microphone";
 export type SampleRate2 = number;
 export type Type3 = "attempt.end";
 export type FinalSample = number;
 export type Type4 = "feedback.cancel" | "session.pause" | "session.resume";
 export type Type5 = "audio.playback_started" | "audio.playback_ended";
-export type GenerationId2 = string;
+export type GenerationId4 = string;
 export type PoseId3 = "vowel-i" | "vowel-u" | "vowel-aa" | "neutral";
-export type TargetId3 = "i" | "u" | "aa";
-export type Action =
+export type TargetId4 = "i" | "u" | "aa";
+export type Action1 =
   "repeat" | "change_cue" | "simplify" | "reduce_assistance" | "next_target" | "pause" | "repair_capture";
 export type State1 = "ready" | "capturing" | "analyzing" | "coaching" | "presenting" | "paused";
+export type ObservationId2 =
+  | "capture.insufficient"
+  | "capture.unavailable"
+  | "capture.usable"
+  | "target.inside"
+  | "target.outside"
+  | "trend.closer"
+  | "trend.similar"
+  | "trend.farther"
+  | "progress.ready_to_reduce";
 
 export interface Contracts {
   Target: Target;
@@ -146,13 +423,23 @@ export interface Contracts {
   AttemptSummary: AttemptSummary;
   Cue: Cue;
   CoachingDecision: CoachingDecision;
+  CoachingProposal: CoachingProposal;
+  CoachingRequest: CoachingRequest;
+  CoachingContext: CoachingContext;
+  CoachingPolicy: CoachingPolicy;
+  CoachingPlan: CoachingPlan;
+  CueOutcome: CueOutcome;
+  EvidenceReference: EvidenceReference;
+  SupportedObservation: SupportedObservation;
+  ActionOption: ActionOption;
   AudioManifest: AudioManifest;
   Event: Event;
   Command: Command;
   PoseId: PoseId3;
-  TargetId: TargetId3;
-  Action: Action;
+  TargetId: TargetId4;
+  Action: Action1;
   State: State1;
+  ObservationId: ObservationId2;
 }
 export interface Target {
   id: Id;
@@ -229,12 +516,80 @@ export interface CoachingDecision {
   pose_id: PoseId2;
   next_action: NextAction;
   narration: Narration;
+  observation_id: ObservationId;
+  evidence: Evidence;
+  rationale: Rationale;
+  policy_version: PolicyVersion;
+  selection_source: SelectionSource;
+  policy: CoachingPolicy | null;
+}
+export interface EvidenceReference {
+  attempt_id: AttemptId2;
+  field: Field;
+  value: Value;
+}
+export interface CoachingPolicy {
+  version: Version2;
+  min_usable_duration_ms: MinUsableDurationMs;
+  min_usable_fraction: MinUsableFraction;
+  region_distance: RegionDistance;
+  distance_change_threshold: DistanceChangeThreshold;
+  successful_attempts_to_reduce: SuccessfulAttemptsToReduce;
+  unsuccessful_retries_to_change: UnsuccessfulRetriesToChange;
+  history_limit: HistoryLimit;
+}
+export interface CoachingProposal {
+  attempt_id: AttemptId3;
+  generation_id: GenerationId1;
+  observation_id: ObservationId1;
+  cue_id: CueId1;
+  cue_version: CueVersion1;
+  next_action: NextAction1;
+}
+export interface CoachingRequest {
+  schema_version: SchemaVersion;
+  summary: AttemptSummary;
+  generation_id: GenerationId2;
+  context: CoachingContext;
+}
+export interface CoachingContext {
+  attempt_history: AttemptHistory;
+  cue_history: CueHistory;
+  policy: CoachingPolicy;
+}
+export interface CueOutcome {
+  cue_id: CueId2;
+  attempt_id: AttemptId4;
+  target_id: TargetId2;
+  target_version: TargetVersion2;
+  source: Source2;
+  distance: Distance;
+  result: Result;
+  assistance_level: AssistanceLevel2;
+  retry_attempt_id: RetryAttemptId;
+}
+export interface CoachingPlan {
+  observations: Observations;
+  preferred_observation_id: PreferredObservationId;
+  actions: Actions;
+  preferred_action: PreferredAction;
+}
+export interface SupportedObservation {
+  id: Id3;
+  text: Text1;
+  evidence: Evidence1;
+}
+export interface ActionOption {
+  action: Action;
+  cue_ids: CueIds;
+  rationale: Rationale1;
+  evidence: Evidence2;
 }
 export interface AudioManifest {
   cache_key: CacheKey;
   text_hash: TextHash;
-  cue_id: CueId1;
-  cue_version: CueVersion1;
+  cue_id: CueId3;
+  cue_version: CueVersion2;
   model_id: ModelId;
   voice_id: VoiceId;
   language: Language2;
@@ -249,11 +604,11 @@ export interface Settings {
   [k: string]: string | number;
 }
 export interface Event {
-  schema_version: SchemaVersion;
+  schema_version: SchemaVersion1;
   type: Type;
   session_id: SessionId;
-  attempt_id: AttemptId2;
-  generation_id: GenerationId1;
+  attempt_id: AttemptId5;
+  generation_id: GenerationId3;
   event_id: EventId;
   seq: Seq;
   payload: Payload;
@@ -262,20 +617,20 @@ export interface Payload {
   [k: string]: unknown;
 }
 export interface Command {
-  schema_version: SchemaVersion1;
+  schema_version: SchemaVersion2;
   command_id: CommandId;
   expected_revision: ExpectedRevision;
   payload: Payload1;
 }
 export interface Configure {
   type: Type1;
-  target_id: TargetId2;
+  target_id: TargetId3;
   audio_enabled: AudioEnabled1;
-  assistance_level: AssistanceLevel2;
+  assistance_level: AssistanceLevel3;
 }
 export interface Start {
   type: Type2;
-  source: Source2;
+  source: Source3;
   sample_rate: SampleRate2;
 }
 export interface End {
@@ -287,5 +642,5 @@ export interface Control {
 }
 export interface Playback {
   type: Type5;
-  generation_id: GenerationId2;
+  generation_id: GenerationId4;
 }

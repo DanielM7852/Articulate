@@ -30,7 +30,7 @@ Demo: select `/i/`, start, wait a second, finish, read the cue, retry, cancel fe
 - Version 1 Pydantic contracts, generated TypeScript, canonical schema and drift checks; nullable measurements and approved target/pose registries.
 - One controller per session: revision-checked commands, IDs/acknowledgements, attempt/generation identity, pause/cancel/retry, capture repair, stale-decision rejection and snapshot recovery. Authorized event clients observe synchronized state; one audio transport is allowed.
 - Moss SDK adapter loads once, warms up, caches/prefetches eligible candidates and uses metadata filters, history exclusions, overfetch and canonical text/version checks. Index preparation is outside the learner request path.
-- Direct Anthropic structured decision call with deadlines, allowlisted observation wording and canonical cue resolution. Unsupported output uses eligible deterministic content or an unavailable/repair state. Raw media and arbitrary anatomical corrections are excluded.
+- Direct Anthropic structured proposal call with deadlines, supported observation IDs, bounded history, admissible actions and canonical cue resolution. The controller resolves evidence, text, rationale and poses. Unsupported output uses deterministic content or an unavailable/repair state.
 - Reusable Cartesia WebSocket per session, new utterance contexts, complete validated text, `max_buffer_delay_ms=0`, `continue=false`, progressive PCM and normalized timing events. Cancellation clears provider/server/browser work. Exact-content caching stores PCM and matching timings atomically.
 - AudioWorklet ring playback: 80 ms default startup buffer, linear sample-rate conversion, bounded buffering, underrun reporting and actual worklet-consumption start signals. A separate worklet uploads 40 ms microphone frames; playback stops before recording.
 - Worker-thread Parselmouth Burg formants, rolling 120 ms buffer, capture quality heuristics, raw summaries and display-only EMA smoothing. Camera is explicitly unavailable and supplies no lip evidence.
@@ -47,7 +47,7 @@ uv run --no-sync python scripts/prepare_index.py
 uv run --no-sync python scripts/prepare_audio.py
 ```
 
-Index preparation uses locked `moss==1.21.0` / `inferedge-moss-core==0.35.0`, `MOSS_PROJECT_ID` and `MOSS_PROJECT_KEY`. Use a new index name for content changes. Audio preparation is idempotent and generates the exact observation-plus-cue caption. It incurs provider usage in real mode. **Listen to generated clips before presenting them as reference speech.** `python scripts/prepare_audio.py --mock` prepares diagnostic tones without calls. Prepared manifests/timings and private clips are prefetched on exercise selection; playback stays progressive through the audio socket.
+Index preparation uses locked `moss==1.21.0` / `inferedge-moss-core==0.35.0`, `MOSS_PROJECT_ID` and `MOSS_PROJECT_KEY`. The current cue corpus is revision 2; use `MOSS_INDEX=articulate-cues-v2` and rebuild an approved index when upgrading from revision 1. Audio preparation is idempotent and generates three common observation-plus-cue captions per eligible cue (18 clips for the six mock drafts). It incurs provider usage in real mode. **Listen to generated clips before presenting them as reference speech.** `python scripts/prepare_audio.py --mock` prepares diagnostic tones without calls. History-specific captions stream on demand. Prepared manifests/timings and private clips are prefetched on exercise selection.
 
 Set `CLAUDE_MODEL`, `CARTESIA_MODEL` and `CARTESIA_VOICE` explicitly after checking availability and auditioning output. No alias is silently selected. `/health/live` checks process liveness; `/health/ready` reports configuration, retrieval readiness, mock status and corpus availability. “Configured” is not a successful live smoke test.
 
@@ -81,6 +81,14 @@ See [docs/protocol.md](docs/protocol.md) for commands, binary framing, queue bou
 
 ## Verification
 
+Develop the coaching agent independently of capture/UI with:
+
+```powershell
+uv run --no-sync python scripts/evaluate_coach.py
+```
+
+This replays 15 synthetic scenarios and writes `.data/coaching-evaluation.json` containing selected observations, evidence, rationales, actions, captions and provider status. Default mode makes no external calls. `--live` explicitly opts into Moss/Claude usage and requires credentials and approved cues; Cartesia is not called by this evaluation. See [docs/coaching-agent.md](docs/coaching-agent.md) for the teammate integration boundary, prompt, policy and fixture workflow.
+
 ```powershell
 uv run --no-sync pytest -q
 uv run --no-sync ruff check services/api scripts
@@ -96,7 +104,7 @@ uv run --no-sync python scripts/benchmark.py --runs 30
 
 Regenerate contracts with `python scripts/export_contracts.py` then `npm run contracts`. Browser checks start localhost-only servers and exercise fixture feedback, progressive worklet consumption, cancellation, muted/reduced assistance, reload history, denied permission and a **synthetic silent MediaStream** through the capture worklet. Database tests use the official SpacetimeDB WASM datastore harness for duplicates, ownership, revisions, rollback and unauthorized reducer calls.
 
-Live smoke tests are skipped unless `LIVE_PROVIDERS=1` is explicitly set; missing credentials or approved content also skip them. Opting in can incur API usage. Ordinary tests never charge providers. [docs/latency.json](docs/latency.json) contains 30-run median/p95 comparisons, failures and environment. These measure local mock-controller enqueue time, not real-provider latency or hardware sound. Browser-clock intervals are in diagnostics; browser/server timestamps must not be subtracted.
+Live smoke tests are skipped unless `LIVE_PROVIDERS=1` is explicitly set; missing credentials or approved content also skip them. Opting in can incur API usage. Ordinary tests never charge providers. [docs/latency.json](docs/latency.json) contains the initial backbone's 30-run baseline, before adaptive coaching was added. Rerun the benchmark for current timings. These measure local mock-controller enqueue time, not real-provider latency or hardware sound.
 
 ## Containers and deployment
 

@@ -21,6 +21,33 @@
     "CoachingDecision": {
       "$ref": "#/definitions/CoachingDecision"
     },
+    "CoachingProposal": {
+      "$ref": "#/definitions/CoachingProposal"
+    },
+    "CoachingRequest": {
+      "$ref": "#/definitions/CoachingRequest"
+    },
+    "CoachingContext": {
+      "$ref": "#/definitions/CoachingContext"
+    },
+    "CoachingPolicy": {
+      "$ref": "#/definitions/CoachingPolicy"
+    },
+    "CoachingPlan": {
+      "$ref": "#/definitions/CoachingPlan"
+    },
+    "CueOutcome": {
+      "$ref": "#/definitions/CueOutcome"
+    },
+    "EvidenceReference": {
+      "$ref": "#/definitions/EvidenceReference"
+    },
+    "SupportedObservation": {
+      "$ref": "#/definitions/SupportedObservation"
+    },
+    "ActionOption": {
+      "$ref": "#/definitions/ActionOption"
+    },
     "AudioManifest": {
       "$ref": "#/definitions/AudioManifest"
     },
@@ -41,6 +68,9 @@
     },
     "State": {
       "$ref": "#/definitions/State"
+    },
+    "ObservationId": {
+      "$ref": "#/definitions/ObservationId"
     }
   },
   "required": [
@@ -50,13 +80,23 @@
     "AttemptSummary",
     "Cue",
     "CoachingDecision",
+    "CoachingProposal",
+    "CoachingRequest",
+    "CoachingContext",
+    "CoachingPolicy",
+    "CoachingPlan",
+    "CueOutcome",
+    "EvidenceReference",
+    "SupportedObservation",
+    "ActionOption",
     "AudioManifest",
     "Event",
     "Command",
     "PoseId",
     "TargetId",
     "Action",
-    "State"
+    "State",
+    "ObservationId"
   ],
   "additionalProperties": false,
   "definitions": {
@@ -375,6 +415,8 @@
         "f1_mean": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
+              "maximum": 1500,
               "type": "number"
             },
             {
@@ -387,6 +429,8 @@
         "f2_mean": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
+              "maximum": 5000,
               "type": "number"
             },
             {
@@ -399,6 +443,7 @@
         "target_distance": {
           "anyOf": [
             {
+              "minimum": 0,
               "type": "number"
             },
             {
@@ -422,15 +467,19 @@
         },
         "quality_flags": {
           "items": {
+            "maxLength": 64,
             "type": "string"
           },
+          "maxItems": 32,
           "title": "Quality Flags",
           "type": "array"
         },
         "evidence_fields": {
           "items": {
+            "maxLength": 64,
             "type": "string"
           },
+          "maxItems": 16,
           "title": "Evidence Fields",
           "type": "array"
         },
@@ -477,6 +526,8 @@
       "additionalProperties": false,
       "properties": {
         "id": {
+          "maxLength": 80,
+          "minLength": 1,
           "title": "Id",
           "type": "string"
         },
@@ -486,8 +537,8 @@
           "type": "integer"
         },
         "corpus_revision": {
-          "const": 1,
-          "default": 1,
+          "const": 2,
+          "default": 2,
           "title": "Corpus Revision",
           "type": "integer"
         },
@@ -565,6 +616,109 @@
         "pose_id"
       ],
       "title": "Cue",
+      "type": "object"
+    },
+    "CoachingPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": "demo-v1",
+          "default": "demo-v1",
+          "title": "Version",
+          "type": "string"
+        },
+        "min_usable_duration_ms": {
+          "default": 300,
+          "maximum": 5000,
+          "minimum": 100,
+          "title": "Min Usable Duration Ms",
+          "type": "number"
+        },
+        "min_usable_fraction": {
+          "default": 0.3,
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Min Usable Fraction",
+          "type": "number"
+        },
+        "region_distance": {
+          "const": 1,
+          "default": 1,
+          "title": "Region Distance",
+          "type": "integer"
+        },
+        "distance_change_threshold": {
+          "default": 0.1,
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Distance Change Threshold",
+          "type": "number"
+        },
+        "successful_attempts_to_reduce": {
+          "default": 3,
+          "maximum": 6,
+          "minimum": 2,
+          "title": "Successful Attempts To Reduce",
+          "type": "integer"
+        },
+        "unsuccessful_retries_to_change": {
+          "default": 2,
+          "maximum": 5,
+          "minimum": 2,
+          "title": "Unsuccessful Retries To Change",
+          "type": "integer"
+        },
+        "history_limit": {
+          "default": 8,
+          "maximum": 12,
+          "minimum": 6,
+          "title": "History Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "min_usable_duration_ms",
+        "min_usable_fraction",
+        "region_distance",
+        "distance_change_threshold",
+        "successful_attempts_to_reduce",
+        "unsuccessful_retries_to_change",
+        "history_limit"
+      ],
+      "title": "CoachingPolicy",
+      "type": "object"
+    },
+    "EvidenceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "format": "uuid",
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "field": {
+          "enum": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "target_distance",
+            "f1_mean",
+            "f2_mean"
+          ],
+          "title": "Field",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "field",
+        "value"
+      ],
+      "title": "EvidenceReference",
       "type": "object"
     },
     "CoachingDecision": {
@@ -649,6 +803,75 @@
           ],
           "default": null,
           "title": "Narration"
+        },
+        "observation_id": {
+          "anyOf": [
+            {
+              "enum": [
+                "capture.insufficient",
+                "capture.unavailable",
+                "capture.usable",
+                "target.inside",
+                "target.outside",
+                "trend.closer",
+                "trend.similar",
+                "trend.farther",
+                "progress.ready_to_reduce"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observation Id"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/EvidenceReference"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "rationale": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rationale"
+        },
+        "policy_version": {
+          "const": "demo-v1",
+          "default": "demo-v1",
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "selection_source": {
+          "default": "fallback",
+          "enum": [
+            "mock",
+            "claude",
+            "fallback"
+          ],
+          "title": "Selection Source",
+          "type": "string"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoachingPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -660,9 +883,402 @@
         "cue_version",
         "pose_id",
         "next_action",
-        "narration"
+        "narration",
+        "observation_id",
+        "evidence",
+        "rationale",
+        "policy_version",
+        "selection_source",
+        "policy"
       ],
       "title": "CoachingDecision",
+      "type": "object"
+    },
+    "CoachingProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "format": "uuid",
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "generation_id": {
+          "format": "uuid",
+          "title": "Generation Id",
+          "type": "string"
+        },
+        "observation_id": {
+          "enum": [
+            "capture.insufficient",
+            "capture.unavailable",
+            "capture.usable",
+            "target.inside",
+            "target.outside",
+            "trend.closer",
+            "trend.similar",
+            "trend.farther",
+            "progress.ready_to_reduce"
+          ],
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "cue_id": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cue Id"
+        },
+        "cue_version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cue Version"
+        },
+        "next_action": {
+          "enum": [
+            "repeat",
+            "change_cue",
+            "simplify",
+            "reduce_assistance",
+            "next_target",
+            "pause",
+            "repair_capture"
+          ],
+          "title": "Next Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "generation_id",
+        "observation_id",
+        "cue_id",
+        "cue_version",
+        "next_action"
+      ],
+      "title": "CoachingProposal",
+      "type": "object"
+    },
+    "CoachingContext": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_history": {
+          "items": {
+            "$ref": "#/definitions/AttemptSummary"
+          },
+          "maxItems": 12,
+          "title": "Attempt History",
+          "type": "array"
+        },
+        "cue_history": {
+          "items": {
+            "$ref": "#/definitions/CueOutcome"
+          },
+          "maxItems": 12,
+          "title": "Cue History",
+          "type": "array"
+        },
+        "policy": {
+          "$ref": "#/definitions/CoachingPolicy"
+        }
+      },
+      "required": [
+        "attempt_history",
+        "cue_history",
+        "policy"
+      ],
+      "title": "CoachingContext",
+      "type": "object"
+    },
+    "CueOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "cue_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Cue Id",
+          "type": "string"
+        },
+        "attempt_id": {
+          "format": "uuid",
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "target_id": {
+          "enum": [
+            "i",
+            "u",
+            "aa"
+          ],
+          "title": "Target Id",
+          "type": "string"
+        },
+        "target_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Target Version",
+          "type": "integer"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "enum": [
+                "microphone",
+                "synthetic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "distance": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Distance"
+        },
+        "result": {
+          "enum": [
+            "awaiting_retry",
+            "improved",
+            "no_improvement",
+            "region_match",
+            "inconclusive"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "assistance_level": {
+          "default": "guided",
+          "enum": [
+            "guided",
+            "reduced"
+          ],
+          "title": "Assistance Level",
+          "type": "string"
+        },
+        "retry_attempt_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry Attempt Id"
+        }
+      },
+      "required": [
+        "cue_id",
+        "attempt_id",
+        "target_id",
+        "target_version",
+        "source",
+        "distance",
+        "result",
+        "assistance_level",
+        "retry_attempt_id"
+      ],
+      "title": "CueOutcome",
+      "type": "object"
+    },
+    "CoachingRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "summary": {
+          "$ref": "#/definitions/AttemptSummary"
+        },
+        "generation_id": {
+          "format": "uuid",
+          "title": "Generation Id",
+          "type": "string"
+        },
+        "context": {
+          "$ref": "#/definitions/CoachingContext"
+        }
+      },
+      "required": [
+        "schema_version",
+        "summary",
+        "generation_id",
+        "context"
+      ],
+      "title": "CoachingRequest",
+      "type": "object"
+    },
+    "ActionOption": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "repeat",
+            "change_cue",
+            "simplify",
+            "reduce_assistance",
+            "next_target",
+            "pause",
+            "repair_capture"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "cue_ids": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Cue Ids",
+          "type": "array"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/EvidenceReference"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "cue_ids",
+        "rationale",
+        "evidence"
+      ],
+      "title": "ActionOption",
+      "type": "object"
+    },
+    "SupportedObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "enum": [
+            "capture.insufficient",
+            "capture.unavailable",
+            "capture.usable",
+            "target.inside",
+            "target.outside",
+            "trend.closer",
+            "trend.similar",
+            "trend.farther",
+            "progress.ready_to_reduce"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/definitions/EvidenceReference"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "evidence"
+      ],
+      "title": "SupportedObservation",
+      "type": "object"
+    },
+    "CoachingPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "observations": {
+          "items": {
+            "$ref": "#/definitions/SupportedObservation"
+          },
+          "title": "Observations",
+          "type": "array"
+        },
+        "preferred_observation_id": {
+          "enum": [
+            "capture.insufficient",
+            "capture.unavailable",
+            "capture.usable",
+            "target.inside",
+            "target.outside",
+            "trend.closer",
+            "trend.similar",
+            "trend.farther",
+            "progress.ready_to_reduce"
+          ],
+          "title": "Preferred Observation Id",
+          "type": "string"
+        },
+        "actions": {
+          "items": {
+            "$ref": "#/definitions/ActionOption"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "preferred_action": {
+          "enum": [
+            "repeat",
+            "change_cue",
+            "simplify",
+            "reduce_assistance",
+            "next_target",
+            "pause",
+            "repair_capture"
+          ],
+          "title": "Preferred Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "observations",
+        "preferred_observation_id",
+        "actions",
+        "preferred_action"
+      ],
+      "title": "CoachingPlan",
       "type": "object"
     },
     "AudioManifest": {
@@ -1082,6 +1698,20 @@
         "coaching",
         "presenting",
         "paused"
+      ],
+      "type": "string"
+    },
+    "ObservationId": {
+      "enum": [
+        "capture.insufficient",
+        "capture.unavailable",
+        "capture.usable",
+        "target.inside",
+        "target.outside",
+        "trend.closer",
+        "trend.similar",
+        "trend.farther",
+        "progress.ready_to_reduce"
       ],
       "type": "string"
     }

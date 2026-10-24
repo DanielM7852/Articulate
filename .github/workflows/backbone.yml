@@ -15,6 +15,7 @@ jobs:
       - run: uv sync --frozen --python 3.12 --extra dev --extra moss
       - run: npm ci
       - run: uv run --no-sync pytest -q
+      - run: uv run --no-sync python scripts/evaluate_coach.py
       - run: uv run --no-sync ruff check services/api scripts
       - run: uv run --no-sync python scripts/export_contracts.py --check
       - run: npm run contracts:check

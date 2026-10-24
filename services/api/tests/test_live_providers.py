@@ -7,6 +7,7 @@ from app.config import Settings
 from app.decisions import validate_decision
 from app.features import summarize, synthetic_frame
 from app.providers import CueRepository, Reasoner, Speech
+from app.schemas import CoachingContext
 
 
 @pytest.mark.live
@@ -39,7 +40,7 @@ async def test_live_retrieval_decision_and_tts():
         )
         generation = uuid4()
         decision = validate_decision(
-            await reasoner.decide(summary, generation, cues, []), summary, generation, cues
+            await reasoner.decide(summary, generation, cues, CoachingContext()), summary, generation, cues
         )
         cue = next(c for c in cues if c.id == decision.cue_id)
         size = 0

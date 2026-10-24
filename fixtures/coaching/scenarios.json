@@ -1,0 +1,1194 @@
+{
+  "schema_version": 1,
+  "source": "synthetic engineering fixtures; not measured learner speech",
+  "scenarios": [
+    {
+      "id": "capture_repair",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "9f5f6773-0cf4-5e05-9abd-ce60a3948f1e",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 80.0,
+          "usable_fraction": 0.1,
+          "f1_mean": null,
+          "f2_mean": null,
+          "target_distance": null,
+          "lip_opening_mean": null,
+          "quality_flags": [
+            "insufficient_usable_speech"
+          ],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "e7a07055-6b1a-5b42-aee8-d4d30e5dcfb8",
+        "context": {
+          "attempt_history": [],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repair_capture",
+        "observation_id": "capture.insufficient",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "first_outside_region",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "09f7ff23-9ba8-5c93-b5e9-c69efc406739",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 684.0,
+          "f2_mean": 2300.0,
+          "target_distance": 2.4,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "2a46ff15-d24d-5752-85d4-8bbdb1435466",
+        "context": {
+          "attempt_history": [],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repeat",
+        "observation_id": "target.outside",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "moving_closer",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "0e75ce9b-47f7-5e79-a39c-60415ea0871a",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 572.0,
+          "f2_mean": 2300.0,
+          "target_distance": 1.7,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "cb4483b5-df30-54b9-9ec0-546926a08258",
+        "context": {
+          "attempt_history": [
+            {
+              "attempt_id": "011b6994-cef8-5985-8dd8-a1433c219dca",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 684.0,
+              "f2_mean": 2300.0,
+              "target_distance": 2.4,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            }
+          ],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repeat",
+        "observation_id": "trend.closer",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "change_after_two_unsuccessful_retries",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "5691ece5-0cc9-5491-a962-df27b5e5d23b",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 776.8,
+          "f2_mean": 2300.0,
+          "target_distance": 2.98,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "d633d399-b32e-54cc-bf45-5dfc6c86eede",
+        "context": {
+          "attempt_history": [
+            {
+              "attempt_id": "c8e733bb-f271-52cb-8d56-df671826150f",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 780.0,
+              "f2_mean": 2300.0,
+              "target_distance": 3.0,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            },
+            {
+              "attempt_id": "799bf2cd-cea7-5f67-bb04-d1ef945b2f88",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 783.2,
+              "f2_mean": 2300.0,
+              "target_distance": 3.02,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            }
+          ],
+          "cue_history": [
+            {
+              "cue_id": "demo-i-1",
+              "attempt_id": "c8e733bb-f271-52cb-8d56-df671826150f",
+              "target_id": "i",
+              "target_version": 1,
+              "source": "synthetic",
+              "distance": 3.0,
+              "result": "no_improvement",
+              "assistance_level": "guided",
+              "retry_attempt_id": "799bf2cd-cea7-5f67-bb04-d1ef945b2f88"
+            },
+            {
+              "cue_id": "demo-i-1",
+              "attempt_id": "799bf2cd-cea7-5f67-bb04-d1ef945b2f88",
+              "target_id": "i",
+              "target_version": 1,
+              "source": "synthetic",
+              "distance": 3.02,
+              "result": "no_improvement",
+              "assistance_level": "guided",
+              "retry_attempt_id": "5691ece5-0cc9-5491-a962-df27b5e5d23b"
+            }
+          ],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "change_cue",
+        "observation_id": "trend.similar",
+        "forbidden_cue_ids": [
+          "demo-i-1"
+        ]
+      }
+    },
+    {
+      "id": "reduce_after_three_guided_region_matches",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "f6c0f41f-8af3-5139-a1bf-c7827640ad93",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 364.0,
+          "f2_mean": 2300.0,
+          "target_distance": 0.4,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "fdd99111-6402-5fca-a927-f6e95b54d10c",
+        "context": {
+          "attempt_history": [
+            {
+              "attempt_id": "8ad94089-0a24-5b82-b4f7-3d7707b02098",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 412.0,
+              "f2_mean": 2300.0,
+              "target_distance": 0.7,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            },
+            {
+              "attempt_id": "aef41e63-804d-5222-8c43-11a70e4dfa60",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 388.0,
+              "f2_mean": 2300.0,
+              "target_distance": 0.55,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            }
+          ],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "reduce_assistance",
+        "observation_id": "progress.ready_to_reduce",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "restore_guide",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "50927faa-943b-5fcf-8cee-79276575b14f",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 620.0,
+          "f2_mean": 2300.0,
+          "target_distance": 2.0,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "reduced"
+        },
+        "generation_id": "3ad3e6be-758a-54af-828d-2437eb1913da",
+        "context": {
+          "attempt_history": [
+            {
+              "attempt_id": "54118579-ebce-59ec-8bbe-0ea43b5865a7",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 348.0,
+              "f2_mean": 2300.0,
+              "target_distance": 0.3,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "reduced"
+            }
+          ],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "simplify",
+        "observation_id": "trend.farther",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "source_change_breaks_progress",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "00392c4b-5bec-5d0c-9d4e-f4543e9bcd35",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 348.0,
+          "f2_mean": 2300.0,
+          "target_distance": 0.3,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "b5a83665-5509-5b7b-8575-3167ccda2a02",
+        "context": {
+          "attempt_history": [
+            {
+              "attempt_id": "e31b3b69-96e5-5a5c-b761-deff80ce20d5",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 348.0,
+              "f2_mean": 2300.0,
+              "target_distance": 0.3,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "microphone",
+              "assistance_level": "guided"
+            },
+            {
+              "attempt_id": "507a3b7b-a239-51ed-a58d-ca09085c3b1f",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 348.0,
+              "f2_mean": 2300.0,
+              "target_distance": 0.3,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "microphone",
+              "assistance_level": "guided"
+            }
+          ],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repeat",
+        "observation_id": "target.inside",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "target_change_breaks_progress",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "579db6b5-4040-5d71-b1a2-c9d1b13a13be",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 348.0,
+          "f2_mean": 2300.0,
+          "target_distance": 0.3,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "bd65582a-5f63-500f-b3d7-21774f23c54c",
+        "context": {
+          "attempt_history": [
+            {
+              "attempt_id": "e9dcca27-7d12-5424-86af-9ae099932427",
+              "target_id": "u",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 398.0,
+              "f2_mean": 900.0,
+              "target_distance": 0.3,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            }
+          ],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repeat",
+        "observation_id": "target.inside",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "capture_gap_breaks_progress",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "0c6de806-22dc-5ad6-b2c2-6730fceeb9f1",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 348.0,
+          "f2_mean": 2300.0,
+          "target_distance": 0.3,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "eed76ed8-6510-5238-aa33-d88aefb2d935",
+        "context": {
+          "attempt_history": [
+            {
+              "attempt_id": "91463b22-4df3-54c9-8e2c-3fa517aa18ee",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 348.0,
+              "f2_mean": 2300.0,
+              "target_distance": 0.3,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            },
+            {
+              "attempt_id": "47319eae-410e-5bf7-9eeb-cca9e672c0c2",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 0.0,
+              "usable_fraction": 0.0,
+              "f1_mean": null,
+              "f2_mean": null,
+              "target_distance": null,
+              "lip_opening_mean": null,
+              "quality_flags": [
+                "insufficient_usable_speech"
+              ],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            }
+          ],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repeat",
+        "observation_id": "target.inside",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "missing_distance_evidence",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "d5a3df34-5b8b-5504-90ab-b5fba1734a9d",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 348.0,
+          "f2_mean": 2300.0,
+          "target_distance": 0.3,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "66634db3-ef6e-51e2-bd4b-f2936cf81f7f",
+        "context": {
+          "attempt_history": [],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repair_capture",
+        "observation_id": "capture.unavailable",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "pause_when_alternatives_exhausted",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "c172b22d-0d1f-5e05-86ba-8055e9053380",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 780.0,
+          "f2_mean": 2300.0,
+          "target_distance": 3.0,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "a2b246c4-f82f-59d9-b579-3ff25feae877",
+        "context": {
+          "attempt_history": [
+            {
+              "attempt_id": "6346f162-64f4-51d9-bae9-58c4395cae53",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 780.0,
+              "f2_mean": 2300.0,
+              "target_distance": 3.0,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            },
+            {
+              "attempt_id": "95ec9266-7258-59af-97bb-f51dc8ed048b",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 780.0,
+              "f2_mean": 2300.0,
+              "target_distance": 3.0,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            },
+            {
+              "attempt_id": "cfa69549-8e37-5d37-91ac-b0f707e69527",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 780.0,
+              "f2_mean": 2300.0,
+              "target_distance": 3.0,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            },
+            {
+              "attempt_id": "97635f82-752f-569e-9d1e-29b4872f7b9c",
+              "target_id": "i",
+              "target_version": 1,
+              "capture_start_sample": 0,
+              "capture_end_sample": 19200,
+              "sample_rate": 24000,
+              "usable_duration_ms": 800.0,
+              "usable_fraction": 1.0,
+              "f1_mean": 780.0,
+              "f2_mean": 2300.0,
+              "target_distance": 3.0,
+              "lip_opening_mean": null,
+              "quality_flags": [],
+              "evidence_fields": [
+                "usable_duration_ms",
+                "usable_fraction",
+                "f1_mean",
+                "f2_mean",
+                "target_distance"
+              ],
+              "source": "synthetic",
+              "assistance_level": "guided"
+            }
+          ],
+          "cue_history": [
+            {
+              "cue_id": "demo-i-1",
+              "attempt_id": "6346f162-64f4-51d9-bae9-58c4395cae53",
+              "target_id": "i",
+              "target_version": 1,
+              "source": "synthetic",
+              "distance": 3.0,
+              "result": "no_improvement",
+              "assistance_level": "guided",
+              "retry_attempt_id": "95ec9266-7258-59af-97bb-f51dc8ed048b"
+            },
+            {
+              "cue_id": "demo-i-1",
+              "attempt_id": "95ec9266-7258-59af-97bb-f51dc8ed048b",
+              "target_id": "i",
+              "target_version": 1,
+              "source": "synthetic",
+              "distance": 3.0,
+              "result": "no_improvement",
+              "assistance_level": "guided",
+              "retry_attempt_id": "cfa69549-8e37-5d37-91ac-b0f707e69527"
+            },
+            {
+              "cue_id": "demo-i-2",
+              "attempt_id": "cfa69549-8e37-5d37-91ac-b0f707e69527",
+              "target_id": "i",
+              "target_version": 1,
+              "source": "synthetic",
+              "distance": 3.0,
+              "result": "no_improvement",
+              "assistance_level": "guided",
+              "retry_attempt_id": "97635f82-752f-569e-9d1e-29b4872f7b9c"
+            },
+            {
+              "cue_id": "demo-i-2",
+              "attempt_id": "97635f82-752f-569e-9d1e-29b4872f7b9c",
+              "target_id": "i",
+              "target_version": 1,
+              "source": "synthetic",
+              "distance": 3.0,
+              "result": "no_improvement",
+              "assistance_level": "guided",
+              "retry_attempt_id": "c172b22d-0d1f-5e05-86ba-8055e9053380"
+            }
+          ],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "pause",
+        "observation_id": "trend.similar",
+        "forbidden_cue_ids": [
+          "demo-i-1",
+          "demo-i-2"
+        ]
+      }
+    },
+    {
+      "id": "short_capture_cannot_reduce_assistance",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "575c9012-2053-5f3c-aed7-a7c05fa3c54d",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 299.0,
+          "usable_fraction": 0.37375,
+          "f1_mean": 332.0,
+          "f2_mean": 2300.0,
+          "target_distance": 0.2,
+          "lip_opening_mean": null,
+          "quality_flags": [
+            "insufficient_usable_speech"
+          ],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "6fec3811-c6d8-51d7-92a9-cef331d3d930",
+        "context": {
+          "attempt_history": [],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repair_capture",
+        "observation_id": "capture.insufficient",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "single_region_match_keeps_assistance",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "0677b625-2a50-5cae-8378-19d0c0e8470e",
+          "target_id": "i",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 332.0,
+          "f2_mean": 2300.0,
+          "target_distance": 0.2,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "cb2f10fb-182d-50a4-8ffc-3f2a50c6b4a5",
+        "context": {
+          "attempt_history": [],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repeat",
+        "observation_id": "target.inside",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "aa_first_attempt",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "f091988a-05b2-5af6-af3b-5c26e96f2387",
+          "target_id": "aa",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 1070.0,
+          "f2_mean": 1200.0,
+          "target_distance": 2.0,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "176ed169-7b6f-5a37-bdea-e8d78a28e47b",
+        "context": {
+          "attempt_history": [],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repeat",
+        "observation_id": "target.outside",
+        "forbidden_cue_ids": []
+      }
+    },
+    {
+      "id": "u_first_attempt",
+      "request": {
+        "schema_version": 1,
+        "summary": {
+          "attempt_id": "92b57e0b-c978-5098-9d09-8b92d785d4e8",
+          "target_id": "u",
+          "target_version": 1,
+          "capture_start_sample": 0,
+          "capture_end_sample": 19200,
+          "sample_rate": 24000,
+          "usable_duration_ms": 800.0,
+          "usable_fraction": 1.0,
+          "f1_mean": 670.0,
+          "f2_mean": 900.0,
+          "target_distance": 2.0,
+          "lip_opening_mean": null,
+          "quality_flags": [],
+          "evidence_fields": [
+            "usable_duration_ms",
+            "usable_fraction",
+            "f1_mean",
+            "f2_mean",
+            "target_distance"
+          ],
+          "source": "synthetic",
+          "assistance_level": "guided"
+        },
+        "generation_id": "d2cc71d4-4e84-5df8-b728-bd6a26e42849",
+        "context": {
+          "attempt_history": [],
+          "cue_history": [],
+          "policy": {
+            "version": "demo-v1",
+            "min_usable_duration_ms": 300.0,
+            "min_usable_fraction": 0.3,
+            "region_distance": 1,
+            "distance_change_threshold": 0.1,
+            "successful_attempts_to_reduce": 3,
+            "unsuccessful_retries_to_change": 2,
+            "history_limit": 8
+          }
+        }
+      },
+      "expected": {
+        "action": "repeat",
+        "observation_id": "target.outside",
+        "forbidden_cue_ids": []
+      }
+    }
+  ]
+}

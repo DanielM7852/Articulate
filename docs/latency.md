@@ -1,5 +1,7 @@
 # Local mock measurements
 
+This is the initial `fd8b6df` backbone baseline, before adaptive coaching was added. Rerun the benchmark to measure the current agent.
+
 Measured on Windows 11 with Python 3.12.13, 30 runs per comparison, no failures. Other local development work may affect these results. Raw values, boundaries and reproduction details are in [latency.json](latency.json) and `python scripts/benchmark.py --runs 30`.
 
 | Boundary / case | Median | p95 |

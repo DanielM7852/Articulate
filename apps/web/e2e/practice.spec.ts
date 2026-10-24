@@ -14,7 +14,10 @@ test("fixture attempt, caption, audio, retry, interruption, history and reconnec
   await expect(
     page
       .getByRole("status")
-      .filter({ hasText: "This attempt contains enough usable audio" }),
+      .filter({
+        hasText:
+          "Your average acoustic position is inside the demonstration region",
+      }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Developer diagnostics" }).click();
   await expect(page.locator(".diagnostics")).toContainText(
@@ -88,4 +91,25 @@ test("synthetic silent MediaStream exercises capture worklet and repair path", a
   );
   await expect(page.locator("tbody")).toContainText("0 ms");
   await expect(page.locator("tbody")).toContainText("microphone");
+});
+
+test("three guided region matches reduce assistance and retain captions", async ({
+  page,
+}) => {
+  await page.goto("/");
+  for (let i = 0; i < 3; i++) {
+    await page
+      .getByRole("button", { name: i ? "Try again" : "Start attempt" })
+      .click();
+    await page.waitForTimeout(400);
+    await page.getByRole("button", { name: "Finish attempt" }).click();
+    await expect(page.locator("tbody tr")).toHaveCount(i + 1);
+  }
+  await expect(page.getByLabel("Hide target guide")).toBeChecked();
+  await expect(page.locator(".caption")).toContainText(
+    "3 comparable guided attempts",
+  );
+  await expect(page.locator(".caption")).toContainText(
+    "captions will stay available",
+  );
 });

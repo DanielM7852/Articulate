@@ -16,6 +16,18 @@ Action = Literal[
     "repeat", "change_cue", "simplify", "reduce_assistance", "next_target", "pause", "repair_capture"
 ]
 State = Literal["ready", "capturing", "analyzing", "coaching", "presenting", "paused"]
+ObservationId = Literal[
+    "capture.insufficient",
+    "capture.unavailable",
+    "capture.usable",
+    "target.inside",
+    "target.outside",
+    "trend.closer",
+    "trend.similar",
+    "trend.farther",
+    "progress.ready_to_reduce",
+]
+CORPUS_REVISION = 2
 
 
 class Target(Model):
@@ -82,20 +94,29 @@ class AttemptSummary(Model):
     sample_rate: int = Field(ge=8000, le=96000)
     usable_duration_ms: float = Field(ge=0)
     usable_fraction: float = Field(ge=0, le=1)
-    f1_mean: float | None = None
-    f2_mean: float | None = None
-    target_distance: float | None = None
+    f1_mean: float | None = Field(default=None, gt=0, le=1500)
+    f2_mean: float | None = Field(default=None, gt=0, le=5000)
+    target_distance: float | None = Field(default=None, ge=0)
     lip_opening_mean: float | None = None
-    quality_flags: list[str]
-    evidence_fields: list[str]
+    quality_flags: list[Annotated[str, Field(max_length=64)]] = Field(max_length=32)
+    evidence_fields: list[Annotated[str, Field(max_length=64)]] = Field(max_length=16)
     source: Literal["microphone", "synthetic"]
     assistance_level: Literal["guided", "reduced"] = "guided"
 
+    @model_validator(mode="after")
+    def interval(self):
+        if self.capture_end_sample < self.capture_start_sample:
+            raise ValueError("capture interval is reversed")
+        duration = (self.capture_end_sample - self.capture_start_sample) / self.sample_rate * 1000
+        if self.usable_duration_ms > duration + 1:
+            raise ValueError("usable duration exceeds capture interval")
+        return self
+
 
 class Cue(Model):
-    id: str
+    id: str = Field(min_length=1, max_length=80)
     version: int = Field(ge=1)
-    corpus_revision: Literal[1] = 1
+    corpus_revision: Literal[2] = 2
     text: str = Field(min_length=1, max_length=400)
     target_ids: list[TargetId]
     language: Literal["en"]
@@ -104,6 +125,77 @@ class Cue(Model):
     source_url: str
     review_status: Literal["approved", "demo_unreviewed", "rejected"]
     pose_id: PoseId
+
+
+class EvidenceReference(Model):
+    attempt_id: UUID
+    field: Literal["usable_duration_ms", "usable_fraction", "target_distance", "f1_mean", "f2_mean"]
+    value: float
+
+
+class SupportedObservation(Model):
+    id: ObservationId
+    text: str
+    evidence: list[EvidenceReference]
+
+
+class CoachingPolicy(Model):
+    version: Literal["demo-v1"] = "demo-v1"
+    min_usable_duration_ms: float = Field(default=300, ge=100, le=5000)
+    min_usable_fraction: float = Field(default=0.3, gt=0, le=1)
+    region_distance: Literal[1] = 1
+    distance_change_threshold: float = Field(default=0.1, gt=0, le=1)
+    successful_attempts_to_reduce: int = Field(default=3, ge=2, le=6)
+    unsuccessful_retries_to_change: int = Field(default=2, ge=2, le=5)
+    history_limit: int = Field(default=8, ge=6, le=12)
+
+
+class CueOutcome(Model):
+    cue_id: str = Field(min_length=1, max_length=80)
+    attempt_id: UUID
+    target_id: TargetId
+    target_version: Literal[1] = 1
+    source: Literal["microphone", "synthetic"] | None = None
+    distance: float | None = Field(default=None, ge=0)
+    result: Literal["awaiting_retry", "improved", "no_improvement", "region_match", "inconclusive"]
+    assistance_level: Literal["guided", "reduced"] = "guided"
+    retry_attempt_id: UUID | None = None
+
+
+class CoachingContext(Model):
+    attempt_history: list[AttemptSummary] = Field(default_factory=list, max_length=12)
+    cue_history: list[CueOutcome] = Field(default_factory=list, max_length=12)
+    policy: CoachingPolicy = Field(default_factory=CoachingPolicy)
+
+
+class CoachingRequest(Model):
+    schema_version: Literal[1] = 1
+    summary: AttemptSummary
+    generation_id: UUID
+    context: CoachingContext = Field(default_factory=CoachingContext)
+
+
+class ActionOption(Model):
+    action: Action
+    cue_ids: list[str | None]
+    rationale: str
+    evidence: list[EvidenceReference] = Field(default_factory=list)
+
+
+class CoachingPlan(Model):
+    observations: list[SupportedObservation]
+    preferred_observation_id: ObservationId
+    actions: list[ActionOption]
+    preferred_action: Action
+
+
+class CoachingProposal(Model):
+    attempt_id: UUID
+    generation_id: UUID
+    observation_id: ObservationId
+    cue_id: str | None = Field(max_length=80)
+    cue_version: int | None
+    next_action: Action
 
 
 class CoachingDecision(Model):
@@ -116,6 +208,12 @@ class CoachingDecision(Model):
     pose_id: PoseId
     next_action: Action
     narration: str | None = Field(default=None, max_length=400)
+    observation_id: ObservationId | None = None
+    evidence: list[EvidenceReference] = Field(default_factory=list)
+    rationale: str | None = None
+    policy_version: Literal["demo-v1"] = "demo-v1"
+    selection_source: Literal["mock", "claude", "fallback"] = "fallback"
+    policy: CoachingPolicy | None = None
 
 
 class AudioManifest(Model):

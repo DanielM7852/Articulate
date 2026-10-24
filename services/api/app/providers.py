@@ -6,14 +6,16 @@ import json
 import math
 import struct
 from uuid import uuid4
+from pathlib import Path
 
 from anthropic import AsyncAnthropic
 from websockets.asyncio.client import connect
 
 from .audio import RATE
 from .config import ROOT, Settings
-from .decisions import fallback, observation
-from .schemas import AttemptSummary, CoachingDecision, Cue
+from .decisions import fallback, resolve_proposal
+from .coaching import plan
+from .schemas import CORPUS_REVISION, TARGETS, AttemptSummary, CoachingContext, CoachingProposal, Cue
 
 
 class CueRepository:
@@ -26,7 +28,7 @@ class CueRepository:
         self.ready = settings.mock_mode
         self.cache = {}
 
-    def eligible(self, target, language="en", difficulty="simple", excluded=(), revision=1):
+    def eligible(self, target, language="en", difficulty="simple", excluded=(), revision=CORPUS_REVISION):
         statuses = {"approved"}
         if self.settings.mock_mode and self.settings.allow_demo_cues:
             statuses.add("demo_unreviewed")
@@ -39,6 +41,7 @@ class CueRepository:
             and c.review_status in statuses
             and c.corpus_revision == revision
             and c.id not in excluded
+            and c.pose_id == TARGETS[target].pose_id
         ]
 
     async def startup(self):
@@ -53,9 +56,20 @@ class CueRepository:
         await self.query("i")
         self.ready = True
 
-    async def query(self, target, excluded=(), history_revision=0):
+    async def query(
+        self, target, excluded=(), history_revision=0, observation_text="usable acoustic capture"
+    ):
         eligible = self.eligible(target, excluded=excluded)
-        key = (target, 1, "en", "simple", 1, history_revision, tuple(sorted(excluded)))
+        key = (
+            target,
+            1,
+            "en",
+            "simple",
+            CORPUS_REVISION,
+            history_revision,
+            tuple(sorted(excluded)),
+            observation_text,
+        )
         if key in self.cache:
             return self.cache[key]
         if self.settings.mock_mode:
@@ -69,7 +83,7 @@ class CueRepository:
             # This also rejects stale index text, rather than trusting similarity as appropriateness.
             result = await self.client.query(
                 self.settings.moss_index,
-                f"English {target} vowel usable acoustic capture simple practice cue",
+                f"English {target} vowel. {observation_text} Simple practice cue.",
                 QueryOptions(
                     top_k=max(3, len(self.cues)),
                     filter={
@@ -78,7 +92,7 @@ class CueRepository:
                             {"field": "language", "condition": {"$eq": "en"}},
                             {"field": "review_status", "condition": {"$eq": "approved"}},
                             {"field": "difficulty", "condition": {"$eq": "simple"}},
-                            {"field": "corpus_revision", "condition": {"$eq": "1"}},
+                            {"field": "corpus_revision", "condition": {"$eq": str(CORPUS_REVISION)}},
                         ]
                     },
                 ),
@@ -94,6 +108,10 @@ class CueRepository:
                     and cue.text == doc.text
                     and metadata.get("corpus_revision") == str(cue.corpus_revision)
                     and metadata.get("cue_version") == str(cue.version)
+                    and metadata.get("target") == target
+                    and metadata.get("language") == cue.language
+                    and metadata.get("review_status") == "approved"
+                    and metadata.get("difficulty") == cue.difficulty
                 ):
                     found.append(cue)
             found = found[:3]
@@ -110,24 +128,46 @@ class CueRepository:
 class Reasoner:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.system_prompt = (Path(__file__).parent / "prompts/coach_system.txt").read_text("utf-8")
+        self.calls = 0
         self.client = None
         if not settings.mock_mode and settings.anthropic_api_key:
             self.client = AsyncAnthropic(
                 api_key=settings.anthropic_api_key, max_retries=0, timeout=settings.provider_deadline_seconds
             )
 
-    async def decide(self, summary: AttemptSummary, generation, cues: list[Cue], history: list):
-        if self.settings.mock_mode or not cues or "target_distance" not in summary.evidence_fields:
-            return fallback(summary, generation, cues)
+    async def decide(self, summary: AttemptSummary, generation, cues: list[Cue], context: CoachingContext):
+        if not isinstance(context, CoachingContext):
+            raise TypeError("CoachingContext is required; pass typed attempt and cue history")
+        if len(cues) > 3:
+            raise ValueError("At most three eligible cue candidates are allowed")
+        statuses = (
+            {"approved", "demo_unreviewed"}
+            if self.settings.mock_mode and self.settings.allow_demo_cues
+            else {"approved"}
+        )
+        if any(
+            c.review_status not in statuses
+            or c.corpus_revision != CORPUS_REVISION
+            or summary.target_id not in c.target_ids
+            or c.language != "en"
+            or c.pose_id != TARGETS[summary.target_id].pose_id
+            for c in cues
+        ):
+            raise ValueError("Ineligible cue candidates")
+        options = plan(summary, context, cues)
+        if self.settings.mock_mode or options.preferred_action in ("repair_capture", "pause"):
+            return fallback(
+                summary, generation, cues, context, source="mock" if self.settings.mock_mode else "fallback"
+            )
         if not self.client or not self.settings.claude_model:
             raise RuntimeError("Claude key/model missing")
+        self.calls += 1
         response = await self.client.messages.parse(
             model=self.settings.claude_model,
             max_tokens=450,
-            output_format=CoachingDecision,
-            system="Select exactly one eligible cue. Do not rewrite instructions. Copy the provided observation "
-            "verbatim; narration must be null. Cite only supplied evidence fields. Allowed next action: "
-            "repeat, change_cue, simplify, reduce_assistance, pause. Never infer anatomy or diagnose.",
+            output_format=CoachingProposal,
+            system=self.system_prompt,
             messages=[
                 {
                     "role": "user",
@@ -135,9 +175,11 @@ class Reasoner:
                         {
                             "summary": summary.model_dump(mode="json"),
                             "generation_id": str(generation),
-                            "observation": observation(summary),
+                            "attempt_id": str(summary.attempt_id),
+                            "plan": options.model_dump(mode="json"),
                             "cues": [c.model_dump() for c in cues],
-                            "recent_outcomes": history[-4:],
+                            "recent_outcomes": [o.model_dump(mode="json") for o in context.cue_history[-4:]],
+                            "policy_version": context.policy.version,
                         }
                     ),
                 }
@@ -145,7 +187,8 @@ class Reasoner:
         )
         if response.parsed_output is None:
             raise ValueError("Claude refusal or empty result")
-        return response.parsed_output
+        proposal = CoachingProposal.model_validate(response.parsed_output)
+        return resolve_proposal(proposal, summary, generation, cues, context)
 
     async def close(self):
         if self.client:
