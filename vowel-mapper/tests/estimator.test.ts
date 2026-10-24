@@ -42,10 +42,25 @@ describe('formant estimation from an audio frame', () => {
     expect(slippedNoisyOo(110, 15)).toEqual([]);
   });
 
-  // Known gaps: a broadened F2 is indistinguishable by bandwidth from the spare pole LPC places
-  // between F1 and F2 of clean front vowels, and at 10 dB F1 can collapse to a 0 Hz pole.
+  it.each([15, 10])('never reports a noisy oo’s F3 as its F2 when noise broadens F2 (%i dB SNR)', (snrDb) => {
+    expect(slippedNoisyOo(200, snrDb)).toEqual([]);
+  });
+
+  // The spare broad pole LPC places in clean front vowels sits close to F2, unlike a dropped F2.
+  it.each([
+    [300, 2300, 3000], [380, 2100, 2900], [400, 2600, 3300], [450, 1900, 2700], [540, 1650, 2500],
+    [675, 1320, 2500], [570, 840, 2400], [370, 930, 2800],
+  ])('keeps accepting every frame of a clean %i / %i Hz vowel across pitches', (...formants) => {
+    for (const pitch of [100, 160, 200, 300]) {
+      const signal = vowelSignal({ formants, pitch, seconds: 0.5 });
+      for (let start = 0; start + 2400 <= signal.length; start += 1200) {
+        expect(estimateFormants(signal.slice(start, start + 2400), 48000).valid, `pitch ${pitch}`).toBe(true);
+      }
+    }
+  });
+
+  // Known gaps: at 10 dB an F1 slip remains at other pitches, and F1 can collapse to a 0 Hz pole.
   it.fails.each([
-    { pitch: 200, snrDb: 15 },
     { pitch: 110, snrDb: 10 },
     { pitch: 250, snrDb: 10 },
   ])('KNOWN GAP: still slips a noisy oo at pitch $pitch, $snrDb dB SNR', ({ pitch, snrDb }) => {

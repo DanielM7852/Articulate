@@ -169,7 +169,9 @@ export function estimateFormants(
   const [first, second] = poles.filter(({ frequency, bandwidth }) => frequency > 180 && frequency < 5000 && bandwidth > 15 && bandwidth < 600);
   // Noise can broaden the real F1 past the bandwidth limit; relabelling would then report F2 as F1 and F3 as F2.
   const maskedF1 = first && poles.some(({ frequency, bandwidth }) => frequency > 180 && frequency < first.frequency && bandwidth >= 600);
-  if (!first || !second || maskedF1 || first.frequency > 1200 || second.frequency < 500 || second.frequency > 3500 || second.frequency - first.frequency < 150) {
+  // Likewise a broadened F2 would promote F3; clean front vowels' spare broad pole sits near F2 (≥0.7×), not this far below.
+  const maskedF2 = first && second && poles.some(({ frequency, bandwidth }) => frequency > first.frequency && frequency < 0.55 * second.frequency && bandwidth >= 600);
+  if (!first || !second || maskedF1 || maskedF2 || first.frequency > 1200 || second.frequency < 500 || second.frequency > 3500 || second.frequency - first.frequency < 150) {
     return { valid: false, reason: 'uncertain', rms, periodicity };
   }
   const confidence = Math.max(0, Math.min(1, periodicity * (1 - Math.max(first.bandwidth, second.bandwidth) / 1200)));

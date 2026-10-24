@@ -82,9 +82,12 @@ export default function App() {
           <div><span>Accepted frames</span><strong data-testid="accepted-frames">{session.accepted}</strong></div>
           <div><span>Analyzed frames</span><strong>{session.frames}</strong></div>
           <div><span>Input sample rate</span><strong>{session.sampleRate ? session.sampleRate / 1000 : '—'}<small> kHz</small></strong></div>
+          <div><span>Low vs mid · nasal cue</span><strong data-testid="cue-low-mid">{session.cues ? session.cues.lowVsMidDb.toFixed(1) : '—'}<small> dB</small></strong></div>
+          <div><span>Low vs high · nasal cue</span><strong data-testid="cue-low-high">{session.cues ? session.cues.lowVsHighDb.toFixed(1) : '—'}<small> dB</small></strong></div>
+          <div><span>Loudness vs loudest (3 s)</span><strong data-testid="cue-loudness">{session.cues ? session.cues.loudnessDb.toFixed(1) : '—'}<small> dB</small></strong></div>
           <label className="ceiling-control">Analysis ceiling<select aria-label="Analysis ceiling" value={ceilingHz} disabled={active} onChange={(event) => setCeilingHz(Number(event.target.value))}><option value="5000">5,000 Hz</option><option value="5500">5,500 Hz · default</option><option value="6000">6,000 Hz</option></select></label>
         </div>
-        <p>Changing the ceiling can help different voices. These measurements are experimental; accepted frames are not a pronunciation score. Unreliable frames are excluded.</p>
+        <p>Changing the ceiling can help different voices. These measurements are experimental; accepted frames are not a pronunciation score. Unreliable frames are excluded. Nasal cues are experimental half-second medians over voiced frames (bands 80–400, 400–1,200, 1,200–3,000 Hz); they do not affect tracking.</p>
       </details>
       <footer><span>Articulate / 2D mapper prototype</span><p>This maps vowel acoustics, not exact tongue position. No audio is saved or uploaded.</p></footer>
     </main>

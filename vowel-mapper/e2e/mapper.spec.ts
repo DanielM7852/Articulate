@@ -19,6 +19,7 @@ test('a synthetic microphone drives the real pipeline; Finish releases it and re
   await expect(page.getByTestId('tracking-status')).toHaveText('Tracking vowel', { timeout: 15000 });
   await expect(page.getByTestId('cursor')).toBeVisible();
   await expect.poll(async () => Number(await page.getByTestId('accepted-frames').textContent())).toBeGreaterThan(5);
+  await expect(page.getByTestId('cue-low-high')).toHaveText(/^-?\d+\.\d dB$/);
   await expect.poll(async () => Math.abs(Number(await page.getByTestId('cursor').getAttribute('data-f2')) - 1200), { timeout: 10000 }).toBeLessThan(160);
   await expect.poll(async () => Math.abs(Number(await page.getByTestId('cursor').getAttribute('data-f2')) - 800), { timeout: 10000 }).toBeLessThan(160);
   await page.getByRole('button', { name: 'Finish', exact: true }).click();
