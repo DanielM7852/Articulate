@@ -24,6 +24,7 @@ const demo = await createMouthDemo(containerElement, {
   driver: "auto",       // "auto" | "talkinghead" | "three"
   style: "hologram",    // "hologram" | "particles" | "porcelain" | "hybrid" | "solid"
   controls: true,       // false: host provides its own buttons
+  startDispersed: false, // true: the particle head starts dispersed until assemble()
 });
 ```
 
@@ -39,8 +40,9 @@ The container needs a height (the component fills it). It builds its own layout:
 | `stop()` | Ease back to neutral and stop looping; clears the caption. |
 | `setStyle("hologram" \| "particles" \| "porcelain" \| "hybrid" \| "solid")` | Switch look at runtime. |
 | `toggleCalibration()` / `handleCalibrationKey(e)` | Highlight ring calibration (see below). `handleCalibrationKey` returns `true` if it consumed the key. |
+| `assemble({ durationMs? })` / `disperse({ durationMs? })` | Particles style intro / outro: the dots fly in and build the head (default 1600 ms), or dissolve outward and up (default 1100 ms). Resolve `true` when done, `false` if the other call interrupts. Reduced motion: a 300 ms crossfade. Other styles resolve at once. |
 | `dispose()` | Free GPU resources, listeners and DOM. Safe to call twice. |
-| `driverName`, `style`, `view`, `speed`, `cueId`, `speaking` | Read-only state. |
+| `driverName`, `style`, `view`, `speed`, `cueId`, `speaking`, `assembly`, `assembled` | Read-only state. `assembly` is `"assembled"`, `"dispersed"`, `"assembling"` or `"dispersing"`. |
 
 Events are dispatched on the container (they bubble):
 
@@ -81,7 +83,7 @@ URL parameters override options:
 |---|---|
 | `?driver=three\|talkinghead\|auto` | Choose the driver. |
 | `?style=hologram\|particles\|porcelain\|hybrid\|solid` | Choose the look. |
-| `?debug` | Show an overlay with the driver name and style. |
+| `?debug` | Show an overlay with the driver name and style; expose `window.__mouthDemo` (try `__mouthDemo.disperse()` / `.assemble()`). |
 | `?thfail` | Force the TalkingHead attempt to fail, to test the fallback. |
 
 ## Keyboard shortcuts (harness page)

@@ -86,6 +86,7 @@ export async function createMouthDemo(container, options = {}) {
     driver: params.driver ?? (DRIVERS.includes(options.driver) ? options.driver : "auto"),
     style: params.style ?? (STYLES.includes(options.style) ? options.style : "hologram"),
     controls: options.controls !== false,
+    startDispersed: options.startDispersed === true,
   };
 
   // DOM
@@ -204,7 +205,7 @@ export async function createMouthDemo(container, options = {}) {
     // The particle head: a sibling of the hologram style, sampled from the same meshes.
     cloud = createPointCloud({
       renderer: scene.renderer, scene: scene.scene, camera: scene.camera, canvas: scene.canvas,
-      root: driver.root, anchor, reducedMotion: mq.matches,
+      root: driver.root, anchor, reducedMotion: mq.matches, startDispersed: opts.startDispersed,
     });
     disposers.push(() => cloud.dispose());
     if (style === "particles") cloud.setActive(true);
@@ -475,6 +476,16 @@ export async function createMouthDemo(container, options = {}) {
       return lipsync.speak(opts);
     },
 
+    // Intro / outro for the particle head: dots fly in and build the face, or dissolve away.
+    // Other styles are not animated; the call settles the state and resolves at once.
+    assemble(o) {
+      return cloud.assemble(o);
+    },
+
+    disperse(o) {
+      return cloud.disperse(o);
+    },
+
     toggleCalibration() {
       highlight.toggleCalibration();
     },
@@ -497,7 +508,20 @@ export async function createMouthDemo(container, options = {}) {
     get speed() { return timeline.speed; },
     get cueId() { return cueId; },
     get speaking() { return lipsync.speaking; },
+    get assembly() { return cloud.assembly; },
+    get assembled() { return cloud.assembly === "assembled"; },
   };
+
+  if (params.debug) {
+    // DevTools: __mouthDemo.disperse() / .assemble() / .assembly; the public object is __mouthDemo.demo
+    Object.assign(window.__mouthDemo, {
+      demo,
+      cloud,
+      assemble: (o) => demo.assemble(o),
+      disperse: (o) => demo.disperse(o),
+    });
+    Object.defineProperty(window.__mouthDemo, "assembly", { get: () => demo.assembly, configurable: true });
+  }
 
   // Ready
   scene.setSolidLighting(style === "solid");

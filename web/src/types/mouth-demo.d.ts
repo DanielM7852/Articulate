@@ -7,6 +7,12 @@ declare module '@mouth-demo/src/mouth-demo.js' {
   export type MouthView = 'front' | 'side';
   export type MouthStyle = 'hologram' | 'particles' | 'porcelain' | 'hybrid' | 'solid';
   export type MouthDriver = 'auto' | 'talkinghead' | 'three';
+  export type MouthAssembly = 'assembled' | 'dispersed' | 'assembling' | 'dispersing';
+
+  export interface AssemblyOptions {
+    /** Length of the transition. Defaults: 1600 for assemble, 1100 for disperse. Reduced motion uses a 300 ms crossfade. */
+    durationMs?: number;
+  }
 
   /** Timestamps in seconds from the start of the speech audio (e.g. from Cartesia). */
   export interface SpeechTimeline {
@@ -37,6 +43,10 @@ declare module '@mouth-demo/src/mouth-demo.js' {
     readonly cueId: MouthCueId | null;
     /** True from speak() until the speech ends or is stopped. */
     readonly speaking: boolean;
+    /** Where the particle head is in its intro / outro. */
+    readonly assembly: MouthAssembly;
+    /** True only when the head is fully assembled (pointer scatter works only then). */
+    readonly assembled: boolean;
     /** Demonstrate a cue and keep looping it. */
     showCue(id: MouthCueId): void;
     /**
@@ -57,6 +67,13 @@ declare module '@mouth-demo/src/mouth-demo.js' {
     lookAt(target: { x: number; y: number } | null): void;
     /** Camera distance multiplier, eased. 1 is the default framing; 0.8 is closer. */
     setZoom(zoom: number): void;
+    /**
+     * Particles style: the dots fly in from around the stage and build the head. Resolves true when
+     * assembled, false if disperse() interrupts it. Other styles settle the state and resolve at once.
+     */
+    assemble(opts?: AssemblyOptions): Promise<boolean>;
+    /** Particles style: the head dissolves (dots drift outward and up and fade). Resolves false if interrupted. */
+    disperse(opts?: AssemblyOptions): Promise<boolean>;
     /** Freeze the face, camera and choreography clock without losing state. */
     pause(): void;
     resume(): void;
@@ -70,6 +87,8 @@ declare module '@mouth-demo/src/mouth-demo.js' {
     style?: MouthStyle;
     /** false: the host renders its own controls. */
     controls?: boolean;
+    /** Start with the particle head dispersed (empty stage) until assemble() is called. Default false. */
+    startDispersed?: boolean;
   }
 
   export function createMouthDemo(container: HTMLElement, options?: MouthDemoOptions): Promise<MouthDemo>;
