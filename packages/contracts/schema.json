@@ -1,0 +1,1089 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Contracts",
+  "type": "object",
+  "properties": {
+    "Target": {
+      "$ref": "#/definitions/Target"
+    },
+    "Session": {
+      "$ref": "#/definitions/Session"
+    },
+    "FeatureFrame": {
+      "$ref": "#/definitions/FeatureFrame"
+    },
+    "AttemptSummary": {
+      "$ref": "#/definitions/AttemptSummary"
+    },
+    "Cue": {
+      "$ref": "#/definitions/Cue"
+    },
+    "CoachingDecision": {
+      "$ref": "#/definitions/CoachingDecision"
+    },
+    "AudioManifest": {
+      "$ref": "#/definitions/AudioManifest"
+    },
+    "Event": {
+      "$ref": "#/definitions/Event"
+    },
+    "Command": {
+      "$ref": "#/definitions/Command"
+    },
+    "PoseId": {
+      "$ref": "#/definitions/PoseId"
+    },
+    "TargetId": {
+      "$ref": "#/definitions/TargetId"
+    },
+    "Action": {
+      "$ref": "#/definitions/Action"
+    },
+    "State": {
+      "$ref": "#/definitions/State"
+    }
+  },
+  "required": [
+    "Target",
+    "Session",
+    "FeatureFrame",
+    "AttemptSummary",
+    "Cue",
+    "CoachingDecision",
+    "AudioManifest",
+    "Event",
+    "Command",
+    "PoseId",
+    "TargetId",
+    "Action",
+    "State"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "Target": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "enum": [
+            "i",
+            "u",
+            "aa"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "f1": {
+          "title": "F1",
+          "type": "number"
+        },
+        "f2": {
+          "title": "F2",
+          "type": "number"
+        },
+        "radius_f1": {
+          "default": 160,
+          "title": "Radius F1",
+          "type": "number"
+        },
+        "radius_f2": {
+          "default": 350,
+          "title": "Radius F2",
+          "type": "number"
+        },
+        "pose_id": {
+          "enum": [
+            "vowel-i",
+            "vowel-u",
+            "vowel-aa",
+            "neutral"
+          ],
+          "title": "Pose Id",
+          "type": "string"
+        },
+        "provenance": {
+          "default": "Engineering demonstration region; not a personalized pronunciation standard.",
+          "title": "Provenance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "label",
+        "f1",
+        "f2",
+        "radius_f1",
+        "radius_f2",
+        "pose_id",
+        "provenance"
+      ],
+      "title": "Target",
+      "type": "object"
+    },
+    "Session": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "owner": {
+          "format": "uuid",
+          "title": "Owner",
+          "type": "string"
+        },
+        "target_id": {
+          "default": "i",
+          "enum": [
+            "i",
+            "u",
+            "aa"
+          ],
+          "title": "Target Id",
+          "type": "string"
+        },
+        "target_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Target Version",
+          "type": "integer"
+        },
+        "language": {
+          "const": "en",
+          "default": "en",
+          "title": "Language",
+          "type": "string"
+        },
+        "audio_enabled": {
+          "default": false,
+          "title": "Audio Enabled",
+          "type": "boolean"
+        },
+        "assistance_level": {
+          "default": "guided",
+          "enum": [
+            "guided",
+            "reduced"
+          ],
+          "title": "Assistance Level",
+          "type": "string"
+        },
+        "revision": {
+          "default": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "state": {
+          "default": "ready",
+          "enum": [
+            "ready",
+            "capturing",
+            "analyzing",
+            "coaching",
+            "presenting",
+            "paused"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "target_id",
+        "target_version",
+        "language",
+        "audio_enabled",
+        "assistance_level",
+        "revision",
+        "state"
+      ],
+      "title": "Session",
+      "type": "object"
+    },
+    "FeatureFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "sample_offset": {
+          "minimum": 0,
+          "title": "Sample Offset",
+          "type": "integer"
+        },
+        "timestamp_ms": {
+          "minimum": 0,
+          "title": "Timestamp Ms",
+          "type": "number"
+        },
+        "duration_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 200,
+          "title": "Duration Ms",
+          "type": "number"
+        },
+        "f1": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1500,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "F1"
+        },
+        "f2": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 5000,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "F2"
+        },
+        "f0": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1500,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "F0"
+        },
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        },
+        "quality_flags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Quality Flags",
+          "type": "array"
+        },
+        "source": {
+          "enum": [
+            "microphone",
+            "synthetic"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "lip_opening": {
+          "anyOf": [
+            {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Opening"
+        }
+      },
+      "required": [
+        "sample_offset",
+        "timestamp_ms",
+        "duration_ms",
+        "f1",
+        "f2",
+        "f0",
+        "valid",
+        "quality_flags",
+        "source",
+        "lip_opening"
+      ],
+      "title": "FeatureFrame",
+      "type": "object"
+    },
+    "AttemptSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "format": "uuid",
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "target_id": {
+          "enum": [
+            "i",
+            "u",
+            "aa"
+          ],
+          "title": "Target Id",
+          "type": "string"
+        },
+        "target_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Target Version",
+          "type": "integer"
+        },
+        "capture_start_sample": {
+          "minimum": 0,
+          "title": "Capture Start Sample",
+          "type": "integer"
+        },
+        "capture_end_sample": {
+          "minimum": 0,
+          "title": "Capture End Sample",
+          "type": "integer"
+        },
+        "sample_rate": {
+          "maximum": 96000,
+          "minimum": 8000,
+          "title": "Sample Rate",
+          "type": "integer"
+        },
+        "usable_duration_ms": {
+          "minimum": 0,
+          "title": "Usable Duration Ms",
+          "type": "number"
+        },
+        "usable_fraction": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Usable Fraction",
+          "type": "number"
+        },
+        "f1_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "F1 Mean"
+        },
+        "f2_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "F2 Mean"
+        },
+        "target_distance": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Distance"
+        },
+        "lip_opening_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Opening Mean"
+        },
+        "quality_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Quality Flags",
+          "type": "array"
+        },
+        "evidence_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Fields",
+          "type": "array"
+        },
+        "source": {
+          "enum": [
+            "microphone",
+            "synthetic"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "assistance_level": {
+          "default": "guided",
+          "enum": [
+            "guided",
+            "reduced"
+          ],
+          "title": "Assistance Level",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "target_id",
+        "target_version",
+        "capture_start_sample",
+        "capture_end_sample",
+        "sample_rate",
+        "usable_duration_ms",
+        "usable_fraction",
+        "f1_mean",
+        "f2_mean",
+        "target_distance",
+        "lip_opening_mean",
+        "quality_flags",
+        "evidence_fields",
+        "source",
+        "assistance_level"
+      ],
+      "title": "AttemptSummary",
+      "type": "object"
+    },
+    "Cue": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "corpus_revision": {
+          "const": 1,
+          "default": 1,
+          "title": "Corpus Revision",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "target_ids": {
+          "items": {
+            "enum": [
+              "i",
+              "u",
+              "aa"
+            ],
+            "type": "string"
+          },
+          "title": "Target Ids",
+          "type": "array"
+        },
+        "language": {
+          "const": "en",
+          "title": "Language",
+          "type": "string"
+        },
+        "difficulty": {
+          "enum": [
+            "simple",
+            "standard"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "applicability": {
+          "const": "usable_capture",
+          "title": "Applicability",
+          "type": "string"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        },
+        "review_status": {
+          "enum": [
+            "approved",
+            "demo_unreviewed",
+            "rejected"
+          ],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "pose_id": {
+          "enum": [
+            "vowel-i",
+            "vowel-u",
+            "vowel-aa",
+            "neutral"
+          ],
+          "title": "Pose Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "corpus_revision",
+        "text",
+        "target_ids",
+        "language",
+        "difficulty",
+        "applicability",
+        "source_url",
+        "review_status",
+        "pose_id"
+      ],
+      "title": "Cue",
+      "type": "object"
+    },
+    "CoachingDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "format": "uuid",
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "generation_id": {
+          "format": "uuid",
+          "title": "Generation Id",
+          "type": "string"
+        },
+        "observation": {
+          "maxLength": 250,
+          "title": "Observation",
+          "type": "string"
+        },
+        "evidence_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Fields",
+          "type": "array"
+        },
+        "cue_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cue Id"
+        },
+        "cue_version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cue Version"
+        },
+        "pose_id": {
+          "enum": [
+            "vowel-i",
+            "vowel-u",
+            "vowel-aa",
+            "neutral"
+          ],
+          "title": "Pose Id",
+          "type": "string"
+        },
+        "next_action": {
+          "enum": [
+            "repeat",
+            "change_cue",
+            "simplify",
+            "reduce_assistance",
+            "next_target",
+            "pause",
+            "repair_capture"
+          ],
+          "title": "Next Action",
+          "type": "string"
+        },
+        "narration": {
+          "anyOf": [
+            {
+              "maxLength": 400,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Narration"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "generation_id",
+        "observation",
+        "evidence_fields",
+        "cue_id",
+        "cue_version",
+        "pose_id",
+        "next_action",
+        "narration"
+      ],
+      "title": "CoachingDecision",
+      "type": "object"
+    },
+    "AudioManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_key": {
+          "title": "Cache Key",
+          "type": "string"
+        },
+        "text_hash": {
+          "title": "Text Hash",
+          "type": "string"
+        },
+        "cue_id": {
+          "title": "Cue Id",
+          "type": "string"
+        },
+        "cue_version": {
+          "title": "Cue Version",
+          "type": "integer"
+        },
+        "model_id": {
+          "title": "Model Id",
+          "type": "string"
+        },
+        "voice_id": {
+          "title": "Voice Id",
+          "type": "string"
+        },
+        "language": {
+          "title": "Language",
+          "type": "string"
+        },
+        "settings": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "title": "Settings",
+          "type": "object"
+        },
+        "encoding": {
+          "const": "pcm_s16le",
+          "default": "pcm_s16le",
+          "title": "Encoding",
+          "type": "string"
+        },
+        "sample_rate": {
+          "const": 24000,
+          "default": 24000,
+          "title": "Sample Rate",
+          "type": "integer"
+        },
+        "audio_hash": {
+          "title": "Audio Hash",
+          "type": "string"
+        },
+        "audio_location": {
+          "title": "Audio Location",
+          "type": "string"
+        },
+        "timings": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Timings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cache_key",
+        "text_hash",
+        "cue_id",
+        "cue_version",
+        "model_id",
+        "voice_id",
+        "language",
+        "settings",
+        "encoding",
+        "sample_rate",
+        "audio_hash",
+        "audio_location",
+        "timings"
+      ],
+      "title": "AudioManifest",
+      "type": "object"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "session.state",
+            "features.frame",
+            "attempt.summary",
+            "coach.decision",
+            "audio.start",
+            "audio.end",
+            "audio.cancelled",
+            "provider.status",
+            "error",
+            "audio.timings",
+            "command.ack",
+            "metrics"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "attempt_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt Id"
+        },
+        "generation_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generation Id"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "type",
+        "session_id",
+        "attempt_id",
+        "generation_id",
+        "event_id",
+        "seq",
+        "payload"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Configure": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "session.configure",
+          "title": "Type",
+          "type": "string"
+        },
+        "target_id": {
+          "enum": [
+            "i",
+            "u",
+            "aa"
+          ],
+          "title": "Target Id",
+          "type": "string"
+        },
+        "audio_enabled": {
+          "title": "Audio Enabled",
+          "type": "boolean"
+        },
+        "assistance_level": {
+          "default": "guided",
+          "enum": [
+            "guided",
+            "reduced"
+          ],
+          "title": "Assistance Level",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "target_id",
+        "audio_enabled",
+        "assistance_level"
+      ],
+      "title": "Configure",
+      "type": "object"
+    },
+    "Control": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "feedback.cancel",
+            "session.pause",
+            "session.resume"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Control",
+      "type": "object"
+    },
+    "End": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "attempt.end",
+          "title": "Type",
+          "type": "string"
+        },
+        "final_sample": {
+          "minimum": 0,
+          "title": "Final Sample",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "final_sample"
+      ],
+      "title": "End",
+      "type": "object"
+    },
+    "Playback": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "audio.playback_started",
+            "audio.playback_ended"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "generation_id": {
+          "format": "uuid",
+          "title": "Generation Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "generation_id"
+      ],
+      "title": "Playback",
+      "type": "object"
+    },
+    "Start": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "attempt.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "synthetic",
+            "microphone"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "sample_rate": {
+          "default": 24000,
+          "maximum": 96000,
+          "minimum": 8000,
+          "title": "Sample Rate",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "source",
+        "sample_rate"
+      ],
+      "title": "Start",
+      "type": "object"
+    },
+    "Command": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_revision": {
+          "minimum": 0,
+          "title": "Expected Revision",
+          "type": "integer"
+        },
+        "payload": {
+          "discriminator": {
+            "mapping": {
+              "attempt.end": "#/definitions/End",
+              "attempt.start": "#/definitions/Start",
+              "audio.playback_ended": "#/definitions/Playback",
+              "audio.playback_started": "#/definitions/Playback",
+              "feedback.cancel": "#/definitions/Control",
+              "session.configure": "#/definitions/Configure",
+              "session.pause": "#/definitions/Control",
+              "session.resume": "#/definitions/Control"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Configure"
+            },
+            {
+              "$ref": "#/definitions/Start"
+            },
+            {
+              "$ref": "#/definitions/End"
+            },
+            {
+              "$ref": "#/definitions/Control"
+            },
+            {
+              "$ref": "#/definitions/Playback"
+            }
+          ],
+          "title": "Payload"
+        }
+      },
+      "required": [
+        "schema_version",
+        "command_id",
+        "expected_revision",
+        "payload"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    "PoseId": {
+      "enum": [
+        "vowel-i",
+        "vowel-u",
+        "vowel-aa",
+        "neutral"
+      ],
+      "type": "string"
+    },
+    "TargetId": {
+      "enum": [
+        "i",
+        "u",
+        "aa"
+      ],
+      "type": "string"
+    },
+    "Action": {
+      "enum": [
+        "repeat",
+        "change_cue",
+        "simplify",
+        "reduce_assistance",
+        "next_target",
+        "pause",
+        "repair_capture"
+      ],
+      "type": "string"
+    },
+    "State": {
+      "enum": [
+        "ready",
+        "capturing",
+        "analyzing",
+        "coaching",
+        "presenting",
+        "paused"
+      ],
+      "type": "string"
+    }
+  }
+}

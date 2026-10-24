@@ -1,0 +1,25 @@
+name: Backbone checks
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      MOCK_MODE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --python 3.12 --extra dev --extra moss
+      - run: npm ci
+      - run: uv run --no-sync pytest -q
+      - run: uv run --no-sync ruff check services/api scripts
+      - run: uv run --no-sync python scripts/export_contracts.py --check
+      - run: npm run contracts:check
+      - run: npm run test:audio
+      - run: npm run test:database
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

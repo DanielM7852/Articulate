@@ -1,0 +1,71 @@
+{
+  "mode": "mock only; synthetic features and diagnostic tone",
+  "python": "3.12.13",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "clock": "Parent perf_counter for cold process launch; controller perf_counter for feedback stages",
+  "environment_notes": "Local development workstation; concurrent development work may affect timing.",
+  "limitations": "Feedback cases measure controller enqueue only. Cold controller case includes new repository/runtime initialization; cold_process_startup measures actual process launch to readiness separately. No browser sound, real providers or database network.",
+  "cases": {
+    "cold_controller_uncached": {
+      "visible_enqueue": {
+        "runs": 30,
+        "median_ms": 10.241,
+        "p95_ms": 11.998
+      },
+      "first_pcm_enqueue": {
+        "runs": 30,
+        "median_ms": 40.315,
+        "p95_ms": 42.901
+      },
+      "completion": {
+        "runs": 30,
+        "median_ms": 577.581,
+        "p95_ms": 579.946
+      },
+      "failures": 0
+    },
+    "warm_uncached": {
+      "visible_enqueue": {
+        "runs": 30,
+        "median_ms": 4.163,
+        "p95_ms": 5.174
+      },
+      "first_pcm_enqueue": {
+        "runs": 30,
+        "median_ms": 43.331,
+        "p95_ms": 44.271
+      },
+      "completion": {
+        "runs": 30,
+        "median_ms": 579.318,
+        "p95_ms": 582.788
+      },
+      "failures": 0
+    },
+    "warm_cached": {
+      "visible_enqueue": {
+        "runs": 30,
+        "median_ms": 4.532,
+        "p95_ms": 8.247
+      },
+      "first_pcm_enqueue": {
+        "runs": 30,
+        "median_ms": 4.534,
+        "p95_ms": 8.249
+      },
+      "completion": {
+        "runs": 30,
+        "median_ms": 188.465,
+        "p95_ms": 202.832
+      },
+      "failures": 0
+    }
+  },
+  "cold_process_startup": {
+    "runs": 30,
+    "median_ms": 2259.781,
+    "p95_ms": 5080.258,
+    "failures": 0,
+    "boundary": "Python process launch to localhost /health/ready response; mocked providers"
+  }
+}

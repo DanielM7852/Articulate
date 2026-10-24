@@ -1,0 +1,12 @@
+.git
+.venv
+.data
+.cache
+**/node_modules
+**/dist
+**/__pycache__
+.pytest_cache
+.env
+mouth-demo
+test-results
+playwright-report
