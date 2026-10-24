@@ -33,8 +33,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Could not start audio analysis. Press Start to try again.';
 }
 
-export function useVowelSession(settings: EstimatorSettings = DEFAULT_SETTINGS) {
+export interface SessionOptions {
+  /** Receives every tracked frame, including frames React may batch into one render. */
+  onFrame?: (frame: TrackedFrame) => void;
+}
+
+export function useVowelSession(settings: EstimatorSettings = DEFAULT_SETTINGS, options: SessionOptions = {}) {
   const [state, setState] = useState<SessionState>(emptyState);
+  const onFrame = useRef(options.onFrame);
+  onFrame.current = options.onFrame;
   const session = useRef<MicrophoneSession | null>(null);
   const pending = useRef<AbortController | null>(null);
   const generation = useRef(0);
@@ -73,6 +80,7 @@ export function useVowelSession(settings: EstimatorSettings = DEFAULT_SETTINGS) 
         onFrame: (frame) => {
           if (generation.current !== token) return;
           lastFrameAt.current = performance.now();
+          onFrame.current?.(frame);
           const cues = cueSummary.push(frame.estimate, frame.cues, frame.timestampMs);
           setState((previous) => {
             const last = previous.trace.at(-1);

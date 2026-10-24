@@ -62,6 +62,28 @@ tracked points into `VowelPlot`. Omkar's future handoff should summarize an
 explicit target-vowel attempt. Do not average a free glide into a single vowel.
 No coach, Convex, target scoring, or anatomical outline is integrated yet.
 
+## Zone game (first slice, provisional)
+
+The **Game** switch above the plot turns the mapper into an osu!-style practice round.
+A warm-up holds eee, ah and oo; each zone is centred on the median of that phase's
+tracked points with a radius in log-frequency space (no textbook values). Four words
+follow (`ah` hold, `hi`, `how`, `we` glides). Consonants such as *h* are visual cues,
+never scored. Each note ends as **hit**, **miss**, or **not heard clearly** (too few
+accepted frames; never counted as a miss). Timing is visual only, and self-paced is the
+default; timed rings are optional. A hit means "reached the zone you set," not a
+judgement of speech.
+
+- `src/game/zones.ts`, `calibration.ts`, `beatmap.ts`, `run.ts`: pure TypeScript driven
+  only by `TrackedFrame`s, unit-tested in `tests/game.test.ts`.
+- `src/game/GameMode.tsx`, `GameOverlay.tsx`, `game.css`: UI. The overlay draws through
+  `VowelPlot`'s `overlay` slot with `projectVowel`; frames arrive via
+  `useVowelSession(settings, { onFrame })`.
+- `e2e/game.spec.ts` drives the round with switchable synthetic vowels through the real
+  worklet/worker/tracker path.
+
+`MAPPER_PORT` picks the dev/preview port (and the port Playwright starts or reuses), for
+example `MAPPER_PORT=5175 npm run dev` or `MAPPER_PORT=5175 npm run test:e2e`.
+
 ## Audio approach
 
 AudioWorklet captures 50 ms windows every 25 ms. A Worker performs antialiased

@@ -118,3 +118,11 @@ footer p { margin: 0; text-align: right; }
   .diagnostics summary span { margin-left: 6px; font-size: 10px; } footer { display: block; } footer p { text-align: left; margin-top: 7px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+
+/* Map / Game switch (added for the zone game) */
+.intro { position: relative; }
+.mode-switch { position: absolute; top: 40px; right: 0; display: inline-flex; padding: 3px; gap: 2px; background: white; border: 1px solid var(--line); border-radius: 11px; }
+.mode-switch button { border: 0; background: transparent; color: var(--muted); font-size: 12px; font-weight: 650; padding: 7px 16px; border-radius: 8px; }
+.mode-switch button[aria-pressed="true"] { background: #edf3ff; color: var(--blue); }
+.mode-switch button:hover { color: var(--ink); }
+@media (max-width: 720px) { .mode-switch { position: static; margin-bottom: 18px; } }

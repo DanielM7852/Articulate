@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { VowelPoint } from '../audio/tracker';
 import { PLOT, projectVowel } from './plot';
 
@@ -6,10 +6,15 @@ export interface VowelPlotProps {
   trace: VowelPoint[];
   point: VowelPoint | null;
   faded: boolean;
+  /**
+   * Optional SVG drawn in plot coordinates (use `projectVowel`), under the trail and cursor.
+   * A function receives the label scale that keeps text at its CSS-pixel size.
+   */
+  overlay?: ReactNode | ((textScale: number) => ReactNode);
 }
 
 /** Display-only component: owns neither a microphone nor session controls. */
-export function VowelPlot({ trace, point, faded }: VowelPlotProps) {
+export function VowelPlot({ trace, point, faded, overlay }: VowelPlotProps) {
   const id = useId();
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
@@ -63,6 +68,7 @@ export function VowelPlot({ trace, point, faded }: VowelPlotProps) {
         <text className="axis-unit" x="8" y="48" style={{ fontSize: 10 * textScale }}>F1 · Hz</text>
         <text className="axis-unit" x="798" y="480" textAnchor="end" style={{ fontSize: 10 * textScale }}>F2 · Hz</text>
         <g clipPath={`url(#${id}-clip)`}>
+          {typeof overlay === 'function' ? overlay(textScale) : overlay}
           {Array.from(segments, ([segment, samples]) => <polyline
             key={segment}
             points={samples.map((sample) => { const p = projectVowel(sample); return `${p.x},${p.y}`; }).join(' ')}
@@ -74,7 +80,7 @@ export function VowelPlot({ trace, point, faded }: VowelPlotProps) {
             <circle r="2" fill="white" />
           </g>}
         </g>
-        {!cursor && <g className="plot-empty">
+        {!cursor && !overlay && <g className="plot-empty">
           <g transform={`translate(398 ${250 - 35 * textScale})`}>
             <circle r="19" fill="#e6edff" />
             <path d="M-9 0h4l3-9 5 18 3-9h4" fill="none" stroke="#3764d9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
