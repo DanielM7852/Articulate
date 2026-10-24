@@ -21,6 +21,18 @@ const MODEL_URL =
 const DETECT_INTERVAL_MS = 66; // about 15 Hz is plenty for a gaze
 const LOST_AFTER_MS = 900;
 const SMOOTH = 0.35;
+/**
+ * Calibration. The webcam sits above (or beside) the screen, not behind the guide's
+ * eyes, so the learner's resting position in the frame is not the frame's centre.
+ * The first sighting becomes "straight ahead" and that reference drifts very slowly
+ * toward wherever the learner settles, so the guide looks at them at rest and reacts
+ * to movement away from rest. Offsets are measured in face widths, so the gain does
+ * not depend on how far the learner sits from the camera.
+ */
+const REFERENCE_DRIFT = 0.006; // per detection, about a 10 s time constant at 15 Hz
+const DEAD_ZONE = 0.08; // face widths; detector jitter below this is ignored
+const GAIN = { x: 0.5, y: 0.55 }; // look units per face width of offset
+const Y_BIAS = 0.1; // small lift: a camera above the screen sees the face a little from above
 
 export function useFaceTracking(enabled: boolean) {
   const [status, setStatus] = useState<FaceStatus>('idle');
@@ -84,6 +96,7 @@ export function useFaceTracking(enabled: boolean) {
       setStatus('searching');
       let lastSeen = 0;
       let lastTs = -1;
+      let reference: { x: number; y: number } | null = null; // the learner at rest, in frame units
       const tick = () => {
         if (cancelled || !detector) return;
         timer = window.setTimeout(tick, DETECT_INTERVAL_MS);
@@ -96,9 +109,19 @@ export function useFaceTracking(enabled: boolean) {
           const b = face.boundingBox;
           const cx = (b.originX + b.width / 2) / video.videoWidth;
           const cy = (b.originY + b.height / 2) / video.videoHeight;
+          const faceW = Math.max(0.05, b.width / video.videoWidth);
+          if (!reference) reference = { x: cx, y: cy };
+          else {
+            reference.x += (cx - reference.x) * REFERENCE_DRIFT;
+            reference.y += (cy - reference.y) * REFERENCE_DRIFT;
+          }
+          // Offset from rest in face widths, with a small dead zone against jitter.
+          const soften = (v: number) => (Math.abs(v) < DEAD_ZONE ? 0 : v - Math.sign(v) * DEAD_ZONE);
+          const dx = soften((cx - reference.x) / faceW);
+          const dy = soften((cy - reference.y) / faceW);
           // The camera faces the learner, so a learner on their own right appears on the
           // left of the unmirrored frame. Flip x so +x is the viewer's right, like the pointer.
-          const target = { x: (0.5 - cx) * 2.4, y: (0.5 - cy) * 2.4 };
+          const target = { x: -dx * GAIN.x, y: -dy * GAIN.y + Y_BIAS };
           const prev = smooth.current ?? target;
           const next = { x: prev.x + (target.x - prev.x) * SMOOTH, y: prev.y + (target.y - prev.y) * SMOOTH };
           smooth.current = next;
@@ -107,6 +130,7 @@ export function useFaceTracking(enabled: boolean) {
           setStatus('tracking');
         } else if (ts - lastSeen > LOST_AFTER_MS) {
           smooth.current = null;
+          reference = null;
           setLook(null);
           setStatus('searching');
         }
