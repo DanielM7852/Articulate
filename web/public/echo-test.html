@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Echo and barge-in test</title>
+<style>
+  :root { --navy:#203E68; --sage:#DADFD9; --white:#FFFFFF; --mist:#CBD7E6; --aec:#B4531A; --ok:#1E6B3A; --warn:#8A5A00; --bad:#9B1C1C; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--sage); color:var(--navy); font:20px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 34px; margin: 0 0 4px; }
+  h2 { font-size: 24px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  .card { background: var(--white); border-radius: 14px; padding: 20px; margin: 16px 0; border: 2px solid var(--mist); }
+  button { font: inherit; font-weight: 700; background: var(--navy); color: var(--white); border: 0; border-radius: 10px; padding: 14px 28px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.secondary { background: var(--mist); color: var(--navy); }
+  .prompt { font-size: 38px; font-weight: 800; text-align: center; padding: 28px 12px; border-radius: 14px; background: var(--mist); min-height: 110px; display:flex; align-items:center; justify-content:center; }
+  .prompt.silent { background: var(--navy); color: var(--white); }
+  .prompt.speak { background: var(--aec); color: var(--white); }
+  table { border-collapse: collapse; width: 100%; font-size: 18px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--mist); vertical-align: top; }
+  th { background: var(--sage); }
+  .flag { font-weight: 700; }
+  .yes, .feasible { color: var(--ok); } .partly, .marginal, .inconclusive { color: var(--warn); } .no, .notfeasible { color: var(--bad); }
+  .verdict { font-size: 26px; font-weight: 800; margin: 6px 0; }
+  canvas { width: 100%; height: 260px; background: var(--white); border: 2px solid var(--mist); border-radius: 10px; }
+  pre { background: var(--sage); padding: 12px; border-radius: 8px; overflow:auto; font-size: 14px; max-height: 260px; }
+  .small { font-size: 16px; opacity: .85; }
+  .error { color: var(--bad); font-weight: 700; }
+  .legend span { display:inline-block; margin-right: 18px; } .sw { display:inline-block; width:18px; height:6px; margin-right:6px; vertical-align:middle; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Echo and barge-in test</h1>
+  <p>Use your laptop speakers (not headphones), moderate room volume, Chrome or Edge. Nothing is uploaded or stored; audio is analysed in this page only.</p>
+
+  <div class="card">
+    <button id="run">Run test</button>
+    <span id="status" class="small" style="margin-left:12px"></span>
+    <div id="prompt" class="prompt" style="margin-top:16px">Press "Run test" to begin (about 20 seconds)</div>
+  </div>
+
+  <div class="card" id="settingsCard" hidden>
+    <h2>1. Track settings</h2>
+    <div style="overflow-x:auto"><table id="settingsTable"></table></div>
+    <p id="allNote" class="small"></p>
+  </div>
+
+  <div class="card" id="verdictCard" hidden>
+    <h2>Verdict</h2>
+    <div id="verdicts"></div>
+    <div style="overflow-x:auto"><table id="numbers"></table></div>
+    <p class="small" id="caveats"></p>
+  </div>
+
+  <div class="card" id="chartCard" hidden>
+    <h2>Per-frame level (50 ms frames, dBFS)</h2>
+    <canvas id="chart" width="1800" height="520"></canvas>
+    <p class="legend small"><span><i class="sw" style="background:#203E68"></i>Raw track</span><span><i class="sw" style="background:#B4531A"></i>AEC (true)</span><span><i class="sw" style="background:#2E7D4F"></i>AEC (all)</span><span><i class="sw" style="background:#888;height:2px"></i>Barge-in threshold (AEC true)</span></p>
+    <p class="small">Shaded bands: baseline silence, silent playback, barge-in playback. The darker band in the last phase is the "say hello hello hello" window.</p>
+  </div>
+
+  <div class="card" id="copyCard" hidden>
+    <button id="copy" class="secondary">Copy results</button>
+    <span id="copyStatus" class="small" style="margin-left:12px"></span>
+    <pre id="json"></pre>
+  </div>
+</main>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const SENTENCE = "Hi, I'm your coach. Let's practise the ee sound together. Take a breath and hold it for me.";
+const FRAME_MS = 50, BASELINE_S = 1.5, SPEAK_START_S = 1.5, TAIL_S = 0.6;
+const RAW = { echoCancellation:false, noiseSuppression:false, autoGainControl:false };
+const AEC = { echoCancellation:true, noiseSuppression:true, autoGainControl:true };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const db = (p) => 10 * Math.log10(Math.max(p, 1e-12));          // p is mean-square
+const fmt = (x, d = 1) => (x == null || !isFinite(x)) ? "n/a" : x.toFixed(d);
+const mean = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : NaN;
+const powDb = (frames) => db(mean(frames.map((f) => f.p)));      // power-averaged level in dB
+
+function setPrompt(text, cls = "") { const p = $("prompt"); p.textContent = text; p.className = "prompt " + cls; }
+function setStatus(t) { $("status").textContent = t; }
+
+// ---- audio sources ----
+async function loadTts(ctx) {
+  const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 20000);
+  try {
+    const r = await fetch("/v1/speech", { method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ text: SENTENCE, rate: null }), signal: ac.signal });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const buf = await ctx.decodeAudioData(await r.arrayBuffer());
+    return { buffer: buf, source: "Cartesia TTS via /v1/speech" };
+  } catch (e) {
+    return { buffer: synthSpeech(ctx), source: "SYNTHETIC speech-like signal (TTS fetch failed: " + e.message + ")" };
+  } finally { clearTimeout(to); }
+}
+function synthSpeech(ctx) {
+  const sr = ctx.sampleRate, n = Math.floor(sr * 4), b = ctx.createBuffer(1, n, sr), d = b.getChannelData(0);
+  const formants = [[700,110],[1220,120],[2600,200]]; let ph = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr, f0 = 120 + 40 * Math.sin(2*Math.PI*0.7*t) + 15 * Math.sin(2*Math.PI*3*t);
+    ph += 2*Math.PI*f0/sr;
+    const syl = Math.max(0, Math.sin(2*Math.PI*3.5*t)) ** 0.7 * (t < 3.6 ? 1 : Math.max(0, (4-t)/0.4));
+    const fm = [[500+250*Math.sin(2*Math.PI*0.5*t),100],[1100+500*Math.sin(2*Math.PI*0.9*t),120],formants[2]];
+    let s = 0;
+    for (let h = 1; h * f0 < 4500; h++) {
+      let g = 0; for (const [fc, bw] of fm) g += Math.exp(-0.5 * ((h*f0 - fc) / bw) ** 2);
+      s += g * Math.sin(h * ph) / h ** 0.3;
+    }
+    d[i] = 0.35 * syl * s / 3 + (Math.random()*2-1) * 0.01 * syl;
+  }
+  return b;
+}
+
+// ---- measurement ----
+function makeMeter(ctx, stream) {
+  const src = ctx.createMediaStreamSource(stream), an = ctx.createAnalyser();
+  an.fftSize = 4096; an.smoothingTimeConstant = 0; src.connect(an);   // not connected to destination: no monitoring feedback
+  const buf = new Float32Array(an.fftSize), win = Math.round(ctx.sampleRate * FRAME_MS / 1000);
+  return { src, read() { an.getFloatTimeDomainData(buf); let s = 0; for (let i = buf.length - win; i < buf.length; i++) s += buf[i]*buf[i]; return s / win; } };
+}
+
+const state = { frames: [], phase: "idle", t0: 0 };
+let sampler = null;
+function startSampling(mRaw, mAec, mAll) {
+  state.t0 = performance.now();
+  sampler = setInterval(() => {
+    state.frames.push({ t: (performance.now() - state.t0) / 1000, phase: state.phase, pr: mRaw.read(), pa: mAec.read(), pl: mAll ? mAll.read() : null });
+  }, FRAME_MS);
+}
+const inPhase = (ph) => state.frames.filter((f) => f.phase === ph);
+
+function trackInfo(label, constraintsAsked, stream, err) {
+  if (err) return { label, asked: constraintsAsked, error: err.name + ": " + err.message };
+  const tr = stream.getAudioTracks()[0], s = tr.getSettings();
+  return { label, asked: constraintsAsked, echoCancellation: s.echoCancellation, noiseSuppression: s.noiseSuppression,
+    autoGainControl: s.autoGainControl, sampleRate: s.sampleRate, deviceId: (s.deviceId || "").slice(0, 8), trackLabel: tr.label };
+}
+
+async function playLine(ctx, buffer) {
+  const src = ctx.createBufferSource(); src.buffer = buffer; src.connect(ctx.destination);
+  const done = new Promise((r) => { src.onended = r; });
+  const startT = (performance.now() - state.t0) / 1000;
+  src.start(); return { done, startT };
+}
+
+// ---- main ----
+let result = null;
+$("run").addEventListener("click", async () => {
+  $("run").disabled = true; ["settingsCard","verdictCard","chartCard","copyCard"].forEach((i) => $(i).hidden = true);
+  state.frames = []; state.phase = "idle";
+  const streams = []; let ctx = null;
+  try {
+    ctx = new AudioContext(); await ctx.resume();
+    setStatus("Requesting microphone...");
+    let sRaw, sAec;
+    try { sRaw = await navigator.mediaDevices.getUserMedia({ audio: RAW }); streams.push(sRaw); }
+    catch (e) { throw Object.assign(e, { stage: "raw" }); }
+    try { sAec = await navigator.mediaDevices.getUserMedia({ audio: AEC }); streams.push(sAec); }
+    catch (e) { throw Object.assign(e, { stage: "aec" }); }
+    let sAll = null, allErr = null;
+    try { sAll = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: "all", noiseSuppression:true, autoGainControl:true } }); streams.push(sAll); }
+    catch (e) { allErr = e; }
+
+    const infoRaw = trackInfo("Raw", "all three false", sRaw), infoAec = trackInfo("AEC", "all three true", sAec),
+          infoAll = trackInfo('AEC "all"', 'echoCancellation:"all"', sAll, allErr);
+    const rawHonored = infoRaw.echoCancellation === false && infoRaw.noiseSuppression === false && infoRaw.autoGainControl === false;
+    const aecHonored = infoAec.echoCancellation === true || infoAec.echoCancellation === "all" || (typeof infoAec.echoCancellation === "string" && infoAec.echoCancellation !== "none");
+    const dual = rawHonored && aecHonored;
+    renderSettings([infoRaw, infoAec, infoAll], rawHonored, aecHonored, allErr);
+
+    const mRaw = makeMeter(ctx, sRaw), mAec = makeMeter(ctx, sAec), mAll = sAll ? makeMeter(ctx, sAll) : null;
+    const tts = await loadTts(ctx);
+    const lineDur = tts.buffer.duration;
+
+    startSampling(mRaw, mAec, mAll);
+    // Phase 1 baseline
+    state.phase = "baseline"; setStatus("Phase 1/3: baseline");
+    setPrompt("Stay SILENT. Measuring room noise...", "silent");
+    await sleep(BASELINE_S * 1000);
+    // Phase 2 silent playback
+    state.phase = "playback"; setStatus("Phase 2/3: teacher line, you stay silent");
+    setPrompt("Stay SILENT while the coach talks", "silent");
+    const p2 = await playLine(ctx, tts.buffer); const p2start = p2.startT;
+    await p2.done; await sleep(TAIL_S * 1000);
+    // Phase 3 barge-in
+    state.phase = "bargein"; setStatus("Phase 3/3: speak over the coach");
+    setPrompt("Get ready...", "");
+    await sleep(600);
+    const p3 = await playLine(ctx, tts.buffer); const p3start = p3.startT;
+    setTimeout(() => { if (state.phase === "bargein") setPrompt('SAY LOUDLY: "hello hello hello"', "speak"); }, SPEAK_START_S * 1000 - 300);
+    await p3.done; await sleep(TAIL_S * 1000);
+    state.phase = "done"; clearInterval(sampler);
+    setPrompt("Done. Results below.", "");
+    setStatus("");
+
+    result = analyze({ infoRaw, infoAec, infoAll, rawHonored, aecHonored, dual, allErr, tts, lineDur, p2start, p3start, hasAll: !!sAll });
+    render(result);
+  } catch (e) {
+    if (sampler) clearInterval(sampler);
+    const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+    const msg = denied ? "Microphone permission was denied. Allow the microphone for this page in the browser address bar and press Run test again."
+      : e && e.name === "NotFoundError" ? "No microphone was found."
+      : "Test failed" + (e && e.stage ? " (" + e.stage + " track)" : "") + ": " + (e && (e.name + " " + e.message));
+    setPrompt(msg, ""); $("prompt").classList.add("error"); setStatus("");
+    console.warn(msg);
+  } finally {
+    streams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
+    if (ctx) ctx.close().catch(() => {});
+    $("run").disabled = false; $("run").textContent = "Run test again";
+  }
+});
+
+function analyze(c) {
+  const base = inPhase("baseline").slice(2);                    // drop first frames (device warm-up)
+  const play = inPhase("playback").filter((f) => f.t >= c.p2start && f.t <= c.p2start + c.lineDur);
+  const win = (frames, start) => frames.filter((f) => f.t >= start + SPEAK_START_S && f.t <= start + c.lineDur);
+  const silentWin = win(inPhase("playback"), c.p2start), speakWin = win(inPhase("bargein"), c.p3start);
+  const lvl = (frames, key) => db(mean(frames.map((f) => f[key])));
+  const floorRaw = lvl(base, "pr"), echoRaw = lvl(play, "pr"), aboveRaw = echoRaw - floorRaw;
+  const silentRaw = lvl(silentWin, "pr"), speakRaw = lvl(speakWin, "pr");
+  const track = (key) => {
+    const floor = lvl(base, key), echo = lvl(play, key), above = echo - floor, suppression = echoRaw - echo;
+    let sup = "no"; if (suppression >= 20 && above <= 6) sup = "yes"; else if (suppression >= 10) sup = "partly";
+    const silent = lvl(silentWin, key), speak = lvl(speakWin, key), rise = speak - silent;
+    // threshold: noise floor + echo residual (power sum) + 8 dB
+    const thr = db(Math.pow(10, floor/10) + Math.pow(10, echo/10)) + 8;
+    const fr = inPhase("bargein").filter((f) => f.t >= c.p3start + SPEAK_START_S - 0.3);
+    let delay = null;
+    for (let i = 0; i + 1 < fr.length; i++)
+      if (db(fr[i][key]) > thr && db(fr[i+1][key]) > thr) { delay = Math.max(0, fr[i].t - (c.p3start + SPEAK_START_S)); break; }
+    let barge = "notfeasible";
+    if (rise >= 10 && delay != null && delay <= 0.6) barge = "feasible";
+    else if (rise >= 5 && delay != null) barge = "marginal";
+    return { floor, echo, above, suppression, sup, silent, speak, rise, thr, delay, barge, inconclusive: aboveRaw < 10 };
+  };
+  const aec = track("pa"), aecAll = c.hasAll ? track("pl") : null;
+  return {
+    floorRaw, echoRaw, aboveRaw, silentRaw, speakRaw, aec, aecAll,
+    dual: c.dual, ttsSource: c.tts.source, lineDur: c.lineDur, p2start: c.p2start, p3start: c.p3start,
+    info: { raw: c.infoRaw, aec: c.infoAec, aecAll: c.infoAll },
+    allAccepted: !c.allErr, allError: c.allErr ? c.allErr.name + ": " + c.allErr.message : null,
+  };
+}
+
+function renderSettings(infos, rawOk, aecOk, allErr) {
+  $("settingsCard").hidden = false;
+  const flagCell = (ok, bad) => ok ? "" : ` <span class="flag no">${bad}</span>`;
+  let h = "<tr><th>Track</th><th>echoCancellation</th><th>noiseSuppression</th><th>autoGainControl</th><th>sampleRate</th><th>device</th></tr>";
+  for (const i of infos) {
+    if (i.error) { h += `<tr><td>${i.label}</td><td colspan="5" class="no">rejected: ${i.error}</td></tr>`; continue; }
+    h += `<tr><td>${i.label}<br><span class="small">asked: ${i.asked}</span></td><td>${i.echoCancellation}</td><td>${i.noiseSuppression}</td><td>${i.autoGainControl}</td><td>${i.sampleRate}</td><td>${i.deviceId}</td></tr>`;
+  }
+  $("settingsTable").innerHTML = h;
+  const bits = [];
+  bits.push(rawOk ? "Raw track settings honored." : "WARNING: raw track did NOT report all three processing features off.");
+  bits.push(aecOk ? "AEC track reports echo cancellation on." : "WARNING: AEC track does not report echo cancellation on.");
+  bits.push(allErr ? 'echoCancellation:"all" rejected by this browser.' : 'echoCancellation:"all" accepted.');
+  $("allNote").textContent = bits.join(" ");
+}
+
+function render(r) {
+  $("verdictCard").hidden = false; $("chartCard").hidden = false; $("copyCard").hidden = false;
+  const v = (title, cls, text) => `<div class="verdict">${title}: <span class="${cls}">${text}</span></div>`;
+  let h = v("Dual tracks honored", r.dual ? "yes" : "no", r.dual ? "yes" : "no");
+  const tracks = [["AEC (true)", r.aec]]; if (r.aecAll) tracks.push(["AEC (all)", r.aecAll]);
+  for (const [name, t] of tracks) {
+    const supText = t.sup === "yes" ? "yes (suppression >= 20 dB, residual within 6 dB of floor)" : t.sup === "partly" ? "partly (10-20 dB, or residual above 6 dB)" : "no (< 10 dB)";
+    h += `<h2 style="margin-top:14px">${name}</h2>`;
+    h += v("AEC removes Web Audio TTS", t.sup, supText + (t.inconclusive ? " - but INCONCLUSIVE: raw echo is under 10 dB above floor, raise speaker volume and rerun" : ""));
+    h += v("Barge-in on speakers", t.barge, t.barge === "feasible" ? "feasible" : t.barge === "marginal" ? "marginal" : "not feasible - use headphones");
+  }
+  if (!r.aecAll) h += '<p class="small">AEC (all) track was rejected by this browser, so it was not measured.</p>';
+  $("verdicts").innerHTML = h;
+  const A = r.aec, L = r.aecAll, c3 = (f) => L ? fmt(f(L)) : "n/a";
+  const rows = [
+    ["Noise floor (dBFS)", fmt(r.floorRaw), fmt(A.floor), c3((x) => x.floor)],
+    ["Level during playback (dBFS)", fmt(r.echoRaw), fmt(A.echo), c3((x) => x.echo)],
+    ["Echo above floor (dB)", fmt(r.aboveRaw), fmt(A.above), c3((x) => x.above)],
+    ["Suppression, raw minus track (dB)", "", fmt(A.suppression), c3((x) => x.suppression)],
+    ["Silent-playback level, speaking window (dBFS)", fmt(r.silentRaw), fmt(A.silent), c3((x) => x.silent)],
+    ["Barge-in level, speaking window (dBFS)", fmt(r.speakRaw), fmt(A.speak), c3((x) => x.speak)],
+    ["Rise when speaking (dB)", fmt(r.speakRaw - r.silentRaw), fmt(A.rise), c3((x) => x.rise)],
+    ["Detector threshold (dBFS)", "", fmt(A.thr), c3((x) => x.thr)],
+    ["Detection delay after prompt (ms)", "", A.delay == null ? "not detected" : fmt(A.delay * 1000, 0),
+      L ? (L.delay == null ? "not detected" : fmt(L.delay * 1000, 0)) : "n/a"],
+  ];
+  $("numbers").innerHTML = "<tr><th>Metric</th><th>Raw</th><th>AEC (true)</th><th>AEC (all)</th></tr>" +
+    rows.map((x) => `<tr><td>${x[0]}</td><td>${x[1]}</td><td>${x[2]}</td><td>${x[3]}</td></tr>`).join("");
+  $("caveats").textContent = "TTS source: " + r.ttsSource + ". Frames are 50 ms. The AEC filter adapts over the first moments of playback, so suppression is averaged over the whole line.";
+  drawChart(r);
+  const dbOf = (t) => t && ({ floor: +fmt(t.floor), playback: +fmt(t.echo), echoAboveFloor: +fmt(t.above), suppression: +fmt(t.suppression),
+    silentWindow: +fmt(t.silent), speaking: +fmt(t.speak), rise: +fmt(t.rise), threshold: +fmt(t.thr), detectionDelayMs: t.delay == null ? null : Math.round(t.delay * 1000) });
+  const summary = {
+    userAgent: navigator.userAgent, when: new Date().toISOString(), ttsSource: r.ttsSource, lineSeconds: +r.lineDur.toFixed(2),
+    settings: r.info, echoCancellationAllAccepted: r.allAccepted, echoCancellationAllError: r.allError,
+    dB: { raw: { floor: +fmt(r.floorRaw), playback: +fmt(r.echoRaw), echoAboveFloor: +fmt(r.aboveRaw), silentWindow: +fmt(r.silentRaw), speaking: +fmt(r.speakRaw) },
+      aec: dbOf(A), aecAll: dbOf(L) || null },
+    verdicts: { dualTracksHonored: r.dual, inconclusiveLowEcho: A.inconclusive,
+      aec: { aecRemovesWebAudioTts: A.sup, bargeIn: A.barge }, aecAll: L ? { aecRemovesWebAudioTts: L.sup, bargeIn: L.barge } : null },
+  };
+  $("json").textContent = JSON.stringify(summary, null, 2);
+}
+
+function drawChart(r) {
+  const cv = $("chart"), g = cv.getContext("2d"), W = cv.width, H = cv.height, L = 70, B = 40, T = 10;
+  g.clearRect(0, 0, W, H);
+  const fr = state.frames, tMax = fr[fr.length - 1].t, lo = -100, hi = 0;
+  const X = (t) => L + (t / tMax) * (W - L - 10), Y = (d) => T + (hi - Math.max(lo, Math.min(hi, d))) / (hi - lo) * (H - T - B);
+  const bands = { baseline:"#DADFD9", playback:"#EEF2F7", bargein:"#DADFD9" };
+  for (const ph of ["baseline","playback","bargein"]) {
+    const f = fr.filter((x) => x.phase === ph); if (!f.length) continue;
+    g.fillStyle = bands[ph]; g.fillRect(X(f[0].t), T, X(f[f.length-1].t) - X(f[0].t), H - T - B);
+  }
+  g.fillStyle = "rgba(180,83,26,0.18)"; g.fillRect(X(r.p3start + SPEAK_START_S), T, X(r.p3start + r.lineDur) - X(r.p3start + SPEAK_START_S), H - T - B);
+  g.font = "22px system-ui"; g.fillStyle = "#203E68"; g.strokeStyle = "#CBD7E6"; g.lineWidth = 1;
+  for (let d = lo; d <= hi; d += 20) { g.beginPath(); g.moveTo(L, Y(d)); g.lineTo(W - 10, Y(d)); g.stroke(); g.fillText(d, 8, Y(d) + 6); }
+  for (let t = 0; t <= tMax; t += 2) g.fillText(t + "s", X(t) - 10, H - 12);
+  const line = (key, color) => { g.strokeStyle = color; g.lineWidth = 3; g.beginPath(); fr.forEach((f, i) => { const x = X(f.t), y = Y(db(f[key])); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); };
+  line("pr", "#203E68"); line("pa", "#B4531A"); if (r.aecAll) line("pl", "#2E7D4F");
+  g.strokeStyle = "#888"; g.setLineDash([8, 6]); g.lineWidth = 2; g.beginPath(); g.moveTo(L, Y(r.aec.thr)); g.lineTo(W - 10, Y(r.aec.thr)); g.stroke(); g.setLineDash([]);
+}
+
+$("copy").addEventListener("click", async () => {
+  const txt = $("json").textContent;
+  try { await navigator.clipboard.writeText(txt); $("copyStatus").textContent = "Copied. Paste it back to the team."; }
+  catch {
+    const ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); $("copyStatus").textContent = "Copied. Paste it back to the team."; }
+    catch { $("copyStatus").textContent = "Copy failed: select the text below and copy manually."; }
+    ta.remove();
+  }
+});
+</script>
+</body>
+</html>
