@@ -234,7 +234,7 @@ export default function PracticeStudio() {
 
   const guidePane = (
     <section className="lp-pane" aria-label="Mouth guide">
-      <MouthReference cue={cueForSound(plan.sound)} view={refView} slow={slow} />
+      <MouthReference cue={cueForSound(plan.sound)} view={refView} slow={slow} paused={narration.paused} />
       <div className="lp-overlay lp-overlay--tl lp-pills">
         {compact ? (
           viewSwitch
@@ -326,7 +326,7 @@ export default function PracticeStudio() {
       stageKey="practice"
       className="lp ob-content--full"
       onClose={{ label: 'Pause or finish', onClick: () => navigate('/summary') }}
-      caption={<CaptionBar text={narration.caption} />}
+      caption={<CaptionBar text={narration.caption} paused={narration.paused} onToggle={narration.toggle} />}
       footer={
         <>
           <button type="button" className="ob-text-btn lp-listen" onClick={playReference} disabled={busy}>

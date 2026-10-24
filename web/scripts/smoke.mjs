@@ -51,6 +51,15 @@ console.log('tutorial guide ready:', tutReady, '| caption:', await page.locator(
 await page.waitForTimeout(9000);
 console.log('tutorial caption later:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
 await snap('tutorial');
+// Through to the hands-on part: the guide shrinks, the learner's mic drives the graph.
+await page.getByRole('button', { name: /Allow microphone/ }).waitFor({ timeout: 30000 });
+await page.getByRole('button', { name: /Allow microphone/ }).click();
+await page.waitForTimeout(2500);
+console.log('solo caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'), '| pip:', await page.locator('.tut-pip .mr').getAttribute('data-state'));
+await page.locator('.cap-pause').click();
+console.log('paused:', await page.locator('.cap-pause').getAttribute('aria-pressed'));
+await snap('tutorial-solo');
+await page.locator('.cap-pause').click();
 await page.getByRole('button', { name: 'Skip' }).click();
 await page.waitForTimeout(1500);
 console.log('practice url:', page.url(), '| caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'));

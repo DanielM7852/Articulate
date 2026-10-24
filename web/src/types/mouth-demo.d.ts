@@ -28,6 +28,9 @@ declare module '@mouth-demo/src/mouth-demo.js' {
     lookAt(target: { x: number; y: number } | null): void;
     /** Camera distance multiplier, eased. 1 is the default framing; 0.8 is closer. */
     setZoom(zoom: number): void;
+    /** Freeze the face, camera and choreography clock without losing state. */
+    pause(): void;
+    resume(): void;
     /** Frees GPU resources, listeners and DOM. Safe to call twice. */
     dispose(): void;
   }

@@ -420,6 +420,15 @@ export async function createMouthDemo(container, options = {}) {
       views.setZoom(z);
     },
 
+    // Freeze everything (face, camera, effects, choreography clock) without losing state.
+    pause() {
+      if (!disposed) scene.stopLoop();
+    },
+
+    resume() {
+      if (!disposed) scene.startLoop(frame);
+    },
+
     setStyle(next) {
       if (!STYLES.includes(next)) return;
       style = next;
@@ -460,7 +469,8 @@ export async function createMouthDemo(container, options = {}) {
   syncButtons();
   renderDebug();
 
-  scene.startLoop((dt) => {
+  // One frame of the demo; also the resume target for pause()/resume().
+  function frame(dt) {
     if (pendingSize) {
       scene.setSize(pendingSize.w, pendingSize.h);
       hologram.setSize(pendingSize.w, pendingSize.h);
@@ -488,7 +498,8 @@ export async function createMouthDemo(container, options = {}) {
     hologram.update(scaled);
     particles.update(scaled);
     hologram.render();
-  });
+  }
+  scene.startLoop(frame);
 
   setTimeout(() => {
     if (!disposed) container.dispatchEvent(new CustomEvent("demo:ready", { bubbles: true, detail: { driver: driver.name } }));

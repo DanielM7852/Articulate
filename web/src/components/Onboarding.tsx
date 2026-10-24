@@ -81,6 +81,7 @@ export function OnboardingFrame({
   overlay,
   width,
   className = '',
+  progress = true,
   children,
 }: {
   step: number;
@@ -102,6 +103,8 @@ export function OnboardingFrame({
   /** Column width in px; 640 by default. */
   width?: number;
   className?: string;
+  /** false hides the progress bar (the intro, before the learner has started). */
+  progress?: boolean;
   children: ReactNode;
 }) {
   const { captions, setCaptions, audio, setAudio } = useAppState();
@@ -133,7 +136,7 @@ export function OnboardingFrame({
             <ChevronLeft size={22} aria-hidden="true" />
           </button>
         )}
-        <Progress step={step} total={total} label={progressLabel} />
+        {progress ? <Progress step={step} total={total} label={progressLabel} /> : <span className="grow" aria-hidden="true" />}
         <div className="ob-access">
           <button
             type="button"

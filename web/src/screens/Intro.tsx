@@ -58,9 +58,10 @@ export default function Intro() {
   return (
     <OnboardingFrame
       step={0}
+      progress={false}
       stageKey="intro"
       className="intro ob-content--full"
-      caption={<CaptionBar text={narration.caption} />}
+      caption={<CaptionBar text={narration.caption} paused={narration.paused} onToggle={narration.toggle} />}
       primary={{
         label: 'Let’s begin',
         icon: <ArrowRight size={18} aria-hidden="true" />,
@@ -71,6 +72,7 @@ export default function Intro() {
         cue={beat === 'loading' ? null : 'spread-lips'}
         look={look}
         zoom={beat === 'loading' ? 1 : 0.82}
+        paused={narration.paused}
         onReady={() => setGuideReady(true)}
         onError={() => setGuideReady(true)}
       />

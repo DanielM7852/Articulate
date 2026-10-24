@@ -45,6 +45,37 @@
   color: var(--color-muted);
   white-space: nowrap;
 }
+.cap-controls {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.cap-pause {
+  width: 40px;
+  height: 40px;
+  border: 1.5px solid var(--color-line);
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-navy);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, transform var(--dur-press) var(--ease-out);
+}
+.cap-pause:active {
+  transform: scale(0.92);
+}
+.cap-pause[aria-pressed='true'] {
+  background: var(--color-navy);
+  border-color: var(--color-navy);
+  color: #fff;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cap-pause:hover:not([aria-pressed='true']) {
+    border-color: var(--color-navy-mist);
+    background: var(--color-navy-soft);
+  }
+}
 
 /* ---------- Intro ---------- */
 .ob-content.intro {
@@ -60,6 +91,19 @@
   pointer-events: none;
 }
 
+/* The session's single 3D guide is moved between hosts; this is its mount node. */
+.guide-mount {
+  position: absolute;
+  inset: 0;
+}
+
+/* Larger captions once the guide has stepped aside and the learner is on their own */
+.cap-wrap--large .cap-text {
+  font-size: 24px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
 /* ---------- Tutorial ---------- */
 .tut-stage {
   flex: 1;
@@ -67,21 +111,43 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   border-top: 1px solid var(--color-line);
-  transition: grid-template-columns 700ms var(--ease-drawer);
 }
 .tut-stage.is-solo {
-  grid-template-columns: 0fr 1fr;
+  grid-template-columns: 1fr;
 }
 .tut-guide {
   min-width: 0;
-  transition: opacity 400ms ease;
 }
-.tut-stage.is-solo .tut-guide {
-  opacity: 0;
-  border-right: 0;
+
+/* The guide, shrunk into a corner of the graph while the learner tries it */
+.tut-pip {
+  position: absolute;
+  left: 16px;
+  bottom: 44px;
+  z-index: 2;
+  width: 190px;
+  height: 190px;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(218, 223, 217, 0.9);
+  box-shadow: 0 16px 36px rgba(23, 47, 78, 0.16), 0 2px 6px rgba(23, 47, 78, 0.08);
+  animation: tut-pip-in 560ms var(--ease-drawer) both;
 }
-.tut-stage.is-solo .lp-pane + .lp-pane {
-  border-left: 0;
+.tut-pip > .mr {
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+}
+@keyframes tut-pip-in {
+  from {
+    opacity: 0;
+    transform: translate(-24px, 24px) scale(0.6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tut-pip {
+    animation: none;
+  }
 }
 
 @media (max-width: 720px) {
@@ -97,14 +163,21 @@
   .tut-stage {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr;
-    transition: grid-template-rows 700ms var(--ease-drawer);
   }
   .tut-stage.is-solo {
-    grid-template-columns: 1fr;
-    grid-template-rows: 0fr 1fr;
+    grid-template-rows: 1fr;
   }
   .tut-stage .lp-pane + .lp-pane {
     border-left: 0;
     border-top: 1px solid var(--color-line);
+  }
+  .tut-pip {
+    width: 130px;
+    height: 130px;
+    left: 10px;
+    bottom: 40px;
+  }
+  .cap-wrap--large .cap-text {
+    font-size: 19px;
   }
 }

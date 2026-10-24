@@ -37,10 +37,13 @@ const DEMO_START = { f1: 620, f2: 1500 };
 const GLIDE_MS = 2600;
 const YOU_HOLD_SEC = 1.5;
 
-/** A scripted cursor for the explanation: glides into the ee region, then rests there. The hold only counts once `holding`. */
-function useDemoCursor(active: boolean, holding: boolean) {
-  const holdingRef = useRef(holding);
-  holdingRef.current = holding;
+/**
+ * A scripted cursor for the explanation: glides into the ee region, then rests there.
+ * The hold only counts once `holding`; `paused` freezes it on its own clock.
+ */
+function useDemoCursor(active: boolean, holding: boolean, paused: boolean) {
+  const flags = useRef({ holding, paused });
+  flags.current = { holding, paused };
   const [state, setState] = useState<{ point: VowelPoint | null; trace: VowelPoint[]; holdSec: number }>({
     point: null,
     trace: [],
@@ -51,29 +54,35 @@ function useDemoCursor(active: boolean, holding: boolean) {
       setState({ point: null, trace: [], holdSec: 0 });
       return;
     }
-    const t0 = performance.now();
     let raf = 0;
+    let elapsed = 0; // ms on the demo's own clock, which stops while paused
+    let prev = performance.now();
+    let sinceFrame = 0;
     let arrivedAt: number | null = null;
-    let last = 0;
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
-      if (now - last < 40) return;
-      last = now;
-      const t = Math.min(1, (now - t0) / GLIDE_MS);
+      const dt = now - prev;
+      prev = now;
+      if (flags.current.paused) return;
+      elapsed += dt;
+      sinceFrame += dt;
+      if (sinceFrame < 40) return;
+      sinceFrame = 0;
+      const t = Math.min(1, elapsed / GLIDE_MS);
       const e = 1 - Math.pow(1 - t, 3);
-      const wobble = t < 1 ? Math.sin(now / 90) * 0.03 * (1 - t) : Math.sin(now / 160) * 0.012;
+      const wobble = t < 1 ? Math.sin(elapsed / 90) * 0.03 * (1 - t) : Math.sin(elapsed / 160) * 0.012;
       const point: VowelPoint = {
         f1: DEMO_START.f1 * Math.exp((Math.log(TARGET.f1 / DEMO_START.f1) + wobble) * e),
         f2: DEMO_START.f2 * Math.exp((Math.log(TARGET.f2 / DEMO_START.f2) - wobble) * e),
-        timestampMs: now - t0,
+        timestampMs: elapsed,
         segment: 0,
       };
-      if (holdingRef.current && inTarget(point, TARGET)) arrivedAt ??= now;
+      if (flags.current.holding && inTarget(point, TARGET)) arrivedAt ??= elapsed;
       else arrivedAt = null;
       setState((s) => ({
         point,
         trace: [...s.trace.slice(-120), point],
-        holdSec: arrivedAt ? (now - arrivedAt) / 1000 : 0,
+        holdSec: arrivedAt !== null ? (elapsed - arrivedAt) / 1000 : 0,
       }));
     };
     raf = requestAnimationFrame(tick);
@@ -89,7 +98,7 @@ export default function Tutorial() {
   const mic = useMicrophone();
   const live = useVowelTracking(mic.stream, TARGET);
   const [phase, setPhase] = useState<Phase>('watch');
-  const demo = useDemoCursor(phase === 'dot' || phase === 'ring', phase === 'ring');
+  const demo = useDemoCursor(phase === 'dot' || phase === 'ring', phase === 'ring', narration.paused);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
@@ -140,14 +149,21 @@ export default function Tutorial() {
       step={ONBOARDING_STEPS}
       stageKey="tutorial"
       className="tut ob-content--full"
-      caption={<CaptionBar text={narration.caption} />}
+      caption={
+        <div className={`cap-wrap ${solo ? 'cap-wrap--large' : ''}`}>
+          <CaptionBar text={narration.caption} paused={narration.paused} onToggle={narration.toggle} />
+        </div>
+      }
       secondary={phase === 'done' ? undefined : { label: 'Skip', onClick: finish }}
       primary={primary}
     >
       <div className={`tut-stage ${solo ? 'is-solo' : ''}`}>
-        <section className="lp-pane tut-guide" aria-label="Mouth guide" aria-hidden={solo}>
-          <MouthReference cue="spread-lips" zoom={phase === 'watch' ? 0.8 : 1} />
-        </section>
+        {/* Full-size guide while explaining; once the learner takes over it shrinks into a corner of the graph. */}
+        {!solo && (
+          <section className="lp-pane tut-guide" aria-label="Mouth guide">
+            <MouthReference cue="spread-lips" zoom={phase === 'watch' ? 0.8 : 1} paused={narration.paused} />
+          </section>
+        )}
         <section className="lp-pane" aria-label="Your sound">
           <VowelGraph
             sound="i"
@@ -161,6 +177,11 @@ export default function Tutorial() {
             <span className="lp-overlay lp-overlay--bl lp-pill" role="alert">
               <TriangleAlert size={15} aria-hidden="true" /> {micMessage}
             </span>
+          )}
+          {solo && (
+            <div className="tut-pip" aria-label="Mouth guide, small">
+              <MouthReference cue="spread-lips" zoom={0.75} paused={narration.paused} />
+            </div>
           )}
         </section>
       </div>
