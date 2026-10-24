@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import inspect
 import logging
 import secrets
 import time
@@ -11,10 +12,10 @@ from .audio import RATE, AudioCache, pack_frame, unpack_frame
 from .config import Settings
 from .decisions import caption_for, fallback, validate_decision
 from .coaching import assess, context_from_records, excluded_cues, retry_outcome, usable
-from .features import AcousticAdapter, summarize, synthetic_frame
+from .features import AcousticAdapter, merge_vision, summarize, synthetic_frame
 from .persistence import Outbox
 from .providers import CueRepository, Reasoner, Speech
-from .schemas import Command, CueOutcome, Event, Session
+from .schemas import Command, CueOutcome, Event, Session, VisionKeyframe, VisionMetrics
 
 logger = logging.getLogger("articulate.metrics")
 
@@ -51,6 +52,10 @@ class Runtime:
         self.attempt_id = None
         self.generation_id = None
         self.frames = []
+        self.vision_frames: list[VisionMetrics] = []
+        self.latest_vision: VisionMetrics | None = None
+        self.keyframes: list[VisionKeyframe] = []
+        self.camera_status = "unavailable; no lip evidence"
         self.history = []
         self.outcomes = []
         self.latest_decision = None
@@ -96,7 +101,8 @@ class Runtime:
             if self.settings.mock_mode
             else "SpacetimeDB outbox",
             "mock_mode": self.settings.mock_mode,
-            "camera": "unavailable; no lip evidence",
+            "camera": self.camera_status,
+            "latest_vision": self.latest_vision.model_dump(mode="json") if self.latest_vision else None,
             "cache_keys": sorted(self.cache_keys),
             "commands": list(self.commands.items())[-100:],
         }
@@ -163,6 +169,27 @@ class Runtime:
         )
         self.emit("metrics", payload)
 
+    def ingest_vision(
+        self,
+        frame: VisionMetrics | None = None,
+        keyframes: list[VisionKeyframe] | None = None,
+    ):
+        if frame is not None:
+            self.latest_vision = frame
+            self.camera_status = (
+                "tracking; MediaPipe Face Landmarker"
+                if frame.valid
+                else f"degraded ({', '.join(frame.quality_flags) or 'invalid'})"
+            )
+            if self.session.state == "capturing" and len(self.vision_frames) < 300:
+                self.vision_frames.append(frame)
+            self.emit("vision.frame", frame.model_dump(mode="json"))
+        if keyframes:
+            by_label = {kf.label: kf for kf in self.keyframes}
+            for kf in keyframes[:4]:
+                by_label[kf.label] = kf
+            self.keyframes = list(by_label.values())[:4]
+
     async def interrupt(self):
         generation = self.generation_id
         self.generation_id = None  # invalidate before awaiting provider cancellation
@@ -203,6 +230,14 @@ class Runtime:
                     raise ValueError("final sample precedes uploaded samples")
                 if body.final_sample > self.sample_rate * 30:
                     raise ValueError("attempt exceeds 30 seconds")
+                if body.vision_frames:
+                    for vf in body.vision_frames[:300]:
+                        if len(self.vision_frames) < 300:
+                            self.vision_frames.append(vf)
+                        self.latest_vision = vf
+                    self.camera_status = "tracking; MediaPipe Face Landmarker"
+                if body.keyframes:
+                    self.ingest_vision(keyframes=body.keyframes)
                 self.session.revision += 1
                 self.state("analyzing")
                 if self.fixture_task:
@@ -220,6 +255,8 @@ class Runtime:
                 await self.interrupt()
                 self.attempt_id, self.generation_id = uuid4(), uuid4()
                 self.frames = []
+                self.vision_frames = []
+                self.keyframes = []
                 self.latest_decision = None
                 self.source, self.sample_rate = body.source, body.sample_rate
                 self.next_sample = self.next_seq = self.processed_sample = 0
@@ -230,6 +267,9 @@ class Runtime:
                     self.fixture_task = self.task(self.fixture())
                 else:
                     self.capture_task = self.task(self.capture())
+            elif kind == "vision.frame":
+                self.ingest_vision(frame=body.frame)
+                self.session.revision += 1
             elif kind == "session.configure":
                 await self.interrupt()
                 self.session.target_id = body.target_id
@@ -271,7 +311,7 @@ class Runtime:
         for index in range(125):
             if self.session.state != "capturing":
                 return
-            frame = synthetic_frame(self.session.target_id, index)
+            frame = merge_vision(synthetic_frame(self.session.target_id, index), self.latest_vision)
             self.frames.append(frame)
             self.processed_sample = self.next_sample = (index + 1) * 960
             self.emit("features.frame", frame.model_dump())
@@ -299,11 +339,17 @@ class Runtime:
         adapter = AcousticAdapter(self.sample_rate, self.settings.formant_ceiling)
         while True:
             offset, pcm = await self.uploads.get()
-            frame = await asyncio.to_thread(adapter.analyze, pcm, offset)
+            raw_frame = await asyncio.to_thread(adapter.analyze, pcm, offset)
+            frame = merge_vision(raw_frame, self.latest_vision)
             self.frames.append(frame)
             self.processed_sample = offset + len(pcm) // 2
             self.processed.set()
             self.emit("features.frame", frame.model_dump())
+
+    async def _call_reasoner(self, summary, generation, cues, context):
+        if self.keyframes and "keyframes" in inspect.signature(self.reasoner.decide).parameters:
+            return await self.reasoner.decide(summary, generation, cues, context, self.keyframes)
+        return await self.reasoner.decide(summary, generation, cues, context)
 
     async def feedback(self, final_sample):
         attempt, generation = self.attempt_id, self.generation_id
@@ -332,6 +378,8 @@ class Runtime:
                 end,
                 self.source,
                 self.session.assistance_level,
+                vision_frames=self.vision_frames,
+                keyframes_count=len(self.keyframes),
             )
             if incomplete:
                 summary.quality_flags.append("incomplete_upload")
@@ -362,7 +410,7 @@ class Runtime:
             t = time.perf_counter()
             try:
                 async with asyncio.timeout(self.settings.provider_deadline_seconds):
-                    proposed = await self.reasoner.decide(summary, generation, cues, context)
+                    proposed = await self._call_reasoner(summary, generation, cues, context)
                     decision = validate_decision(
                         proposed,
                         summary,

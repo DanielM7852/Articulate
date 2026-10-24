@@ -15,7 +15,15 @@ from .audio import RATE
 from .config import ROOT, Settings
 from .decisions import fallback, resolve_proposal
 from .coaching import plan
-from .schemas import CORPUS_REVISION, TARGETS, AttemptSummary, CoachingContext, CoachingProposal, Cue
+from .schemas import (
+    CORPUS_REVISION,
+    TARGETS,
+    AttemptSummary,
+    CoachingContext,
+    CoachingProposal,
+    Cue,
+    VisionKeyframe,
+)
 
 
 class CueRepository:
@@ -136,7 +144,14 @@ class Reasoner:
                 api_key=settings.anthropic_api_key, max_retries=0, timeout=settings.provider_deadline_seconds
             )
 
-    async def decide(self, summary: AttemptSummary, generation, cues: list[Cue], context: CoachingContext):
+    async def decide(
+        self,
+        summary: AttemptSummary,
+        generation,
+        cues: list[Cue],
+        context: CoachingContext,
+        keyframes: list[VisionKeyframe] | None = None,
+    ):
         if not isinstance(context, CoachingContext):
             raise TypeError("CoachingContext is required; pass typed attempt and cue history")
         if len(cues) > 3:
@@ -163,6 +178,29 @@ class Reasoner:
         if not self.client or not self.settings.claude_model:
             raise RuntimeError("Claude key/model missing")
         self.calls += 1
+        payload = json.dumps(
+            {
+                "summary": summary.model_dump(mode="json"),
+                "generation_id": str(generation),
+                "attempt_id": str(summary.attempt_id),
+                "plan": options.model_dump(mode="json"),
+                "cues": [c.model_dump() for c in cues],
+                "recent_outcomes": [o.model_dump(mode="json") for o in context.cue_history[-4:]],
+                "policy_version": context.policy.version,
+            }
+        )
+        content: str | list[dict] = payload
+        if keyframes:
+            # Optional mouth keyframes are supplementary context; the controller still resolves all wording.
+            content = [{"type": "text", "text": payload}]
+            for kf in keyframes[:3]:
+                content.append({"type": "text", "text": f"Mouth keyframe '{kf.label}' at {round(kf.timestamp_ms)} ms:"})
+                content.append(
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": kf.mime_type, "data": kf.data_base64},
+                    }
+                )
         response = await self.client.messages.parse(
             model=self.settings.claude_model,
             max_tokens=450,
@@ -171,17 +209,7 @@ class Reasoner:
             messages=[
                 {
                     "role": "user",
-                    "content": json.dumps(
-                        {
-                            "summary": summary.model_dump(mode="json"),
-                            "generation_id": str(generation),
-                            "attempt_id": str(summary.attempt_id),
-                            "plan": options.model_dump(mode="json"),
-                            "cues": [c.model_dump() for c in cues],
-                            "recent_outcomes": [o.model_dump(mode="json") for o in context.cue_history[-4:]],
-                            "policy_version": context.policy.version,
-                        }
-                    ),
+                    "content": content,
                 }
             ],
         )

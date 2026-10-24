@@ -23,17 +23,63 @@ export type AudioEnabled = boolean;
 export type AssistanceLevel = "guided" | "reduced";
 export type Revision = number;
 export type State = "ready" | "capturing" | "analyzing" | "coaching" | "presenting" | "paused";
-export type SampleOffset = number;
 export type TimestampMs = number;
+export type Valid = boolean;
+export type QualityFlags = string[];
+export type LipOpening = number | null;
+export type OuterLipHeight = number | null;
+export type VermilionFlare = number | null;
+export type LipWidth = number | null;
+export type LipAspectRatio = number | null;
+export type LipProtrusionZ = number | null;
+export type JawDrop = number | null;
+export type MouthSymmetry = number | null;
+export type InnerMouthArea = number | null;
+export type RoundingScore = number | null;
+export type SpreadScore = number | null;
+export type OpennessScore = number | null;
+export type PitchDeg = number | null;
+export type YawDeg = number | null;
+export type RollDeg = number | null;
+export type Label1 = "onset" | "peak_nucleus" | "sustained_hold";
+export type TimestampMs1 = number;
+export type MimeType = "image/jpeg" | "image/webp";
+export type DataBase64 = string;
+export type UsableFrames = number;
+export type TotalFrames = number;
+export type UsableFraction = number;
+export type QualityFlags1 = string[];
+export type LipOpeningMean = number | null;
+export type LipOpeningMax = number | null;
+export type OuterLipHeightMean = number | null;
+export type VermilionFlareMean = number | null;
+export type LipWidthMean = number | null;
+export type LipWidthMin = number | null;
+export type LipAspectRatioMean = number | null;
+export type LipProtrusionZMean = number | null;
+export type JawDropMean = number | null;
+export type MouthSymmetryMean = number | null;
+export type InnerMouthAreaMean = number | null;
+export type RoundingScoreMean = number | null;
+export type RoundingScoreMax = number | null;
+export type SpreadScoreMean = number | null;
+export type SpreadScoreMax = number | null;
+export type OpennessScoreMean = number | null;
+export type OpennessScoreMax = number | null;
+export type PostureStabilityStd = number | null;
+export type VoicedVisualAlignment = number | null;
+export type KeyframesCount = number;
+export type SampleOffset = number;
+export type TimestampMs2 = number;
 export type DurationMs = number;
 export type F11 = number | null;
 export type F21 = number | null;
 export type F0 = number | null;
-export type Valid = boolean;
+export type Valid1 = boolean;
 /**
  * @maxItems 10
  */
-export type QualityFlags =
+export type QualityFlags2 =
   | []
   | [string]
   | [string, string]
@@ -46,7 +92,14 @@ export type QualityFlags =
   | [string, string, string, string, string, string, string, string, string]
   | [string, string, string, string, string, string, string, string, string, string];
 export type Source = "microphone" | "synthetic";
-export type LipOpening = number | null;
+export type LipOpening1 = number | null;
+export type LipWidth1 = number | null;
+export type LipAspectRatio1 = number | null;
+export type LipProtrusionZ1 = number | null;
+export type JawDrop1 = number | null;
+export type RoundingScore1 = number | null;
+export type SpreadScore1 = number | null;
+export type OpennessScore1 = number | null;
 export type AttemptId = string;
 export type TargetId1 = "i" | "u" | "aa";
 export type TargetVersion1 = 1;
@@ -54,15 +107,19 @@ export type CaptureStartSample = number;
 export type CaptureEndSample = number;
 export type SampleRate = number;
 export type UsableDurationMs = number;
-export type UsableFraction = number;
+export type UsableFraction1 = number;
 export type F1Mean = number | null;
 export type F2Mean = number | null;
 export type TargetDistance = number | null;
-export type LipOpeningMean = number | null;
+export type LipOpeningMean1 = number | null;
+export type LipWidthMean1 = number | null;
+export type LipRoundingMean = number | null;
+export type LipSpreadMean = number | null;
+export type JawDropMean1 = number | null;
 /**
  * @maxItems 32
  */
-export type QualityFlags1 = string[];
+export type QualityFlags3 = string[];
 /**
  * @maxItems 16
  */
@@ -133,6 +190,7 @@ export type PoseId1 = "vowel-i" | "vowel-u" | "vowel-aa" | "neutral";
 export type AttemptId1 = string;
 export type GenerationId = string;
 export type Observation = string;
+export type VisualObservation = string | null;
 export type EvidenceFields1 = string[];
 export type CueId = string | null;
 export type CueVersion = number | null;
@@ -154,7 +212,17 @@ export type ObservationId =
     )
   | null;
 export type AttemptId2 = string;
-export type Field = "usable_duration_ms" | "usable_fraction" | "target_distance" | "f1_mean" | "f2_mean";
+export type Field =
+  | "usable_duration_ms"
+  | "usable_fraction"
+  | "target_distance"
+  | "f1_mean"
+  | "f2_mean"
+  | "lip_opening_mean"
+  | "lip_width_mean"
+  | "lip_rounding_mean"
+  | "lip_spread_mean"
+  | "jaw_drop_mean";
 export type Value = number;
 export type Evidence = EvidenceReference[];
 export type Rationale = string | null;
@@ -369,6 +437,7 @@ export type SchemaVersion1 = 1;
 export type Type =
   | "session.state"
   | "features.frame"
+  | "vision.frame"
   | "attempt.summary"
   | "coach.decision"
   | "audio.start"
@@ -387,7 +456,7 @@ export type Seq = number;
 export type SchemaVersion2 = 1;
 export type CommandId = string;
 export type ExpectedRevision = number;
-export type Payload1 = Configure | Start | End | Control | Playback;
+export type Payload1 = Configure | Start | End | VisionFrameCommand | Control | Playback;
 export type Type1 = "session.configure";
 export type TargetId3 = "i" | "u" | "aa";
 export type AudioEnabled1 = boolean;
@@ -397,8 +466,22 @@ export type Source3 = "synthetic" | "microphone";
 export type SampleRate2 = number;
 export type Type3 = "attempt.end";
 export type FinalSample = number;
-export type Type4 = "feedback.cancel" | "session.pause" | "session.resume";
-export type Type5 = "audio.playback_started" | "audio.playback_ended";
+/**
+ * @maxItems 300
+ */
+export type VisionFrames = VisionMetrics[];
+/**
+ * @maxItems 4
+ */
+export type Keyframes =
+  | []
+  | [VisionKeyframe]
+  | [VisionKeyframe, VisionKeyframe]
+  | [VisionKeyframe, VisionKeyframe, VisionKeyframe]
+  | [VisionKeyframe, VisionKeyframe, VisionKeyframe, VisionKeyframe];
+export type Type4 = "vision.frame";
+export type Type5 = "feedback.cancel" | "session.pause" | "session.resume";
+export type Type6 = "audio.playback_started" | "audio.playback_ended";
 export type GenerationId4 = string;
 export type PoseId3 = "vowel-i" | "vowel-u" | "vowel-aa" | "neutral";
 export type TargetId4 = "i" | "u" | "aa";
@@ -419,6 +502,9 @@ export type ObservationId2 =
 export interface Contracts {
   Target: Target;
   Session: Session;
+  VisionMetrics: VisionMetrics;
+  VisionKeyframe: VisionKeyframe;
+  VisionSummary: VisionSummary;
   FeatureFrame: FeatureFrame;
   AttemptSummary: AttemptSummary;
   Cue: Cue;
@@ -463,17 +549,90 @@ export interface Session {
   revision: Revision;
   state: State;
 }
+export interface VisionMetrics {
+  timestamp_ms: TimestampMs;
+  valid: Valid;
+  quality_flags?: QualityFlags;
+  lip_opening?: LipOpening;
+  outer_lip_height?: OuterLipHeight;
+  vermilion_flare?: VermilionFlare;
+  lip_width?: LipWidth;
+  lip_aspect_ratio?: LipAspectRatio;
+  lip_protrusion_z?: LipProtrusionZ;
+  jaw_drop?: JawDrop;
+  mouth_symmetry?: MouthSymmetry;
+  inner_mouth_area?: InnerMouthArea;
+  rounding_score?: RoundingScore;
+  spread_score?: SpreadScore;
+  openness_score?: OpennessScore;
+  blendshapes?: Blendshapes;
+  pitch_deg?: PitchDeg;
+  yaw_deg?: YawDeg;
+  roll_deg?: RollDeg;
+}
+export interface Blendshapes {
+  [k: string]: number;
+}
+export interface VisionKeyframe {
+  label: Label1;
+  timestamp_ms: TimestampMs1;
+  mime_type: MimeType;
+  data_base64: DataBase64;
+  metrics: VisionMetrics | null;
+}
+export interface VisionSummary {
+  usable_frames: UsableFrames;
+  total_frames: TotalFrames;
+  usable_fraction: UsableFraction;
+  quality_flags: QualityFlags1;
+  lip_opening_mean: LipOpeningMean;
+  lip_opening_max: LipOpeningMax;
+  outer_lip_height_mean: OuterLipHeightMean;
+  vermilion_flare_mean: VermilionFlareMean;
+  lip_width_mean: LipWidthMean;
+  lip_width_min: LipWidthMin;
+  lip_aspect_ratio_mean: LipAspectRatioMean;
+  lip_protrusion_z_mean: LipProtrusionZMean;
+  jaw_drop_mean: JawDropMean;
+  mouth_symmetry_mean: MouthSymmetryMean;
+  inner_mouth_area_mean: InnerMouthAreaMean;
+  rounding_score_mean: RoundingScoreMean;
+  rounding_score_max: RoundingScoreMax;
+  spread_score_mean: SpreadScoreMean;
+  spread_score_max: SpreadScoreMax;
+  openness_score_mean: OpennessScoreMean;
+  openness_score_max: OpennessScoreMax;
+  posture_stability_std: PostureStabilityStd;
+  voiced_visual_alignment: VoicedVisualAlignment;
+  blendshapes_mean: BlendshapesMean;
+  head_pose_mean: HeadPoseMean;
+  keyframes_count: KeyframesCount;
+}
+export interface BlendshapesMean {
+  [k: string]: number;
+}
+export interface HeadPoseMean {
+  [k: string]: number;
+}
 export interface FeatureFrame {
   sample_offset: SampleOffset;
-  timestamp_ms: TimestampMs;
+  timestamp_ms: TimestampMs2;
   duration_ms: DurationMs;
   f1: F11;
   f2: F21;
   f0: F0;
-  valid: Valid;
-  quality_flags: QualityFlags;
+  valid: Valid1;
+  quality_flags: QualityFlags2;
   source: Source;
-  lip_opening: LipOpening;
+  lip_opening: LipOpening1;
+  lip_width: LipWidth1;
+  lip_aspect_ratio: LipAspectRatio1;
+  lip_protrusion_z: LipProtrusionZ1;
+  jaw_drop: JawDrop1;
+  rounding_score: RoundingScore1;
+  spread_score: SpreadScore1;
+  openness_score: OpennessScore1;
+  vision: VisionMetrics | null;
 }
 export interface AttemptSummary {
   attempt_id: AttemptId;
@@ -483,12 +642,17 @@ export interface AttemptSummary {
   capture_end_sample: CaptureEndSample;
   sample_rate: SampleRate;
   usable_duration_ms: UsableDurationMs;
-  usable_fraction: UsableFraction;
+  usable_fraction: UsableFraction1;
   f1_mean: F1Mean;
   f2_mean: F2Mean;
   target_distance: TargetDistance;
-  lip_opening_mean: LipOpeningMean;
-  quality_flags: QualityFlags1;
+  lip_opening_mean: LipOpeningMean1;
+  lip_width_mean: LipWidthMean1;
+  lip_rounding_mean: LipRoundingMean;
+  lip_spread_mean: LipSpreadMean;
+  jaw_drop_mean: JawDropMean1;
+  vision_summary: VisionSummary | null;
+  quality_flags: QualityFlags3;
   evidence_fields: EvidenceFields;
   source: Source1;
   assistance_level: AssistanceLevel1;
@@ -510,6 +674,7 @@ export interface CoachingDecision {
   attempt_id: AttemptId1;
   generation_id: GenerationId;
   observation: Observation;
+  visual_observation: VisualObservation;
   evidence_fields: EvidenceFields1;
   cue_id: CueId;
   cue_version: CueVersion;
@@ -636,11 +801,17 @@ export interface Start {
 export interface End {
   type: Type3;
   final_sample: FinalSample;
+  vision_frames: VisionFrames;
+  keyframes: Keyframes;
+}
+export interface VisionFrameCommand {
+  type: Type4;
+  frame: VisionMetrics;
 }
 export interface Control {
-  type: Type4;
+  type: Type5;
 }
 export interface Playback {
-  type: Type5;
+  type: Type6;
   generation_id: GenerationId4;
 }

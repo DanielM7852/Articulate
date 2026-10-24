@@ -16,6 +16,9 @@ def export():
     names = [
         "Target",
         "Session",
+        "VisionMetrics",
+        "VisionKeyframe",
+        "VisionSummary",
         "FeatureFrame",
         "AttemptSummary",
         "Cue",
