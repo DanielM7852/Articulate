@@ -1,6 +1,6 @@
 import type { Step } from './beatmap';
 import type { GameOptions, NoteState } from './run';
-import { VOWEL_LABEL, VOWELS, zoneOutline, type VowelId, type Zone, type ZoneSet } from './zones';
+import { VOWEL_LABEL, zoneOutline, type VowelId, type Zone, type ZoneSet } from './zones';
 import { projectVowel } from '../components/plot';
 
 interface Projected {
@@ -36,7 +36,8 @@ export interface GameOverlayProps {
 
 /** Zones, glide path, hold progress and approach ring, drawn in the plot's own coordinates. */
 export function GameOverlay({ zones, textScale, step, note, options, timeMs = 0 }: GameOverlayProps) {
-  const shapes = Object.fromEntries(VOWELS.map((vowel) => [vowel, project(zones[vowel])])) as Record<VowelId, Projected>;
+  const vowels = Object.keys(zones) as VowelId[];
+  const shapes = Object.fromEntries(vowels.map((vowel) => [vowel, project(zones[vowel]!)])) as Record<VowelId, Projected>;
   const spec = note && note.status !== 'upcoming' ? step?.note : undefined;
   const active = new Set<VowelId>(spec ? (spec.kind === 'glide' ? [spec.from, spec.to] : [spec.vowel]) : []);
   const minZone = options?.minZonePoints ?? 2;
@@ -58,7 +59,7 @@ export function GameOverlay({ zones, textScale, step, note, options, timeMs = 0 
           <path d="M1 1 9 5 1 9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </marker>
       </defs>
-      {VOWELS.map((vowel) => {
+      {vowels.map((vowel) => {
         const shape = shapes[vowel];
         const state = reached.has(vowel) ? 'is-reached' : active.has(vowel) ? 'is-active' : '';
         return (

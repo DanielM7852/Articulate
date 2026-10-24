@@ -1,0 +1,27 @@
+/* "Say head": the model voice in teal (as ee), the learner in the app's blue. */
+.hd-workspace { --hd-model: #0f8f80; --hd-you: #2e64f5; }
+
+.hd-zone { opacity: .13; }
+.hd-zone polygon { fill: var(--hd-model); stroke: none; }
+.hd-model { fill: none; stroke: var(--hd-model); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.hd-model-end { fill: var(--hd-model); }
+.hd-overlay .hd-model-start { stroke: var(--hd-model); }
+.hd-label { font-family: "Avenir Next", "Segoe UI", sans-serif; font-weight: 650; letter-spacing: -.3px; fill: #182c4e; opacity: .65; }
+
+.hd-past { fill: none; stroke: var(--hd-you); stroke-width: 1.4; stroke-opacity: .22; stroke-linejoin: round; }
+.hd-last polyline { fill: none; stroke: var(--hd-you); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; }
+.hd-last.is-close polyline { stroke-dasharray: none; }
+.hd-last circle { fill: var(--hd-you); stroke: white; stroke-width: 1.2; }
+.hd-live { fill: none; stroke: var(--hd-you); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.hd-watch { fill: var(--hd-model); stroke: white; stroke-width: 2; }
+
+.trace-key .hd-key-model, .trace-key .hd-key-you { display: inline-block; width: 14px; height: 3px; border-radius: 2px; background: var(--hd-model); margin-left: 6px; }
+.trace-key .hd-key-you { background: var(--hd-you); }
+.hd-zone-key { display: inline-block; width: 14px; height: 9px; border-radius: 5px; background: rgb(15 143 128 / 22%); margin-right: 7px; vertical-align: -1px; }
+
+.hd-strip { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; padding: 0; }
+.hd-strip li { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 38px; padding: 7px 4px 6px; border-radius: 10px; background: #f6f9ff; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hd-strip i { display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; border: 1.6px solid #c4d0e2; font-size: 9px; font-style: normal; font-weight: 700; }
+.hd-strip .is-close i { background: var(--hd-model); border-color: var(--hd-model); }
+.hd-strip .is-close { color: var(--ink); font-weight: 600; }
+.hd-strip .is-unheard i { border-style: dashed; }

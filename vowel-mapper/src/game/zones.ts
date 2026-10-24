@@ -1,11 +1,15 @@
 /** Vowels the warm-up sets; the only sounds the game judges. */
-export type VowelId = 'ee' | 'ah' | 'oo';
+export type VowelId = 'ee' | 'ah' | 'oo' | 'aw' | 'ih' | 'eh' | 'ae';
 export const VOWELS: readonly VowelId[] = ['ee', 'ah', 'oo'];
 
 export const VOWEL_LABEL: Record<VowelId, { sound: string; example: string }> = {
   ee: { sound: 'eee', example: 'sheep' },
   ah: { sound: 'ah', example: 'father' },
   oo: { sound: 'oo', example: 'boot' },
+  aw: { sound: 'aw', example: 'boy, stretched start' },
+  ih: { sound: 'ih', example: 'bit' },
+  eh: { sound: 'eh', example: 'bet' },
+  ae: { sound: 'a', example: 'bat' },
 };
 
 type Formants = { f1: number; f2: number };
@@ -17,14 +21,14 @@ export interface Zone extends Formants {
   radius: number;
 }
 
-export type ZoneSet = Record<VowelId, Zone>;
+export type ZoneSet = Partial<Record<VowelId, Zone>>;
 
 export function zoneDistance(point: Formants, zone: Formants): number {
   return Math.hypot(Math.log(point.f1 / zone.f1), Math.log(point.f2 / zone.f2));
 }
 
-export function inZone(point: Formants, zone: Zone): boolean {
-  return zoneDistance(point, zone) <= zone.radius;
+export function inZone(point: Formants, zone: Zone | undefined): boolean {
+  return !!zone && zoneDistance(point, zone) <= zone.radius;
 }
 
 /** Boundary points in Hz; draw them with `projectVowel` so the plot geometry stays in one place. */

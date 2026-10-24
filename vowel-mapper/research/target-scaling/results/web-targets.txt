@@ -1,0 +1,5 @@
+group | hit iy/ah/uw | neighbour FA iy/ah/uw
+men 95 / 82 / 91 | 24 / 3 / 83
+women 95 / 92 / 46 | 40 / 80 / 30
+boys 33 / 71 / 53 | 22 / 68 / 2
+girls 25 / 44 / 23 | 31 / 84 / 3

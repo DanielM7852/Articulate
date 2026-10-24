@@ -62,27 +62,46 @@ tracked points into `VowelPlot`. Omkar's future handoff should summarize an
 explicit target-vowel attempt. Do not average a free glide into a single vowel.
 No coach, Convex, target scoring, or anatomical outline is integrated yet.
 
-## Zone game (first slice, provisional)
+## Zone game (provisional)
 
-The **Game** switch above the plot turns the mapper into an osu!-style practice round.
-A warm-up holds eee, ah and oo; each zone is centred on the median of that phase's
-tracked points with a radius in log-frequency space (no textbook values). Four words
-follow (`ah` hold, `hi`, `how`, `we` glides). Consonants such as *h* are visual cues,
-never scored. Each note ends as **hit**, **miss**, or **not heard clearly** (too few
-accepted frames; never counted as a miss). Timing is visual only, and self-paced is the
-default; timed rings are optional. A hit means "reached the zone you set," not a
-judgement of speech.
+The **Game** switch adds personal-zone holds and slides to the existing map.
+Start with eee, ah and oo calibration; each centre is the median of that sound's
+tracked points, with the existing log-frequency radius rules. Zones survive
+Map/Game switches in page memory, and disappear when the page reloads.
 
-- `src/game/zones.ts`, `calibration.ts`, `beatmap.ts`, `run.ts`: pure TypeScript driven
-  only by `TrackedFrame`s, unit-tested in `tests/game.test.ts`.
-- `src/game/GameMode.tsx`, `GameOverlay.tsx`, `game.css`: UI. The overlay draws through
-  `VowelPlot`'s `overlay` slot with `projectVowel`; frames arrive via
-  `useVowelSession(settings, { onFrame })`.
-- `e2e/game.spec.ts` drives the round with switchable synthetic vowels through the real
-  worklet/worker/tracker path.
+Choose First route, Front–back sweep (we/key/coo/tea/two), Glide routes
+(hi/buy/how/now), Boy route, or Front-vowel set (beat/bit/bet/bat).
+Boy requires its own aw/eee calibration, and the front-vowel set requires its own
+eee/ih/eh/a calibration. These are independent sets: extra calibration cannot
+move the base targets. Redo base warm-up clears extra sets. **Rent/ween stays
+locked** because nasal rejection has not passed validation.
 
-`MAPPER_PORT` picks the dev/preview port (and the port Playwright starts or reuses), for
-example `MAPPER_PORT=5175 npm run dev` or `MAPPER_PORT=5175 npm run test:e2e`.
+The words cue **stretched game routes**. Natural diphthongs need not reach the
+held eee/oo endpoints; matching the route is not a judgement of ordinary speech.
+Consonant letters are cues only, never detections. The n in “now” has a visible
+caveat because nasal humming can still move the dot. See
+[the verified research and lesson limitations](docs/game-research.md).
+
+Self-paced is the default. Rejected room noise does not start a window: an
+accepted vowel point starts it, or **Try this word** starts an explicit attempt.
+Too few accepted points produce **not heard clearly**, excluded from the
+hit/miss tally. Timed rings are optional. Their displayed tempo is minimum
+spacing: a late previous result delays the next note so its approach is complete.
+Competing speech that the tracker accepts can still start or affect an attempt.
+
+- `src/game/zones.ts`, `calibration.ts`, `beatmap.ts`, `lessons.ts`, `run.ts`:
+  pure game logic and lesson availability, tested through tracked-point streams.
+- `src/game/GameMode.tsx`, `GameOverlay.tsx`, `game.css`: UI using the shared
+  `VowelPlot` overlay and `plot.ts` geometry. Active word cues sit above the map
+  at phone widths. Progress and per-lesson summaries count zones, not speech quality.
+- `e2e/game.spec.ts`: switchable synthetic vowels through the real capture,
+  worklet, worker, tracker and UI, including extra calibration and privacy checks.
+
+`MAPPER_PORT` picks the dev/preview port and the port Playwright starts or reuses:
+`MAPPER_PORT=5183 npm run test:e2e` and
+`MAPPER_PREVIEW=1 MAPPER_PORT=5184 npm run test:e2e` after building.
+Preview skips only the source-module capture API test; dev runs it. No audio,
+recording, analytics, or persistent storage is added by the game.
 
 ## Audio approach
 
@@ -100,8 +119,10 @@ or guaranteed match of Praat**. Parameters and windowing differ. References:
 
 Silence, unvoiced broadband noise, clipping and implausible estimates are gated.
 When noise broadens F1 past the bandwidth limit, the frame is rejected rather than
-relabelling F2 as F1. Noise can still cause F2 to be dropped and F3 reported as F2
-(known gap, covered by expected-fail tests), so a loud room can show a second cluster.
+relabelling F2 as F1. A second mask guards against a broadened F2 being replaced by F3. Known noisy
+F1 slips remain at some pitches (two expected-fail tests), so a loud room can
+still show misleading positions. The real-speech benchmark below also measures
+the clean-vowel coverage cost of both guards.
 This is **not speaker separation**: nearby voiced speech can still move the dot.
 Browser echo cancellation, noise suppression and automatic gain control are
 requested off to preserve the spectrum; devices may not honor every constraint.
@@ -131,3 +152,22 @@ ignored `test-results/`.
 
 These checks do not establish performance on a real built-in microphone or in
 the hackathon venue. Dependencies are locked in `package-lock.json`.
+
+## Real-speech evaluation and consonant preview
+
+The [offline benchmark](scripts/eval/README.md) evaluates public LibriSpeech
+recordings with published phone alignments and DEMAND cafeteria noise at
+20/15/10/5 dB. A separately qualified Hillenbrand mirror study compares against
+original formant measurements. Read the [decision and limitations](eval-results/decision.md),
+[detailed baseline](eval-results/baseline.md), and
+[real-speech browser checks](eval-results/browser-verification.md).
+
+The measured consonant leakage remains a limitation. No nasal gate, F3 display,
+or estimator threshold change was justified by this small study. Under Tracking
+details, **Consonant cue preview** is off by default and shows scripted rent/ween
+sound-order cues in a separate lane. It is not microphone recognition and does
+not change plotted points. Do not treat it as nasal detection.
+
+Use `MAPPER_PORT=5181 npm run test:e2e` for an isolated dev test server and
+`MAPPER_PREVIEW=1 MAPPER_PORT=5182 npm run test:e2e -- --grep 'synthetic microphone|consonant cue prototype'`
+for these browser checks against the production build.
