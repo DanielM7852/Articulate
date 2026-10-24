@@ -126,3 +126,10 @@ def test_route_upstream_error_is_502_without_leaking():
     assert res.status_code == 502
     assert res.json()["detail"] == "realtime_secret_failed"
     assert "sk-test" not in res.text
+
+
+def test_instructions_generalise_to_any_word_and_part():
+    text = instructions("Ava")
+    assert "teaches one word, track" not in text
+    for token in ("one word at a time", "one part of it at a time", "ship for sheep", "truck or trek for track"):
+        assert token in text, token

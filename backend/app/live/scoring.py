@@ -122,24 +122,44 @@ def score_video(sound: str, frames: list[LipFrame]) -> VideoScore | None:
 _MISSING = ("miss", "skipped")
 
 
-def score_word(attempt: WordAttempt) -> WordScore:
+def practice_scope(attempt: WordAttempt, practice: list[str] | None) -> list[str]:
+    """Zone ids the coach may focus on: the practice list restricted to this attempt's zones, else every zone."""
+    ids = [z.zoneId for z in attempt.zones]
+    if practice is None:
+        return ids
+    return [i for i in ids if i in practice]
+
+
+def score_word(attempt: WordAttempt, practice: list[str] | None = None) -> WordScore:
     """Zone verdicts pass through unchanged. weakestZoneId: first miss/skipped, else first partial, else None.
 
-    verdict: insufficient when capture quality is unclear; on_target when every zone hit; close when nothing
+    Advisory zones (liquid, fricative, nasal) never count: not toward the verdict, the hit count, the zone count or
+    the weakest zone. With `practice` the roll-up covers only the listed zones. When nothing scoreable is left
+    (a cue-only part), the verdict is close with zero zones and weakestZoneId is the first practised advisory zone,
+    so the coach still has a part to teach from its hint.
+
+    verdict: insufficient when capture quality is unclear; on_target when every counted zone hit; close when nothing
     was missed but some zone was partial; off otherwise.
     """
-    zones = list(attempt.zones)
-    hits = sum(1 for z in zones if z.verdict == "hit")
+    scope = set(practice_scope(attempt, practice))
+    zones = [z for z in attempt.zones if z.zoneId in scope] if practice is not None else list(attempt.zones)
+    counted = [z for z in zones if not z.is_advisory]
+    hits = sum(1 for z in counted if z.verdict == "hit")
+    out_zones = list(attempt.zones)
     if attempt.quality != "usable":
-        return WordScore(word=attempt.word, verdict="insufficient", zoneCount=len(zones), hitCount=hits,
-                         weakestZoneId=None, zones=zones, lipUsable=attempt.lipUsable)
-    missed = next((z.zoneId for z in zones if z.verdict in _MISSING), None)
-    partial = next((z.zoneId for z in zones if z.verdict == "partial"), None)
+        return WordScore(word=attempt.word, verdict="insufficient", zoneCount=len(counted), hitCount=hits,
+                         weakestZoneId=None, zones=out_zones, lipUsable=attempt.lipUsable)
+    if not counted:
+        first = zones[0].zoneId if zones else None
+        return WordScore(word=attempt.word, verdict="close", zoneCount=0, hitCount=0,
+                         weakestZoneId=first, zones=out_zones, lipUsable=attempt.lipUsable)
+    missed = next((z.zoneId for z in counted if z.verdict in _MISSING), None)
+    partial = next((z.zoneId for z in counted if z.verdict == "partial"), None)
     if missed is not None:
         verdict = "off"
     elif partial is not None:
         verdict = "close"
     else:
         verdict = "on_target"
-    return WordScore(word=attempt.word, verdict=verdict, zoneCount=len(zones), hitCount=hits,
-                     weakestZoneId=missed or partial, zones=zones, lipUsable=attempt.lipUsable)
+    return WordScore(word=attempt.word, verdict=verdict, zoneCount=len(counted), hitCount=hits,
+                     weakestZoneId=missed or partial, zones=out_zones, lipUsable=attempt.lipUsable)
