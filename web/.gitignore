@@ -3,3 +3,4 @@ dist
 .env*.local
 *.log
 public/mediapipe/wasm/
+tsconfig.tsbuildinfo

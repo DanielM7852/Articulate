@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { speakTeacher, type TeacherSpeech } from '../audio/teacher';
 import type { MouthReferenceHandle } from '../components/MouthReference';
-import type { LiveCoachResponse } from './liveCoach';
+import type { CueId, LiveCoachResponse } from './liveCoach';
 
 /**
  * Plays a live coach response: the teacher speaks the caption (Cartesia, browser fallback) while the
@@ -18,6 +18,13 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface SequenceOptions {
   narration: boolean;
+}
+
+/** One therapist line: the caption, plus an optional side-view cue that owns the mouth while it plays. */
+export interface SequenceLine {
+  text: string;
+  cueId: CueId | null;
+  showSideView: boolean;
 }
 
 export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ensureAvatarVisible: () => void) {
@@ -120,8 +127,9 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
     [cancel],
   );
 
-  const run = useCallback(
-    async (resp: LiveCoachResponse, opts: SequenceOptions): Promise<void> => {
+  /** Speak any therapist line (coach feedback or a session-director turn). Resolves when finished or cancelled. */
+  const speakLine = useCallback(
+    async (line: SequenceLine, opts: SequenceOptions): Promise<void> => {
       const pending = bridgePending.current;
       if (pending && token.current === pending.my) {
         await pending.promise;
@@ -130,10 +138,10 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
       cancel(false);
       const my = token.current;
       const alive = () => token.current === my;
-      const text = resp.caption;
+      const text = line.text;
       setCaption(text);
       setRunning(true);
-      const wantCue = resp.showSideView && resp.cueId !== null;
+      const wantCue = line.showSideView && line.cueId !== null;
 
       // Speak first; the avatar work happens in parallel with the audio.
       let sp: TeacherSpeech | null = null;
@@ -158,12 +166,12 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
         demo = getDemoRef.current();
         const avatar = demo && demo.ready ? demo : null;
 
-        if (wantCue && avatar && resp.cueId) {
+        if (wantCue && avatar && line.cueId) {
           live.current.touchedDemo = true;
           avatar.stop();
           await avatar.setView('side');
           if (!alive()) return;
-          avatar.showCue(resp.cueId);
+          avatar.showCue(line.cueId);
           const cueStart = Date.now();
           if (sp) await sp.done;
           if (!alive()) return;
@@ -206,5 +214,11 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
     [cancel],
   );
 
-  return { speech, caption, running, run, say, whenIdle, cancel };
+  const run = useCallback(
+    (resp: LiveCoachResponse, opts: SequenceOptions): Promise<void> =>
+      speakLine({ text: resp.caption, cueId: resp.cueId, showSideView: resp.showSideView }, opts),
+    [speakLine],
+  );
+
+  return { speech, caption, running, run, speakLine, say, whenIdle, cancel };
 }

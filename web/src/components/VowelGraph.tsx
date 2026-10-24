@@ -136,7 +136,7 @@ export function VowelGraph({
 
         <div className={`vg-empty ${cursor ? 'is-hidden' : ''}`} aria-hidden="true">
           <p className="ob-label">Your sound appears here</p>
-          <p className="ob-fine">Record, then hold “{SOUNDS[sound].spelled}” steadily.</p>
+          <p className="ob-fine">When Ava invites you, hold “{SOUNDS[sound].spelled}” steadily.</p>
         </div>
       </div>
 

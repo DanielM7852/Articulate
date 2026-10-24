@@ -1,0 +1,124 @@
+/* Session director: status chip, tap controls, begin button, last-heard line, attempt card. */
+.sd-begin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 0 6px;
+  text-align: center;
+}
+.sd-begin .ob-cta {
+  font-size: 1.1rem;
+  padding: 16px 36px;
+}
+.sd-error {
+  color: var(--color-warn, #8a5a00);
+  max-width: 460px;
+}
+
+.sd-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 10px 0;
+}
+.sd-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #eef2ee;
+  border: 1px solid #d6ded6;
+  font-weight: 600;
+  font-size: 0.95rem;
+  min-height: 34px;
+}
+.sd-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8a948a;
+}
+.sd-status--speaking .sd-dot {
+  background: #2f6fb0;
+}
+.sd-status--listening .sd-dot {
+  background: #2f8a4c;
+  animation: sd-pulse 1.4s ease-in-out infinite;
+}
+.sd-status--capturing .sd-dot {
+  background: #c0392b;
+  animation: sd-pulse 0.8s ease-in-out infinite;
+}
+.sd-status--analyzing .sd-dot {
+  background: #b88a1a;
+}
+@keyframes sd-pulse {
+  50% {
+    transform: scale(1.5);
+    opacity: 0.6;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sd-dot {
+    animation: none !important;
+  }
+}
+
+.sd-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sd-end {
+  margin-left: 4px;
+}
+.sd-interrupt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.sd-interrupt select {
+  font: inherit;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid #c9d2c9;
+  background: #fff;
+}
+
+.sd-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+.sd-heard {
+  margin: 0;
+  font-size: 0.95rem;
+  opacity: 0.85;
+}
+
+.sd-card {
+  border: 1px solid #d6ded6;
+  border-radius: 14px;
+  padding: 12px 16px;
+  background: #f6f9f6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.sd-card--warn {
+  background: var(--color-warn-soft, #fbf3e2);
+  border-color: #ecdcbf;
+}
+.sd-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

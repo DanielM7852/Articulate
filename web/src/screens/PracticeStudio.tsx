@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Mic, Play, ScanFace, Snail, Square, TriangleAlert, Video, VideoOff, Volume2 } from 'lucide-react';
+import { CheckCircle2, Mic, Play, ScanFace, Snail, TriangleAlert, Video, VideoOff, Volume2 } from 'lucide-react';
 import { OnboardingFrame, Segmented, StepHeading, Switch } from '../components/Onboarding';
 import { AmplitudeMeter, CameraTile, LESSON_STEPS } from '../components/practice';
 import { VowelGraph } from '../components/VowelGraph';
 import { MouthReference, type MouthReferenceHandle, type MouthView } from '../components/MouthReference';
 import { TeacherCaptions } from '../components/TeacherCaptions';
 import { prepareTeacher, unlockTeacherAudio } from '../audio/teacher';
+import { useConversationAudio } from '../conversation/audio';
+import { SessionControls, SessionStatus } from '../conversation/director/SessionControls';
+import { useSessionDirector, type CaptureOutcome } from '../conversation/director/useSessionDirector';
+import '../conversation/director/director.css';
 import { bridgeLine } from '../live/bridge';
 import '../live/bridge.css';
 import { useLipTracking } from '../vision/useLipTracking';
@@ -24,12 +28,13 @@ import { SOUNDS, SOUND_ORDER, type Attempt } from '../state/types';
 import { TARGETS } from '../vowel/targets';
 
 /**
- * Practice Studio: one screen, explicit states.
- *   ready     -> preview the reference, nothing recording
- *   recording -> example and narration stopped, mic capturing
- *   analyzing -> attempt saved, result sheet opens, coach response pending
- *   feedback  -> measured summary + grounded coach response + retry choices
- * Scoring never waits on the coach; the sheet opens before the response arrives.
+ * Practice Studio: a therapist-led, hands-free session (see conversation/director/useSessionDirector.ts for the
+ * conversation state machine). The capture phases below are driven by the director, never by a button:
+ *   ready     -> nothing captured
+ *   recording -> a voiced segment was detected; mic, F1/F2 window, lips and recorder are capturing
+ *   analyzing -> attempt saved, coach response pending (bridge line speaks meanwhile)
+ *   feedback  -> measured summary + grounded coach response
+ * Scoring never waits on the coach; the attempt card shows before the response arrives.
  */
 type Phase = 'ready' | 'recording' | 'analyzing' | 'feedback';
 type View = 'graph' | 'guide' | 'mirror';
@@ -40,15 +45,13 @@ const FEELINGS = [
   { id: 'ready', label: 'Ready for more' },
 ] as const;
 
-const SHEET_EXIT_MS = 220;
-
 /** One short line for the graph's status chip. Tracking words come from the vowel-mapper engine. */
 function trackingLabel(tracking: TrackingStatus, mic: MicStatus) {
   if (mic === 'denied') return 'Microphone blocked';
   if (mic === 'unsupported') return 'Microphone unsupported';
   switch (tracking) {
     case 'off':
-      return 'Starts when you record';
+      return 'Starts with the session';
     case 'starting':
       return 'Starting…';
     case 'tracking':
@@ -68,6 +71,15 @@ function trackingLabel(tracking: TrackingStatus, mic: MicStatus) {
     case 'error':
       return 'Tracking unavailable';
   }
+}
+
+/** Short verdict string from a backend audio/video analysis blob; falls back when no known field is present. */
+function verdictOf(blob: Record<string, unknown>, fallback: string): string {
+  for (const k of ['verdict', 'status', 'quality']) {
+    const v = blob[k];
+    if (typeof v === 'string' && v) return v;
+  }
+  return fallback;
 }
 
 function useMediaQuery(query: string) {
@@ -181,21 +193,24 @@ export default function PracticeStudio() {
     setLiveResp(null);
   }
 
-  async function startRecording() {
-    void unlockTeacherAudio(); // must run inside the click gesture
+  const captureActive = useRef(false);
+
+  /** Segment started: begin an attempt capture (what the Record button used to do). */
+  async function beginCapture() {
     runId.current++;
     coachAbort.current?.abort();
-    seq.cancel(); // cancels teacher speech, lip sync and cue; returns the avatar to front view
-    speech.stop(); // playback must stop before the learner is recorded
+    speech.stop();
     replayRef.current?.pause();
     setReferencePlaying(false);
     setCoach(null);
     setLiveResp(null);
     const attemptId = crypto.randomUUID();
     attemptIdRef.current = attemptId;
+    captureActive.current = true;
     await recorder.current!.begin(attemptId, plan.sound);
     const ok = await mic.beginRecording();
     if (!ok) {
+      captureActive.current = false;
       recorder.current!.discard();
       return;
     }
@@ -204,8 +219,25 @@ export default function PracticeStudio() {
     setPhase('recording');
   }
 
-  async function stopRecording() {
+  /** Drop a capture without storing an attempt; also supersedes any grading in flight. Safe when idle. */
+  function discardCapture() {
+    runId.current++;
+    coachAbort.current?.abort();
+    if (!captureActive.current) return;
+    captureActive.current = false;
+    tracking.endWindow();
+    lip.endWindow();
+    recorder.current?.discard();
+    void mic.endRecording().then((s) => {
+      if (s.recordingUrl) URL.revokeObjectURL(s.recordingUrl);
+    });
+    setPhase('ready');
+  }
+
+  /** Segment ended as an attempt: grade it (what stopRecording did). Resolves with the coach summary for the director. */
+  async function finishCapture(): Promise<CaptureOutcome | null> {
     const myRun = ++runId.current;
+    captureActive.current = false;
     prepareTeacher(); // fetch the speech token and open the socket while the coach call runs
     void unlockTeacherAudio();
     const target = tracking.endWindow();
@@ -213,6 +245,10 @@ export default function PracticeStudio() {
     lip.endWindow();
     const recorded = recorder.current!.end(); // stops frame capture now; resolves after the final flush
     const summary = await mic.endRecording();
+    if (runId.current !== myRun) {
+      if (summary.recordingUrl) URL.revokeObjectURL(summary.recordingUrl);
+      return null;
+    }
     if (recordingUrl) URL.revokeObjectURL(recordingUrl);
     setRecordingUrl(summary.recordingUrl);
     const attempt: Attempt = {
@@ -274,7 +310,7 @@ export default function PracticeStudio() {
     } catch {
       live = null;
     }
-    if (runId.current !== myRun) return; // a newer attempt or leaving the screen superseded this one
+    if (runId.current !== myRun) return null; // superseded (barge-in, tap control, leaving the screen)
 
     if (live) {
       setLiveResp(live);
@@ -287,17 +323,67 @@ export default function PracticeStudio() {
         evidence: live.evidence.map((e) => `${e.field}: ${String(e.value)}`),
       });
       setPhase('feedback');
-      void seq.run(live, { narration });
-      return;
+      await seq.run(live, { narration });
+      if (runId.current !== myRun) return null;
+      return {
+        attemptId: attempt.attemptId,
+        coach: {
+          caption: live.caption,
+          cueId: live.cueId,
+          nextAction: live.nextAction,
+          audioVerdict: verdictOf(live.audio, attempt.qualityReason ?? attempt.quality),
+          videoVerdict: live.video ? verdictOf(live.video, '') || null : null,
+        },
+      };
     }
 
     const response = await analyzeAttempt(attempt, history);
     await seq.whenIdle(); // never overlap the bridge line
-    if (runId.current !== myRun) return;
+    if (runId.current !== myRun) return null;
     setCoach(response);
     setPhase('feedback');
-    if (narration) speech.speak(`${response.observation} ${response.nextCue}`);
+    const text = `${response.observation} ${response.nextCue}`.trim();
+    await seq.speakLine({ text, cueId: null, showSideView: false }, { narration });
+    if (runId.current !== myRun) return null;
+    return {
+      attemptId: attempt.attemptId,
+      coach: {
+        caption: text,
+        cueId: null,
+        nextAction: response.nextAction === 'next-context' ? 'next_sound' : response.nextAction === 'simplify' ? 'rest' : 'retry',
+        audioVerdict: attempt.qualityReason ?? attempt.quality,
+        videoVerdict: null,
+      },
+    };
   }
+
+  /* ---------- Hands-free session ---------- */
+  const [armed, setArmed] = useState(false);
+  const vowel = useMemo(() => ({ subscribe: tracking.subscribe }), [tracking.subscribe]);
+  const convAudio = useConversationAudio({ vowel, enabled: armed });
+  const director = useSessionDirector({
+    audio: convAudio,
+    profileId,
+    displayName: learnerName || 'Learner',
+    sound: plan.sound,
+    setSound: (id) => {
+      updatePlan({ sound: id });
+      setCurrent(null);
+      setCoach(null);
+      setLiveResp(null);
+      setPhase('ready');
+    },
+    narration,
+    speakLine: seq.speakLine,
+    cancelSpeech: () => seq.cancel(),
+    prepare: async () => {
+      setArmed(true);
+      return mic.start();
+    },
+    capture: { begin: beginCapture, finish: finishCapture, discard: discardCapture },
+    onEnded: () => navigate('/summary'),
+  });
+  const sessionRunning = director.active;
 
   function readAloud() {
     if (liveResp) void seq.run(liveResp, { narration: true });
@@ -317,17 +403,6 @@ export default function PracticeStudio() {
     el.play().catch(() => undefined);
   }
 
-  /* ---------- Result sheet: stays mounted briefly so it can slide back down ---------- */
-  const sheetOpen = (phase === 'analyzing' || phase === 'feedback') && current !== null;
-  const [sheetMounted, setSheetMounted] = useState(false);
-  const lastResult = useRef<{ attempt: Attempt; coach: CoachResponse | null } | null>(null);
-  if (sheetOpen && current) lastResult.current = { attempt: current, coach };
-  useEffect(() => {
-    if (sheetOpen) return setSheetMounted(true);
-    const t = setTimeout(() => setSheetMounted(false), SHEET_EXIT_MS);
-    return () => clearTimeout(t);
-  }, [sheetOpen]);
-
   const micLine =
     mic.status === 'denied' ? (
       <span className="ob-status ob-status--warn" role="alert">
@@ -336,7 +411,7 @@ export default function PracticeStudio() {
     ) : recording ? (
       <span className="ob-status">Recording · {mic.elapsed.toFixed(1)} s</span>
     ) : (
-      <span className="ob-status">{mic.status === 'ready' ? 'Microphone ready' : 'Mic starts when you record'}</span>
+      <span className="ob-status">{mic.status === 'ready' ? 'Microphone ready' : 'Mic starts with the session'}</span>
     );
 
   const graphBody = (
@@ -426,44 +501,14 @@ export default function PracticeStudio() {
       onClose={{ label: 'Pause or finish', onClick: () => navigate('/summary') }}
       footer={
         <>
-          <button type="button" className="ob-text-btn lp-listen" onClick={playReference} disabled={busy}>
+          <button type="button" className="ob-text-btn lp-listen" onClick={playReference} disabled={busy || sessionRunning}>
             <Volume2 size={18} aria-hidden="true" />
             {referencePlaying ? 'Playing…' : 'Hear example'}
           </button>
           <span role="status" style={{ fontSize: 12, opacity: 0.65 }}>
             Live sync {syncStatus === 'ready' ? 'on' : 'off'}
           </span>
-          <button
-            type="button"
-            className={`ob-cta ${recording ? 'ob-cta--stop' : ''}`}
-            onClick={recording ? stopRecording : startRecording}
-            disabled={phase === 'analyzing' || mic.status === 'unsupported'}
-          >
-            {recording ? <Square size={16} fill="currentColor" aria-hidden="true" /> : <Mic size={18} aria-hidden="true" />}
-            {recording ? `Stop · ${mic.elapsed.toFixed(1)} s` : 'Record'}
-          </button>
         </>
-      }
-      overlay={
-        sheetMounted &&
-        lastResult.current && (
-          <ResultSheet
-            attempt={lastResult.current.attempt}
-            coach={lastResult.current.coach}
-            leaving={!sheetOpen}
-            feeling={attempts.find((a) => a.attemptId === lastResult.current?.attempt.attemptId)?.feeling}
-            onFeeling={(id) => {
-              updateAttempt(lastResult.current!.attempt.attemptId, { feeling: id });
-              if (id === 'ready') updatePlan({ assistance: 'target-only' });
-            }}
-            onReplay={recordingUrl ? replayRecording : undefined}
-            onReadAloud={readAloud}
-            lipMeasured={lipMeasured}
-            captionsNode={captions && seq.caption ? <TeacherCaptions speech={seq.speech} text={seq.caption} /> : null}
-            onTryAgain={startRecording}
-            onLessHelp={() => navigate('/summary')}
-          />
-        )
       }
     >
       <div className="lp-head">
@@ -474,7 +519,13 @@ export default function PracticeStudio() {
               Find your {s.spelled} <span className="navy">{s.ipa}</span>
             </>
           }
-          hint={recording ? 'Keep a comfortable sound. Stop when you’re ready.' : `Take a breath and hold “${s.spelled}” for about 3 seconds.`}
+          hint={
+            sessionRunning
+              ? recording
+                ? 'Keep a comfortable sound. Ava will respond when you pause.'
+                : `Take a breath and hold “${s.spelled}” for about 3 seconds when Ava invites you.`
+              : 'Ava will guide you through the sounds and listen as you go. No buttons to hold.'
+          }
         />
         <Segmented
           className="lp-sounds"
@@ -488,13 +539,56 @@ export default function PracticeStudio() {
             ),
           }))}
           value={plan.sound}
-          disabled={busy}
+          disabled={busy || sessionRunning}
           onChange={(id) => {
             updatePlan({ sound: id });
             resetForSound();
           }}
         />
       </div>
+
+      {!sessionRunning && director.state !== 'ended' && (
+        <div className="sd-begin">
+          <button
+            type="button"
+            className="ob-cta"
+            onClick={() => void director.begin()}
+            disabled={director.state === 'starting' || mic.status === 'unsupported'}
+          >
+            <Mic size={20} aria-hidden="true" />
+            {director.state === 'starting' ? 'Starting…' : director.state === 'error' ? 'Try again' : 'Begin session'}
+          </button>
+          {director.state === 'starting' && <SessionStatus state="starting" label="Getting ready…" />}
+          {director.error && (
+            <p className="sd-error" role="alert">
+              {director.error}
+            </p>
+          )}
+          <p className="ob-fine">One tap lets your browser play Ava’s voice. Captions are always shown.</p>
+        </div>
+      )}
+
+      {(sessionRunning || director.state === 'ended') && (
+        <>
+          <div className="sd-bar">
+            <SessionStatus state={director.state} label={director.statusLabel} />
+            <SessionControls
+              state={director.state}
+              onControl={director.control}
+              bargeInMode={convAudio.bargeInMode}
+              onBargeInMode={convAudio.setBargeInMode}
+            />
+          </div>
+          <div className="sd-lines">
+            {captions && seq.caption && <TeacherCaptions speech={seq.speech} text={seq.caption} />}
+            {director.heard !== null && (
+              <p className="sd-heard" aria-live="polite">
+                You said: {director.heard ? `“${director.heard}”` : '(nothing I could make out)'}
+              </p>
+            )}
+          </div>
+        </>
+      )}
 
       <div className="lp-tiles">
         {!compact && (
@@ -545,114 +639,96 @@ export default function PracticeStudio() {
           )}
         </section>
       </div>
+
+      {current && (
+        <AttemptCard
+          attempt={current}
+          coach={coach}
+          lipMeasured={lipMeasured}
+          feeling={attempts.find((a) => a.attemptId === current.attemptId)?.feeling}
+          onFeeling={(id) => {
+            updateAttempt(current.attemptId, { feeling: id });
+            if (id === 'ready') updatePlan({ assistance: 'target-only' });
+          }}
+          onReplay={recordingUrl ? replayRecording : undefined}
+          onReadAloud={sessionRunning ? undefined : readAloud}
+        />
+      )}
     </OnboardingFrame>
   );
 }
 
-function ResultSheet({
+/** Compact "last attempt" card: measured numbers on this device, the coach's words, and how it felt. */
+function AttemptCard({
   attempt,
   coach,
-  leaving,
   feeling,
   onFeeling,
   onReplay,
   onReadAloud,
-  onTryAgain,
-  onLessHelp,
-  captionsNode,
   lipMeasured,
 }: {
-  captionsNode?: React.ReactNode;
   lipMeasured: boolean;
   attempt: Attempt;
   coach: CoachResponse | null;
-  leaving: boolean;
   feeling: Attempt['feeling'];
   onFeeling: (id: NonNullable<Attempt['feeling']>) => void;
   onReplay?: () => void;
-  onReadAloud: () => void;
-  onTryAgain: () => void;
-  onLessHelp: () => void;
+  onReadAloud?: () => void;
 }) {
   const usable = attempt.quality === 'usable';
   return (
-    <section
-      className={`lp-sheet ${usable ? 'lp-sheet--ok' : 'lp-sheet--warn'} ${leaving ? 'is-leaving' : ''}`}
-      aria-label="Result"
-      aria-busy={!coach}
-    >
-      <div className="lp-sheet-inner">
-        <div className="lp-sheet-head">
-          <span className="lp-sheet-icon" aria-hidden="true">
-            {usable ? <CheckCircle2 size={26} /> : <TriangleAlert size={24} />}
-          </span>
-          <div className="grow">
-            <h2 className="lp-sheet-title">
-              {usable ? `Got it · ${attempt.usableVoicedSec.toFixed(1)} s of usable voice` : 'Let’s try that capture again'}
-            </h2>
-            <p className="ob-fine">
-              {usable ? 'This describes the sound only. It isn’t a pronunciation score.' : 'That’s a capture issue, not a mistake.'}
-            </p>
-          </div>
+    <section className={`sd-card ${usable ? '' : 'sd-card--warn'}`} aria-label="Last attempt" aria-busy={!coach}>
+      <div className="sd-card-head">
+        <span aria-hidden="true">{usable ? <CheckCircle2 size={22} /> : <TriangleAlert size={20} />}</span>
+        <h2 className="lp-sheet-title grow">
+          {usable ? `Got it · ${attempt.usableVoicedSec.toFixed(1)} s of usable voice` : 'Let’s try that capture again'}
+        </h2>
+        {onReadAloud && (
           <button type="button" className="ob-pill" aria-label="Read feedback aloud" title="Read feedback aloud" onClick={onReadAloud} disabled={!coach}>
             <Volume2 size={17} aria-hidden="true" />
           </button>
-        </div>
-
+        )}
+      </div>
+      <p className="ob-fine">
+        {usable ? 'This describes the sound only. It isn’t a pronunciation score.' : 'That’s a capture issue, not a mistake.'}
+      </p>
+      {coach ? (
         <div className="lp-coach" aria-live="polite">
-          {coach ? (
-            <>
-              <p>{coach.observation}</p>
-              {coach.nextCue && <p className="lp-cue">{coach.nextCue}</p>}
-              {captionsNode}
-            </>
-          ) : (
-            <>
-              <p className="ob-fine">Reading your attempt…</p>
-              {captionsNode}
-            </>
-          )}
+          <p>{coach.observation}</p>
+          {coach.nextCue && <p className="lp-cue">{coach.nextCue}</p>}
         </div>
-
-        <dl className="lp-measures" aria-label="Measured on this device">
-          <div>
-            <dt>Time in target</dt>
-            <dd>{attempt.timeInTargetSec === null ? 'not measured' : `${attempt.timeInTargetSec.toFixed(1)} s`}</dd>
-          </div>
-          <div>
-            <dt>Longest hold</dt>
-            <dd>{attempt.longestHoldSec === null ? 'not measured' : `${attempt.longestHoldSec.toFixed(1)} s`}</dd>
-          </div>
-          <div>
-            <dt>Usable voice</dt>
-            <dd>{attempt.usableVoicedSec.toFixed(1)} s</dd>
-          </div>
-          <div>
-            <dt>Lip tracking</dt>
-            <dd>{lipMeasured ? 'on' : 'off'}</dd>
-          </div>
-        </dl>
-
-        <div className="lp-sheet-tools">
-          <button type="button" className="ob-text-btn" onClick={onReplay} disabled={!onReplay}>
-            <Play size={16} aria-hidden="true" /> Replay mine
-          </button>
-          {usable && (
-            <div className="lp-feel">
-              <span className="ob-fine">How did that feel?</span>
-              <Segmented label="How did that feel?" options={[...FEELINGS]} value={feeling} onChange={onFeeling} />
-            </div>
-          )}
+      ) : (
+        <p className="ob-fine">Reading your attempt…</p>
+      )}
+      <dl className="lp-measures" aria-label="Measured on this device">
+        <div>
+          <dt>Time in target</dt>
+          <dd>{attempt.timeInTargetSec === null ? 'not measured' : `${attempt.timeInTargetSec.toFixed(1)} s`}</dd>
         </div>
-
-        <div className="lp-sheet-actions">
-          <button type="button" className="ob-text-btn" onClick={onLessHelp}>
-            Try with less help
-          </button>
-          <button type="button" className="ob-cta" onClick={onTryAgain} disabled={!coach}>
-            <Mic size={18} aria-hidden="true" /> Try again
-          </button>
+        <div>
+          <dt>Longest hold</dt>
+          <dd>{attempt.longestHoldSec === null ? 'not measured' : `${attempt.longestHoldSec.toFixed(1)} s`}</dd>
         </div>
+        <div>
+          <dt>Usable voice</dt>
+          <dd>{attempt.usableVoicedSec.toFixed(1)} s</dd>
+        </div>
+        <div>
+          <dt>Lip tracking</dt>
+          <dd>{lipMeasured ? 'on' : 'off'}</dd>
+        </div>
+      </dl>
+      <div className="lp-sheet-tools">
+        <button type="button" className="ob-text-btn" onClick={onReplay} disabled={!onReplay}>
+          <Play size={16} aria-hidden="true" /> Replay mine
+        </button>
+        {usable && (
+          <div className="lp-feel">
+            <span className="ob-fine">How did that feel?</span>
+            <Segmented label="How did that feel?" options={[...FEELINGS]} value={feeling} onChange={onFeeling} />
+          </div>
+        )}
       </div>
     </section>
   );
