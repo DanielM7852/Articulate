@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.live_routes import health_router, router as live_router
 from app.api.routes import router
+from app.realtime.routes import router as realtime_router
 from app.config import Settings, get_settings
 from app.live.runtime import get_runtime
 from app.live.identity import read_identity
@@ -77,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(router)
     app.include_router(live_router)
     app.include_router(health_router)
+    app.include_router(realtime_router)
     return app
 
 
