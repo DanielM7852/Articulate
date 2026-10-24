@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import type { MouthCueId, MouthDemo, MouthView, SpeakOptions, SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
+import type { AssemblyOptions, MouthCueId, MouthDemo, MouthView, SpeakOptions, SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
 import { acquireGuide, releaseGuide } from '../guide/guide';
 import type { SoundId } from '../state/types';
 
@@ -31,6 +31,10 @@ export interface MouthReferenceHandle {
   stop(): void;
   /** Lip-synced speech on the guide; null until the guide is ready. */
   speak(opts: SpeakOptions): SpeechHandle | null;
+  /** Build the particle head from the stage. Resolves true when assembled, false if interrupted or not ready. */
+  assemble(opts?: AssemblyOptions): Promise<boolean>;
+  /** Dissolve the particle head. Resolves true when gone, false if interrupted or not ready. */
+  disperse(opts?: AssemblyOptions): Promise<boolean>;
 }
 
 export interface MouthReferenceProps {
@@ -46,10 +50,12 @@ export interface MouthReferenceProps {
   onReady?: () => void;
   /** The 3D guide could not load; the screen should carry on without it. */
   onError?: () => void;
+  /** Open on an empty stage (only the ambient particles); the screen calls assemble() through the ref. */
+  startDispersed?: boolean;
 }
 
 export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferenceProps>(function MouthReference(
-  { cue, view = 'front', slow = false, look = null, zoom = 1, paused = false, onReady, onError },
+  { cue, view = 'front', slow = false, look = null, zoom = 1, paused = false, onReady, onError, startDispersed = false },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -74,6 +80,12 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
       speak(opts) {
         return demoRef.current?.speak(opts) ?? null;
       },
+      assemble(opts) {
+        return demoRef.current?.assemble(opts) ?? Promise.resolve(false);
+      },
+      disperse(opts) {
+        return demoRef.current?.disperse(opts) ?? Promise.resolve(false);
+      },
     }),
     [],
   );
@@ -82,7 +94,7 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
     const host = hostRef.current;
     if (!host) return;
     let cancelled = false;
-    acquireGuide(host)
+    acquireGuide(host, { startDispersed })
       .then((demo) => {
         if (cancelled) return;
         demoRef.current = demo;

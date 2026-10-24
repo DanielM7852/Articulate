@@ -1,0 +1,75 @@
+/* ---------- Intro: one Go button over the empty stage ----------
+ * Only the ambient particles show until the tap; the button then fades while the head assembles.
+ */
+.intro-go {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  width: 168px;
+  height: 168px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-navy);
+  color: #fff;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  translate: -50% -50%;
+  box-shadow: 0 6px 0 var(--color-navy-deep), 0 24px 56px rgba(23, 47, 78, 0.26);
+  transition:
+    opacity 420ms var(--ease-out),
+    transform 420ms var(--ease-out),
+    box-shadow 110ms var(--ease-out),
+    background-color 150ms ease;
+}
+.intro-go:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 2px 0 var(--color-navy-deep), 0 12px 28px rgba(23, 47, 78, 0.2);
+}
+.intro-go:focus-visible {
+  box-shadow: var(--focus-ring), 0 6px 0 var(--color-navy-deep), 0 24px 56px rgba(23, 47, 78, 0.26);
+}
+.intro-go[data-gone] {
+  opacity: 0;
+  transform: scale(0.9);
+  pointer-events: none;
+  cursor: default;
+}
+@media (hover: hover) and (pointer: fine) {
+  .intro-go:hover:not(:disabled) {
+    background: #284a7a;
+  }
+}
+@media (max-width: 720px) {
+  .intro-go {
+    width: 136px;
+    height: 136px;
+    font-size: 28px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-go {
+    transition: opacity 200ms ease, background-color 150ms ease;
+  }
+  .intro-go:active:not(:disabled),
+  .intro-go[data-gone] {
+    transform: none;
+  }
+}
+
+/* No floating button sits beside the caption on this screen, so it stays centred at every width. */
+@media (min-width: 721px) and (max-width: 1180px) {
+  .ob-content.intro .cap.cap-card {
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(760px, calc(100% - 32px));
+    animation-name: cap-card-in;
+  }
+}
+@media (max-width: 720px) {
+  .ob-content.intro .cap.cap-card {
+    bottom: 14px;
+  }
+}

@@ -1,3 +1,4 @@
+import type { WordAttemptResult, ZoneResult } from '../game/types';
 import type { SoundId } from '../state/types';
 import type { AudioFrame, RecordedLipFrame } from './attemptRecorder';
 import { livePost } from './transport';
@@ -22,6 +23,19 @@ export interface LiveCoachRequest {
   metricsSource: MetricsSource;
   clientSummary: ClientSummary;
   frames: { audio: AudioFrame[]; video: RecordedLipFrame[] } | null;
+  /** Word mode: the board's attempt. `sound` is then the word's vowel ("a" for track). */
+  word?: WordAttemptResult;
+}
+
+/** Server roll-up of a word attempt (backend/app/live/scoring.py score_word). */
+export interface WordScore {
+  word: string;
+  verdict: 'on_target' | 'close' | 'off' | 'insufficient';
+  zoneCount: number;
+  hitCount: number;
+  weakestZoneId: string | null;
+  zones: ZoneResult[];
+  lipUsable: boolean;
 }
 
 export interface LiveCoachResponse {
@@ -37,6 +51,9 @@ export interface LiveCoachResponse {
   nextAction: 'retry' | 'next_sound' | 'rest';
   evidence: { field: string; value: unknown }[];
   persisted: boolean;
+  /** Word mode only. */
+  word?: WordScore | null;
+  focusZoneId?: string | null;
 }
 
 export interface LiveNotes {

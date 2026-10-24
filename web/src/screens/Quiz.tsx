@@ -100,7 +100,7 @@ export default function Quiz() {
       assistance: preferences.guidance === 'explore' ? 'target-only' : 'cue-target',
     });
     completeQuiz();
-    go('/tutorial');
+    go('/lesson');
   };
   const back = () => go(step > 1 ? `/quiz/${step - 1}` : '/', 'back');
 

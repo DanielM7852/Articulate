@@ -1,4 +1,4 @@
-// Headless walk through the whole flow against a running dev server: guide intro, quiz, tutorial, practice.
+// Headless walk through the whole flow against a running dev server: guide intro (Go), quiz, word lesson.
 // Usage: npm run smoke [-- http://127.0.0.1:5173]. Screenshots land in web/smoke-out/. Uses fake camera and mic devices.
 import { mkdirSync } from 'node:fs';
 mkdirSync(process.env.SMOKE_OUT ?? 'smoke-out', { recursive: true });
@@ -16,6 +16,15 @@ page.on('console', (m) => {
   else if (m.text().includes('[pointcloud]')) console.log(m.text().slice(0, 600));
 });
 const snap = async (name) => page.screenshot({ path: `${process.env.SMOKE_OUT ?? 'smoke-out'}/${name}.png` });
+/** Poll the hash route; the intro's assemble/greeting/disperse timing is not fixed, so wait up to `ms`. */
+const waitForHash = async (hash, ms = 15000) => {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (new URL(page.url()).hash.startsWith(hash)) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
+};
 
 await page.goto(base + '/#/', { waitUntil: 'networkidle' });
 await page.waitForTimeout(1500);
@@ -45,9 +54,12 @@ await page.mouse.move(1100, 700);
 await page.waitForTimeout(1500);
 await page.screenshot({ path: `${process.env.SMOKE_OUT ?? 'smoke-out'}/scatter-settled.png`, clip: { x: 420, y: 200, width: 440, height: 360 } });
 
-await page.getByRole('button', { name: /begin/i }).click();
-await page.waitForTimeout(1200);
-console.log('quiz url:', page.url());
+// Intro: Go -> the guide assembles, greets, disperses -> quiz.
+const go = page.getByRole('button', { name: /^\s*go\b/i });
+if (await go.count()) await go.first().click();
+else await page.getByRole('button', { name: /begin/i }).click(); // older intro
+console.log('reached quiz:', await waitForHash('#/quiz/1', 40000), '| url:', page.url());
+await page.getByRole('button', { name: 'Continue' }).waitFor({ timeout: 15000 });
 console.log('quiz caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
 console.log('continue disabled:', await page.getByRole('button', { name: 'Continue' }).isDisabled());
 console.log('checked options:', await page.locator('[aria-checked="true"]').count());
@@ -63,38 +75,22 @@ await page.waitForTimeout(600);
 await page.getByRole('radio', { name: /Watching the mouth/ }).click();
 await page.getByRole('radio', { name: 'A little guidance' }).click();
 await page.getByRole('button', { name: 'Continue' }).click();
-await page.waitForTimeout(1500);
-console.log('after quiz url:', page.url());
-const tutReady = await page.locator('.mr[data-state="ready"]').waitFor({ timeout: 25000 }).then(() => true).catch(() => false);
-console.log('tutorial guide ready:', tutReady, '| caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
-await page.waitForTimeout(9000);
-console.log('tutorial caption later:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
-await snap('tutorial');
-// Through to the hands-on part: the guide shrinks, the learner's mic drives the graph.
-await page.getByRole('button', { name: /Allow microphone/ }).waitFor({ timeout: 30000 });
-await page.getByRole('button', { name: /Allow microphone/ }).click();
-await page.waitForTimeout(2500);
-console.log('solo caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'), '| pip:', await page.locator('.tut-pip .mr').getAttribute('data-state'));
-await page.locator('.cap-pause').click();
-console.log('paused:', await page.locator('.cap-pause').getAttribute('aria-pressed'));
-await snap('tutorial-solo');
-await page.locator('.cap-pause').click();
-await page.getByRole('button', { name: 'Skip' }).click();
-await page.waitForTimeout(1500);
-console.log('practice url:', page.url(), '| caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
-await snap('practice');
-// On your own: the same stage without cues, reached by its route.
-await page.goto(base + '/#/own', { waitUntil: 'networkidle' });
-await page.waitForTimeout(1800);
-console.log('own url:', page.url(), '| word:', await page.locator('.own-word').innerText().catch(() => '(none)'), '| caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
-await snap('own');
-await page.getByRole('radio', { name: /Word/ }).click();
-await page.getByRole('button', { name: 'Record' }).click();
-await page.waitForTimeout(2500);
-await page.getByRole('button', { name: /Stop/ }).click();
-await page.locator('.lp-sheet').waitFor({ timeout: 15000 });
-await page.waitForTimeout(1200);
-console.log('own sheet:', (await page.locator('.lp-sheet').innerText()).replace(/\s+/g, ' ').slice(0, 300));
-await snap('own-result');
+// Quiz -> word lesson: Ava on the left, the word board on the right.
+const lesson = await waitForHash('#/lesson');
+console.log('reached lesson:', lesson, '| url:', page.url());
+if (!lesson) errors.push(`expected #/lesson after the quiz, got ${page.url()}`);
+const board = await page.locator('.wl-board > *').first().waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
+if (!board) errors.push('word board did not render');
+const lessonGuide = await page.locator('.wl-guide .mr[data-state="ready"]').waitFor({ timeout: 25000 }).then(() => true).catch(() => false);
+console.log('board:', board, '| lesson guide ready:', lessonGuide);
+await page.waitForTimeout(4000);
+console.log('lesson phase:', await page.locator('.wl-stage').getAttribute('data-phase').catch(() => '(none)'));
+console.log('lesson caption:', await page.locator('.cap-text').innerText().catch(() => '(none)'));
+console.log('lesson pills:', (await page.locator('.wl-guide .lp-pill').allInnerTexts().catch(() => [])).join(' | '));
+await snap('lesson');
+// The loop is hands-free: give the board and the coach time for one attempt, then look again.
+await page.waitForTimeout(8000);
+console.log('lesson later | phase:', await page.locator('.wl-stage').getAttribute('data-phase').catch(() => '(none)'), '| caption:', await page.locator('.cap-text').first().innerText().catch(() => '(none)'));
+await snap('lesson-later');
 console.log('errors:', errors.length ? errors : 'none');
 await browser.close();
