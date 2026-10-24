@@ -1,5 +1,6 @@
 """Wire models for /v1/live/*. Field names are the contract with the web client."""
 
+import math
 import re
 from typing import Annotated, Literal
 
@@ -75,15 +76,91 @@ class ClientSummary(BaseModel):
     qualityReason: str | None = Field(default=None, max_length=80)
 
 
+ZoneKind = Literal["vowel", "tuner", "stop"]
+ZoneVerdict = Literal["hit", "partial", "miss", "skipped"]
+ZONE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,16}$")
+EVIDENCE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,39}$")
+
+
+class WordZoneResult(BaseModel):
+    """One zone of a word attempt. Mirrors ZoneResult in web/src/game/types.ts."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    zoneId: str
+    phoneme: str = Field(min_length=1, max_length=8)
+    kind: ZoneKind
+    verdict: ZoneVerdict
+    dwellMs: float = Field(ge=0, le=60_000)
+    startMs: float | None = None
+    endMs: float | None = None
+    evidence: dict[str, float] = Field(default_factory=dict, max_length=24)
+
+    @field_validator("zoneId")
+    @classmethod
+    def _zone(cls, value: str) -> str:
+        if not ZONE_ID_RE.fullmatch(value):
+            raise ValueError("zoneId must match [A-Za-z0-9_-]{1,16}")
+        return value
+
+    @field_validator("evidence")
+    @classmethod
+    def _evidence(cls, value: dict[str, float]) -> dict[str, float]:
+        # Keys become evidence field names (word.<zoneId>.<key>); non-finite values are dropped.
+        if any(not EVIDENCE_KEY_RE.fullmatch(k) for k in value):
+            raise ValueError("evidence keys must be short camelCase names")
+        return {k: v for k, v in value.items() if math.isfinite(v)}
+
+
+class WordAttempt(BaseModel):
+    """A finished word attempt from the board. Mirrors WordAttemptResult in web/src/game/types.ts."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    word: str = Field(min_length=1, max_length=32)
+    attemptId: str = Field(min_length=1, max_length=80)
+    durationMs: float = Field(ge=0, le=120_000)
+    zones: list[WordZoneResult] = Field(min_length=1, max_length=12)
+    quality: Literal["usable", "unclear"]
+    qualityReason: Literal["silence", "clipped", "too-short", "no-voice"] | None = None
+    lipUsable: bool = False
+
+    @field_validator("zones")
+    @classmethod
+    def _unique(cls, value: list[WordZoneResult]) -> list[WordZoneResult]:
+        ids = [z.zoneId for z in value]
+        if len(set(ids)) != len(ids):
+            raise ValueError("zone ids must be unique")
+        return value
+
+
+WordVerdict = Literal["on_target", "close", "off", "insufficient"]
+
+
+class WordScore(BaseModel):
+    """Server-side roll-up of a word attempt. Zone verdicts come from the board unchanged."""
+
+    word: str
+    verdict: WordVerdict
+    zoneCount: int
+    hitCount: int
+    weakestZoneId: str | None = None
+    zones: list[WordZoneResult]
+    lipUsable: bool
+
+
 class LiveCoachRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     attemptId: str
     profileId: str
+    # Word mode still sends a sound (the word's vowel, "a" for track) so stored history keeps its shape.
     sound: SoundId
     metricsSource: Literal["spacetimedb", "inline"]
     clientSummary: ClientSummary
     frames: Frames | None = None
+    # Present: coach this word attempt (word mode). Absent: the vowel path, unchanged.
+    word: WordAttempt | None = None
 
     @field_validator("attemptId")
     @classmethod
@@ -144,6 +221,9 @@ class LiveCoachResponse(BaseModel):
     persisted: bool | None = None  # None: queued in the background
     model: str | None = None
     timingsMs: dict[str, int] | None = None
+    # Word mode only.
+    word: WordScore | None = None
+    focusZoneId: str | None = None
 
 
 class CoachDecision(BaseModel):
@@ -156,6 +236,8 @@ class CoachDecision(BaseModel):
     cueId: CueId | None = None
     nextAction: NextAction
     evidenceFields: list[str] = Field(default_factory=list, max_length=12)
+    # Word mode: the zone the caption coaches; must be one of the attempt's zone ids. Ignored for vowels.
+    focusZoneId: str | None = Field(default=None, max_length=16)
 
 
 class NotesRequest(BaseModel):

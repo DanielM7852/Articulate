@@ -18,6 +18,11 @@ from app.live.decision import (
     fallback_decision,
     show_side_view,
     validate_decision,
+    validate_word_decision,
+    word_evidence_candidates,
+    word_fallback_decision,
+    word_show_side_view,
+    zone_info,
 )
 from app.live.history import LearnerContext, LearnerHistory, build_history
 from app.live.schemas import (
@@ -28,9 +33,11 @@ from app.live.schemas import (
     LiveCoachRequest,
     LiveCoachResponse,
     VideoScore,
+    WordScore,
 )
-from app.live.scoring import score_audio, score_video
+from app.live.scoring import score_audio, score_video, score_word
 from app.live.targets import SOUND_CUE, SOUND_SPELLING
+from app.live.words import ZONE_CUE
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +135,56 @@ def _user_message(
     return json.dumps(payload, separators=(",", ":"))
 
 
+def _word_user_message(
+    body: LiveCoachRequest,
+    score: WordScore,
+    candidates: dict[str, float | str],
+    context: LearnerContext,
+) -> str:
+    word = body.word
+    assert word is not None
+    zones = []
+    for z in word.zones:
+        info = zone_info(word, z.zoneId)
+        zones.append(
+            {
+                "id": z.zoneId,
+                "label": info.label if info else z.phoneme,
+                "phoneme": z.phoneme,
+                "kind": z.kind,
+                "position": info.position if info else "",
+                "hint": (info.hint if word.lipUsable else info.hint_no_camera) if info else "",
+                "verdict": z.verdict,
+                "dwellMs": round(z.dwellMs),
+                "evidence": z.evidence,
+                "cue": ZONE_CUE.get(z.zoneId),
+            }
+        )
+    weakest = next((zone for zone in zones if zone["id"] == score.weakestZoneId), None)
+    payload = {
+        "word": word.word,
+        "verdict": score.verdict,
+        "hitCount": score.hitCount,
+        "zoneCount": score.zoneCount,
+        "quality": word.quality,
+        "qualityReason": word.qualityReason,
+        "lipUsable": word.lipUsable,
+        "zones": zones,
+        "weakestZone": weakest,
+        "focusZoneCue": weakest["cue"] if weakest else None,
+        "evidenceMeaning": (
+            "vowel: f1Offset/f2Offset are log-ratios to the target centre (positive f1Offset = more open, positive "
+            "f2Offset = further forward), inTargetFraction is the share of voiced frames inside the target; tuner (r): "
+            "valueMedian/valueBest are the F3-F2 gap in Hz (lower is a stronger r), inBandFraction the share in the "
+            "green band; stop: burstDetected 1 when a release burst was seen; lips: spreadMean, roundingMean, "
+            "lipOpeningMean when the camera was usable"
+        ),
+        "allowedEvidenceFields": sorted(candidates),
+        "learnerNotes": context.notes,
+    }
+    return json.dumps(payload, separators=(",", ":"))
+
+
 def _ms(start: float, end: float) -> int:
     return int(round((end - start) * 1000))
 
@@ -188,6 +245,47 @@ async def _decide(
     return "fallback", decision, evidence
 
 
+async def _decide_word(
+    deps: LiveDeps,
+    body: LiveCoachRequest,
+    score: WordScore,
+    context: LearnerContext,
+    timings: dict[str, int],
+):
+    word = body.word
+    assert word is not None
+    candidates = word_evidence_candidates(word, score)
+    timings["llm"] = 0
+    timings["validate"] = 0
+    if deps.model_available:
+        try:
+            t0 = time.perf_counter()
+            decision = await llm.ask(
+                deps.settings,
+                deps.anthropic_client,
+                llm.WORD_COACH_SYSTEM,
+                _word_user_message(body, score, candidates, context),
+                CoachDecision,
+                deps.settings.live_coach_effort,
+                deps.settings.live_coach_timeout_s,
+                max_tokens=6000,
+                model=deps.settings.live_coach_model,
+                thinking=deps.settings.live_coach_thinking,
+            )
+            t1 = time.perf_counter()
+            timings["llm"] = _ms(t0, t1)
+            evidence = validate_word_decision(decision, word, score, candidates)
+            timings["validate"] = _ms(t1, time.perf_counter())
+            return "agent", decision, evidence
+        except Exception as exc:  # noqa: BLE001 - any model or validation failure uses the fallback
+            timings["llm"] = _ms(t0, time.perf_counter())
+            logger.warning("live word coach used fallback: %s %s", type(exc).__name__, str(exc)[:80])
+    t2 = time.perf_counter()
+    decision, evidence = word_fallback_decision(word, score, candidates)
+    timings["validate"] += _ms(t2, time.perf_counter())
+    return "fallback", decision, evidence
+
+
 Scheduler = Callable[[Callable[[], Awaitable[None]]], None]
 
 
@@ -209,7 +307,15 @@ async def coach_attempt(
     # The current attempt may already be stored (for example a retried request); never show it as history.
     context.attempts = [a for a in context.attempts if a.get("attemptId") != body.attemptId]
 
-    source, decision, evidence = await _decide(deps, body, audio, video, context, timings)
+    word_score = score_word(body.word) if body.word is not None else None
+    if word_score is not None:
+        source, decision, evidence = await _decide_word(deps, body, word_score, context, timings)
+        focus = decision.focusZoneId
+        side = word_show_side_view(focus, decision.nextAction)
+    else:
+        source, decision, evidence = await _decide(deps, body, audio, video, context, timings)
+        focus = None
+        side = show_side_view(decision.cueId, decision.nextAction)
     response = LiveCoachResponse(
         attemptId=body.attemptId,
         source=source,
@@ -219,11 +325,13 @@ async def coach_attempt(
         observation=decision.observation.strip(),
         caption=decision.caption.strip(),
         cueId=decision.cueId,
-        showSideView=show_side_view(decision.cueId, decision.nextAction),
+        showSideView=side,
         nextAction=decision.nextAction,
         evidence=evidence,
         persisted=None,
         model=deps.settings.live_coach_model if source == "agent" else None,
+        word=word_score,
+        focusZoneId=focus,
     )
 
     summary = {
@@ -236,7 +344,12 @@ async def coach_attempt(
         "cueId": response.cueId,
         "nextAction": response.nextAction,
     }
-    decision_json = response.model_dump(exclude={"audio", "video", "persisted", "model", "timingsMs"})
+    if word_score is not None:
+        summary["word"] = word_score.model_dump(include={"word", "verdict", "zoneCount", "hitCount", "weakestZoneId"})
+        summary["focusZoneId"] = focus
+    # Vowel turns keep their stored shape; word turns also record the focus zone.
+    skip = {"audio", "video", "persisted", "model", "timingsMs", "word"} | (set() if word_score else {"focusZoneId"})
+    decision_json = response.model_dump(exclude=skip)
 
     async def persist() -> None:
         try:
