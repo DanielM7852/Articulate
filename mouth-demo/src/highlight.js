@@ -4,6 +4,42 @@ export const HIGHLIGHT_TUNING = { offset: [0, 0, 0], radius: null };
 
 const STEP = 0.002;
 const PERIOD_MS = 900;
+const RX_FACTOR = 1.15; // horizontal radius = anchor radius * this
+const RY_RATIO = 0.6; // vertical radius = horizontal radius * this
+const STROKE = 0.0012; // navy stroke width (m)
+const UNDERLAY = 0.0018; // extra white underlay beyond the stroke (m)
+const PEAK_OPACITY = 0.75;
+const PULSE_MIN_OPACITY = 0.45;
+const PULSE_SCALE = 0.04;
+const SEGMENTS = 96;
+
+// Triangle strip between two offset curves of an ellipse; offsets follow the
+// true normal so the stroke width stays even all the way around.
+function ellipseStrip(rx, ry, d0, d1) {
+  const pos = [];
+  const idx = [];
+  for (let i = 0; i < SEGMENTS; i++) {
+    const t = (i / SEGMENTS) * Math.PI * 2;
+    const c = Math.cos(t);
+    const sn = Math.sin(t);
+    let nx = c / rx;
+    let ny = sn / ry;
+    const l = Math.hypot(nx, ny);
+    nx /= l;
+    ny /= l;
+    const x = rx * c;
+    const y = ry * sn;
+    pos.push(x + nx * d0, y + ny * d0, 0, x + nx * d1, y + ny * d1, 0);
+    const a = i * 2;
+    const b = ((i + 1) % SEGMENTS) * 2;
+    idx.push(a, a + 1, b, a + 1, b + 1, b);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  return geo;
+}
+
 const KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "[", "]"]);
 
 export function createHighlight({ headBone, camera, anchor }) {
@@ -15,10 +51,13 @@ export function createHighlight({ headBone, camera, anchor }) {
   let pulseVal = 0;
   let calibrating = false;
 
-  // palette only: white band with thin navy edges on both sides
-  const EDGE = 0.0015;
-  const BAND = 0.006;
-  const COLORS = ["#203E68", "#FFFFFF", "#203E68"]; // inner edge, band, outer edge
+  // palette only: thin navy stroke over a faint white underlay
+  const COLORS = ["#FFFFFF", "#203E68"]; // underlay, stroke
+  const LAYER_OPACITY = [0.55, 1];
+  const LAYERS = [
+    [-STROKE, STROKE + UNDERLAY], // underlay offsets (m) from the base ellipse
+    [0, STROKE],
+  ];
   const materials = COLORS.map(
     (color) =>
       new THREE.MeshBasicMaterial({
@@ -31,15 +70,15 @@ export function createHighlight({ headBone, camera, anchor }) {
   );
 
   function buildGeometries() {
-    const r = radius * 1.35;
-    const e = [r, r + EDGE, r + EDGE + BAND, r + 2 * EDGE + BAND];
-    return [0, 1, 2].map((i) => new THREE.RingGeometry(e[i], e[i + 1], 64));
+    const rx = radius * RX_FACTOR;
+    const ry = rx * RY_RATIO;
+    return LAYERS.map(([d0, d1]) => ellipseStrip(rx, ry, d0, d1));
   }
 
   const mesh = new THREE.Group();
   const parts = buildGeometries().map((geo, i) => {
     const part = new THREE.Mesh(geo, materials[i]);
-    part.renderOrder = 999;
+    part.renderOrder = 999 + i;
     part.frustumCulled = false;
     mesh.add(part);
     return part;
@@ -77,13 +116,13 @@ export function createHighlight({ headBone, camera, anchor }) {
     const vis = calibrating ? 1 : visibility;
     const doPulse = pulsing || calibrating;
     let scale = 1;
-    let opacity = 0.85 * vis;
+    let opacity = PEAK_OPACITY * vis;
     if (doPulse) {
-      scale = 1 + 0.08 * s;
-      opacity = (0.5 + 0.5 * s) * vis;
+      scale = 1 + PULSE_SCALE * s;
+      opacity = (PULSE_MIN_OPACITY + (PEAK_OPACITY - PULSE_MIN_OPACITY) * s) * vis;
     }
     pulseVal = pulsing ? s * visibility : 0;
-    for (const m of materials) m.opacity = opacity;
+    materials.forEach((m, i) => { m.opacity = opacity * LAYER_OPACITY[i]; });
     mesh.visible = opacity >= 0.01;
     if (!mesh.visible) return;
 

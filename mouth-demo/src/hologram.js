@@ -29,15 +29,18 @@ const ALIAS_FROM = 0.5; // fwidth(row phase) where dots blend to average coverag
 const ALIAS_TO = 0.8;
 const HEAD_RADIUS = 0.09; // metres, cylindrical column coordinate around the head axis
 const PREPASS_OFFSET = { factor: 2, units: 4 };
-const LIP = { targets: ["mouthPucker", "mouthFunnel"], lo: 0.4, hi: 0.7, radial: 0.35, radius: 0.5, darken: 0.2, line: 0.9 };
+const LIP = { targets: ["mouthPucker", "mouthFunnel"], lo: 0.4, hi: 0.7, radial: 0.35, radius: 0.5, darken: 0.2 };
 const TEX = { rMax: 0.55, rMin: 0.22, l0: 0.25, l1: 1.0, lipLo: 0.45, lipHi: 0.6, morphW: 0.0, cavityR: 0.1, cavityDark: 0.05 };
-const DEBUG_VIEW = 0; // 1: lip mask, 2: luminance
+const INTERIOR = { lumLo: 0.42, lumHi: 0.56, dark: 0.6 }; // mouth interior on the head: sqrt-luminance ramp, navy multiplier
+const TEETH = { lumLo: 0.55, lumHi: 0.7, redLo: 0.3, redHi: 0.5, shade: 0.5 }; // teeth texel = bright and low chroma
+const DEBUG_VIEW = 0; // 1: lip mask, 2: luminance, 3: texture, 4: redness/lum, 5: interior/teeth
 const LIP_TEETH = false; // teeth get no lip weight
 const PREPASS_ORDER = -10;
 const HOLO_ORDER = 1;
 
 // per-class params: rowFreq = dot rows per metre, radius in row-pitch units
 const CLASS_PARAMS = {
+  teeth: { rowFreq: 340, radius: 0.38, opacity: 0.92, dropout: 0.06, side: THREE.FrontSide, prepass: true },
   full: { rowFreq: 340, radius: 0.38, opacity: 0.92, dropout: 0.06, side: THREE.FrontSide, prepass: true },
   eyes: { rowFreq: 400, radius: 0.46, opacity: 1.0, dropout: 0.0, side: THREE.FrontSide, prepass: true }
 };
@@ -46,7 +49,8 @@ const HIDDEN_RE = /body|outfit|footwear|shoe|shirt|top|bottom|cloth|jacket|pants
 
 function classify(name) {
   if (/eye/i.test(name) && !/lash|brow/i.test(name)) return "eyes";
-  if (/head|teeth|tongue/i.test(name)) return "full";
+  if (/teeth/i.test(name)) return "teeth";
+  if (/head|tongue/i.test(name)) return "full";
   if (/hair|glasses|lash|brow|beard/i.test(name)) return "hidden";
   if (HIDDEN_RE.test(name)) return "hidden";
   return "hidden";
@@ -86,6 +90,7 @@ uniform float uRadius;
 uniform float uOpacity;
 uniform float uDropout;
 uniform vec2 uCylC;
+uniform float uKind; // 0 head/other, 1 teeth, 2 tongue
 varying vec3 vRestPos;
 varying vec3 vHNormal;
 varying vec3 vViewPos;
@@ -174,22 +179,36 @@ vec3 outgoingLight;
   float a = mix(aB, aM, ml);
   float shade = mix(shB, shM, ml);
   float spec = mix(spB, spM, ml);
-  // thin solid contour where the lip weight crosses 0.5
-  float lg = fwidth(vLip) + 1e-4;
-  float line = (1.0 - smoothstep(0.6, 1.4, abs(vLip - 0.5) / lg)) * ${LIP.line.toFixed(2)};
-  a = max(a, line);
+  // mouth interior (cavity/gums/tongue) = solid dark navy, teeth = solid near-white, both opaque and dot-free
+  float interior = 0.0;
+  float tooth = 0.0;
+  if (uKind > 1.5) {
+    interior = 1.0;
+  } else if (uKind > 0.5) {
+    tooth = smoothstep(${TEETH.lumLo.toFixed(2)}, ${TEETH.lumHi.toFixed(2)}, lum) * (1.0 - smoothstep(${TEETH.redLo.toFixed(2)}, ${TEETH.redHi.toFixed(2)}, redness));
+    interior = 1.0 - tooth;
+  } else {
+    interior = m * (1.0 - smoothstep(${INTERIOR.lumLo.toFixed(2)}, ${INTERIOR.lumHi.toFixed(2)}, lum)) * (1.0 - L);
+    interior = smoothstep(0.35, 0.65, interior);
+  }
+  a = mix(a, 1.0, max(interior, tooth));
   if (a < 0.02) discard;
 
   vec3 col3 = uColNavy * shade * (1.0 - ${LIP.darken.toFixed(2)} * L) + uColHalo * spec;
-  col3 = mix(col3, uColHalo, 0.35 * edge);
+  col3 = mix(col3, uColNavy * ${INTERIOR.dark.toFixed(2)}, interior);
+  col3 = mix(col3, mix(vec3(1.0), uColHalo, clamp(rim * ${TEETH.shade.toFixed(2)}, 0.0, 1.0)), tooth);
+  col3 = mix(col3, uColHalo, 0.35 * edge * (1.0 - max(interior, tooth)));
 
   float fade = smoothstep(uFade.x, uFade.y, y);
   float op = mix(uOpacity, ${MOUTH_EMPH.opacity.toFixed(2)}, ml);
+  op = mix(op, 1.0, max(interior, tooth));
   op = min(op + rim * ${RIM_OPACITY.toFixed(2)} + 0.2 * edge, 1.0);
   outgoingLight = col3;
   if (${DEBUG_VIEW} == 1) { outgoingLight = vec3(L); a = 1.0; }
   if (${DEBUG_VIEW} == 2) { outgoingLight = vec3(lum); a = 1.0; }
   if (${DEBUG_VIEW} == 3) { outgoingLight = tex; a = 1.0; }
+  if (${DEBUG_VIEW} == 5) { outgoingLight = vec3(interior, tooth, 0.0); a = 1.0; }
+  if (${DEBUG_VIEW} == 4) { outgoingLight = vec3(redness, lum, 0.0); a = 1.0; }
   diffuseColor.a = a * op * fade;
 }
 `;
@@ -294,7 +313,7 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
     g.setAttribute("aLip", new THREE.BufferAttribute(out, 1));
   }
   for (const e of entries) {
-    if (e.cls === "full") addLipAttribute(e.mesh, /teeth/i.test(e.mesh.name) && !LIP_TEETH);
+    if (e.cls === "full" || e.cls === "teeth") addLipAttribute(e.mesh, e.cls === "teeth" && !LIP_TEETH);
   }
 
   // reveal range from geometry bounds (rest space)
@@ -341,14 +360,15 @@ export function createHologram({ renderer, scene, camera, root, style = "hologra
       uRowFreq: { value: p.rowFreq },
       uRadius: { value: p.radius },
       uOpacity: { value: p.opacity },
-      uDropout: { value: p.dropout }
+      uDropout: { value: p.dropout },
+      uKind: { value: cls === "teeth" ? 1 : /tongue/i.test(e.mesh.name || "") ? 2 : 0 }
     };
     mat.onBeforeCompile = (shader) => {
       const misses = [];
       patchShader(shader, { ...shared, ...own }, misses);
       if (misses.length) console.warn("[hologram] shader injection missed:", misses.join(", "));
     };
-    mat.customProgramCacheKey = () => "hologram-v5";
+    mat.customProgramCacheKey = () => "hologram-v6";
     mat.userData.hologramClass = cls;
     materials.set(e, mat);
     return mat;
