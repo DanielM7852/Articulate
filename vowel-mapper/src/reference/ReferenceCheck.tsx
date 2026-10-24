@@ -5,6 +5,7 @@ import { VowelPlot } from '../components/VowelPlot';
 import type { FrameListener } from '../game/GameMode';
 import type { useVowelSession } from '../useVowelSession';
 import { HOLD_MS, MIN_POINTS, PROMPTS, centre, distance, evaluate, holdValue, outline, resultsText, voiceFactor, type Hold, type Location, type TargetVowel } from './check';
+import { download, recordClip, wavBlob } from './saveClip';
 import './reference.css';
 
 type Session = ReturnType<typeof useVowelSession>;
@@ -30,6 +31,7 @@ export function ReferenceCheck({ session, frames, point, tracking }: Props) {
   const [location, setLocation] = useState<Location>('quiet');
   const [recording, setRecording] = useState<{ prompt: number; heard: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
   const buffer = useRef<VowelPoint[] | null>(null);
   const holds = saved[location] ?? [];
   const factor = voiceFactor(holds);
@@ -66,6 +68,13 @@ export function ReferenceCheck({ session, frames, point, tracking }: Props) {
     try { await navigator.clipboard.writeText(resultsText(run('quiet', saved.quiet), run('hall', saved.hall))); setCopied(true); } catch { setCopied(false); }
   };
   const checks = evaluate(run('quiet', saved.quiet), run('hall', saved.hall));
+  const saveClip = async (sound: string) => {
+    setSaving(sound);
+    try {
+      const { samples, rate } = await recordClip(3);
+      download(wavBlob(samples, rate), `articulate-${sound}-${new Date().toISOString().replace(/[:.]/g, '-')}.wav`);
+    } finally { setSaving(null); }
+  };
 
   return <div className="workspace rc-workspace">
     <section className="map-panel" aria-labelledby="rc-map-title">
@@ -112,6 +121,14 @@ export function ReferenceCheck({ session, frames, point, tracking }: Props) {
           </li>;
         })}
       </ul>
+
+      <div className="rc-save" aria-label="Save audio for analysis">
+        <p>Save 3 s of audio for analysis. Press, then hold the sound until the button resets. The file goes to your Downloads folder only.</p>
+        <div className="controls">
+          {(['eee', 'ah'] as const).map((sound) => <button key={sound} type="button" className="button-secondary" disabled={!!saving || !!recording}
+            onClick={() => void saveClip(sound)}>{saving === sound ? 'Hold it…' : `Save 3 s · ${sound}`}</button>)}
+        </div>
+      </div>
 
       <ul className="rc-checks">
         {checks.length === 0 && <li className="is-waiting"><b>—</b><div><strong>Results appear here as you record.</strong></div></li>}

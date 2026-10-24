@@ -17,6 +17,8 @@
 .rc-record:focus-visible, .rc-places button:focus-visible { outline: 3px solid #9db6fb; outline-offset: 2px; }
 .rc-result { font-size: 12px; text-align: right; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .rc-result.is-miss { color: var(--rc-fail); }
+.rc-save { margin: 0 0 18px; padding: 12px; border-radius: 10px; background: #f6f9ff; }
+.rc-save p { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .rc-checks { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 8px; }
 .rc-checks li { display: grid; grid-template-columns: 62px 1fr; gap: 10px; align-items: start; padding: 10px; border-radius: 10px; background: #f6f9ff; font-size: 12px; }
 .rc-checks b { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
