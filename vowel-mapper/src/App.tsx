@@ -4,6 +4,7 @@ import { VowelPlot } from './components/VowelPlot';
 import { GameMode, type FrameListener } from './game/GameMode';
 import type { GameCalibrations } from './game/lessons';
 import { ConsonantCuePreview } from './components/ConsonantCuePreview';
+import { ReferenceCheck } from './reference/ReferenceCheck';
 import { useVowelSession } from './useVowelSession';
 
 const trackingCopy = {
@@ -16,10 +17,13 @@ const trackingCopy = {
   invalid: ['Unsupported audio', 'Try desktop Chrome and check your microphone input.'],
 } as const;
 
+/** Developer-only reference check, reached with ?check. */
+const showCheck = new URLSearchParams(window.location.search).has('check');
+
 export default function App() {
   const [ceilingHz, setCeilingHz] = useState(DEFAULT_SETTINGS.ceilingHz);
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ceilingHz }), [ceilingHz]);
-  const [mode, setMode] = useState<'map' | 'game'>('map');
+  const [mode, setMode] = useState<'map' | 'game' | 'check'>(showCheck ? 'check' : 'map');
   const [gameCalibrations, setGameCalibrations] = useState<GameCalibrations>({ base: null, extra: {} });
   const gameFrames = useRef<FrameListener | null>(null);
   const session = useVowelSession(settings, { onFrame: (frame) => gameFrames.current?.(frame) });
@@ -47,11 +51,16 @@ export default function App() {
         <div className="mode-switch" role="group" aria-label="Mode">
           <button type="button" aria-pressed={mode === 'map'} onClick={() => setMode('map')}>Map</button>
           <button type="button" aria-pressed={mode === 'game'} onClick={() => setMode('game')}>Game</button>
+          {showCheck && <button type="button" aria-pressed={mode === 'check'} onClick={() => setMode('check')}>Check</button>}
         </div>
         {mode === 'map' ? <>
           <p className="eyebrow">Vowel explorer</p>
           <h1 id="page-title">See your voice<br className="mobile-break" /> take shape.</h1>
           <p className="intro-copy">Hold a vowel. Watch its position change as you move between sounds.</p>
+        </> : mode === 'check' ? <>
+          <p className="eyebrow">Reference check · developer tool</p>
+          <h1 id="page-title">Does the reference<br className="mobile-break" /> fit your voice?</h1>
+          <p className="intro-copy">About three minutes in each place. Record each word once, then copy the results into the chat.</p>
         </> : <>
           <p className="eyebrow">Zone game</p>
           <h1 id="page-title">Glide between<br className="mobile-break" /> the zones you set.</h1>
@@ -60,6 +69,7 @@ export default function App() {
       </section>
 
       {mode === 'game' && <GameMode calibrations={gameCalibrations} setCalibrations={setGameCalibrations} session={session} frames={gameFrames} point={point} tracking={tracking} />}
+      {mode === 'check' && <ReferenceCheck session={session} frames={gameFrames} point={point} tracking={tracking} />}
       {mode === 'map' && <div className="workspace">
         <section className="map-panel" aria-labelledby="map-title">
           <div className="panel-heading">
