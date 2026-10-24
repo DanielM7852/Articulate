@@ -27,7 +27,7 @@ Use Chrome or Edge and allow microphone access. The app uses a hash router, so t
 
 ## Where teammates plug in
 
-- **F1/F2 vowel graph** and **3D mouth reference**: replace the placeholders in `src/integrations/slots.tsx`. The props (`sound`, `mode`, `stream`, `view`) are already passed by every screen.
+- **F1/F2 vowel graph** and **3D mouth reference**: not included yet; they will be added in a later change (the sound panel in Practice and the reference panel are where they go).
 - **Coaching agents (Claude)**: set `VITE_COACH_URL` to an endpoint that accepts `{ attempt, history }` and returns the `CoachResponse` shape in `src/services/coach.ts`. Without it, a local response is generated from measured fields only.
 - **Cartesia narration**: swap the browser `speechSynthesis` call in `src/audio/useSpeech.ts`.
 - **Formant metrics**: `timeInTargetSec` and `longestHoldSec` on `Attempt` stay `null` until the measurement service fills them; the UI shows "—" until then.

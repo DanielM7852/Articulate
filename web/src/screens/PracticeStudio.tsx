@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Info, Mic, Play, Square, Type, Volume2, VolumeX } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { LessonHeader } from '../components/LessonHeader';
-import { AmplitudeMeter, CameraTile, LessonSteps, ReferencePanel, SoundPanel, type GraphMode } from '../components/practice';
+import { AmplitudeMeter, CameraTile, LessonSteps, ReferencePanel, SoundPanel } from '../components/practice';
 import { Badge, Button, ChoiceButton } from '../components/ui';
 import { useMicrophone } from '../audio/useMicrophone';
 import { useSpeech } from '../audio/useSpeech';
@@ -38,8 +38,6 @@ export default function PracticeStudio() {
   const guidedCount = history.filter((a) => a.kind === 'guided' && a.quality === 'usable').length;
   const stepIndex = phase === 'feedback' ? (guidedCount > 1 ? 3 : 2) : guidedCount > 0 ? 3 : 1;
   const assistanceOn = plan.assistance !== 'none';
-
-  const graphMode: GraphMode = !assistanceOn ? 'hidden' : phase === 'recording' ? 'live' : phase === 'feedback' ? 'review' : 'preview';
 
   useEffect(() => {
     if (!speech.speaking) setReferencePlaying(false);
@@ -118,7 +116,7 @@ export default function PracticeStudio() {
     <AppShell
       context="Practice studio"
       inLesson
-      footerNote="Live capture · Formant tracking and 3D reference connect through integration slots."
+      footerNote="Live capture · Formant tracking is measured separately."
     >
       <div className="page--tight">
         <LessonHeader
@@ -130,10 +128,7 @@ export default function PracticeStudio() {
 
         <div className="grid-2">
           <SoundPanel
-            sound={plan.sound}
-            mode={graphMode}
-            stream={mic.stream}
-            title={phase === 'ready' ? 'Your voice → sound graph' : 'Your recorded sound'}
+            title={phase === 'ready' ? 'Your voice' : 'Your recorded sound'}
             badge={
               recording ? (
                 <Badge live>Recording · {mic.elapsed.toFixed(1)} s</Badge>
@@ -145,11 +140,6 @@ export default function PracticeStudio() {
             }
             footer={
               <>
-                <p className="fine">
-                  {recording
-                    ? 'The hold ring fills only while valid sound stays inside the target.'
-                    : 'In a recording, the hold ring fills only for valid measurements inside the target.'}
-                </p>
                 <div className="row" style={{ borderTop: '1px solid var(--color-line)', paddingTop: 12, gap: 16 }}>
                   <div className="stack gap-4 grow">
                     <p className="strong" style={{ fontSize: 12, color: mic.status === 'denied' ? 'var(--color-warn)' : 'var(--color-success)' }}>
@@ -269,7 +259,7 @@ export default function PracticeStudio() {
             </div>
             <div className="card card--warn" style={{ padding: 20, gap: 10 }}>
               <div className="card-head">
-                <p className="eyebrow">If the cursor fades</p>
+                <p className="eyebrow">If the amplitude drops</p>
                 <Badge tone="warn">Capture tip</Badge>
               </div>
               <p className="ink" style={{ fontSize: 14, fontWeight: 500 }}>

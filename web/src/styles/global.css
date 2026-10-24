@@ -720,22 +720,6 @@ button.badge {
   background: var(--color-navy);
 }
 
-.slot {
-  position: relative;
-  border-radius: var(--radius-control);
-  background: var(--color-cream);
-  border: 1px dashed var(--color-navy-mist);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 8px;
-  padding: 20px;
-  color: var(--color-muted);
-  overflow: hidden;
-}
-
 .metric-value {
   font-size: 25px;
   font-weight: 500;

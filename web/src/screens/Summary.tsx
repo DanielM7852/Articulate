@@ -4,7 +4,6 @@ import { EyeOff, Mic, Play, Square, Type, Volume2, VolumeX } from 'lucide-react'
 import { AppShell } from '../components/AppShell';
 import { LessonHeader } from '../components/LessonHeader';
 import { AmplitudeMeter, LessonSteps } from '../components/practice';
-import { ReferenceModel } from '../integrations/slots';
 import { Badge, Button } from '../components/ui';
 import { useMicrophone } from '../audio/useMicrophone';
 import { useSpeech } from '../audio/useSpeech';
@@ -100,14 +99,11 @@ export default function Summary() {
                   </p>
                   <p className="small">Caption: Take a comfortable breath. Hold “{s.spelled}” for about 3 seconds, without following a target.</p>
                 </div>
-                <div style={{ width: 240, height: 240 }}>
-                  <ReferenceModel sound={plan.sound} view="front" />
-                </div>
               </div>
 
               <p className="row row--top small" style={{ gap: 12 }}>
                 <EyeOff size={20} color="var(--color-navy)" aria-hidden="true" style={{ flexShrink: 0 }} />
-                During this attempt, the cursor, target, hold ring, and mouth cue are hidden. Captions, written instructions,
+                During this attempt, task-specific cues are hidden. Captions, written instructions,
                 audio preferences, and stop controls stay available.
               </p>
 
