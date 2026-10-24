@@ -6,7 +6,9 @@ import { AmplitudeMeter, CameraTile, LESSON_STEPS } from '../components/practice
 import { VowelGraph } from '../components/VowelGraph';
 import { MouthReference, type MouthReferenceHandle, type MouthView } from '../components/MouthReference';
 import { TeacherCaptions } from '../components/TeacherCaptions';
-import { unlockTeacherAudio } from '../audio/teacher';
+import { prepareTeacher, unlockTeacherAudio } from '../audio/teacher';
+import { bridgeLine } from '../live/bridge';
+import '../live/bridge.css';
 import { useLipTracking } from '../vision/useLipTracking';
 import { AttemptRecorder } from '../live/attemptRecorder';
 import { offlineSink, type MetricSink } from '../live/metricSink';
@@ -118,6 +120,7 @@ export default function PracticeStudio() {
   const [phase, setPhase] = useState<Phase>('ready');
   const [current, setCurrent] = useState<Attempt | null>(null);
   const [coach, setCoach] = useState<CoachResponse | null>(null);
+  const [lipMeasured, setLipMeasured] = useState(false);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [referencePlaying, setReferencePlaying] = useState(false);
   const replayRef = useRef<HTMLAudioElement | null>(null);
@@ -203,7 +206,10 @@ export default function PracticeStudio() {
 
   async function stopRecording() {
     const myRun = ++runId.current;
+    prepareTeacher(); // fetch the speech token and open the socket while the coach call runs
+    void unlockTeacherAudio();
     const target = tracking.endWindow();
+    const lipOn = camera && lip.status === 'tracking';
     lip.endWindow();
     const recorded = recorder.current!.end(); // stops frame capture now; resolves after the final flush
     const summary = await mic.endRecording();
@@ -226,7 +232,20 @@ export default function PracticeStudio() {
     };
     addAttempt(attempt);
     setCurrent(attempt);
+    setLipMeasured(lipOn);
     setPhase('analyzing');
+    // Bridge: say what was measured right away while the coach call runs.
+    void seq.say(
+      bridgeLine({
+        sound: attempt.sound,
+        timeInTargetSec: attempt.timeInTargetSec,
+        longestHoldSec: attempt.longestHoldSec,
+        usableVoicedSec: attempt.usableVoicedSec,
+        quality: attempt.quality,
+        lipTracking: lipOn,
+      }),
+      { narration },
+    );
 
     // Live coaching first; any failure falls back to the existing local/agent path.
     let live: LiveCoachResponse | null = null;
@@ -273,6 +292,7 @@ export default function PracticeStudio() {
     }
 
     const response = await analyzeAttempt(attempt, history);
+    await seq.whenIdle(); // never overlap the bridge line
     if (runId.current !== myRun) return;
     setCoach(response);
     setPhase('feedback');
@@ -438,7 +458,8 @@ export default function PracticeStudio() {
             }}
             onReplay={recordingUrl ? replayRecording : undefined}
             onReadAloud={readAloud}
-            captionsNode={captions && liveResp ? <TeacherCaptions speech={seq.speech} text={liveResp.caption} /> : null}
+            lipMeasured={lipMeasured}
+            captionsNode={captions && seq.caption ? <TeacherCaptions speech={seq.speech} text={seq.caption} /> : null}
             onTryAgain={startRecording}
             onLessHelp={() => navigate('/summary')}
           />
@@ -539,8 +560,10 @@ function ResultSheet({
   onTryAgain,
   onLessHelp,
   captionsNode,
+  lipMeasured,
 }: {
   captionsNode?: React.ReactNode;
+  lipMeasured: boolean;
   attempt: Attempt;
   coach: CoachResponse | null;
   leaving: boolean;
@@ -584,9 +607,31 @@ function ResultSheet({
               {captionsNode}
             </>
           ) : (
-            <p className="ob-fine">Reading your attempt…</p>
+            <>
+              <p className="ob-fine">Reading your attempt…</p>
+              {captionsNode}
+            </>
           )}
         </div>
+
+        <dl className="lp-measures" aria-label="Measured on this device">
+          <div>
+            <dt>Time in target</dt>
+            <dd>{attempt.timeInTargetSec === null ? 'not measured' : `${attempt.timeInTargetSec.toFixed(1)} s`}</dd>
+          </div>
+          <div>
+            <dt>Longest hold</dt>
+            <dd>{attempt.longestHoldSec === null ? 'not measured' : `${attempt.longestHoldSec.toFixed(1)} s`}</dd>
+          </div>
+          <div>
+            <dt>Usable voice</dt>
+            <dd>{attempt.usableVoicedSec.toFixed(1)} s</dd>
+          </div>
+          <div>
+            <dt>Lip tracking</dt>
+            <dd>{lipMeasured ? 'on' : 'off'}</dd>
+          </div>
+        </dl>
 
         <div className="lp-sheet-tools">
           <button type="button" className="ob-text-btn" onClick={onReplay} disabled={!onReplay}>

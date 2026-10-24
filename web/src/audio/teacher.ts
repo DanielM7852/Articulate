@@ -34,8 +34,89 @@ const TOKEN_TIMEOUT_MS = 10_000;
 const LEAD_S = 0.05;
 const TICK_MS = 30;
 
+const TOKEN_TTL_MS = 120_000; // backend token lifetime
+const TOKEN_MIN_REMAINING_MS = 30_000;
+const REUSED_SOCKET_WATCHDOG_MS = 3000;
+
 let sharedCtx: AudioContext | null = null;
 let current: Impl | null = null;
+
+// Prewarmed transport. The token is only ever held in memory and never logged.
+let tokenCache: { info: TokenResponse; expiresAt: number } | null = null;
+let tokenInflight: Promise<TokenResponse> | null = null;
+let idle: { ws: WebSocket; info: TokenResponse } | null = null;
+
+function cachedToken(): TokenResponse | null {
+  if (tokenCache && tokenCache.expiresAt - Date.now() > TOKEN_MIN_REMAINING_MS) return tokenCache.info;
+  return null;
+}
+
+/** Shared by prepareTeacher and speakTeacher so concurrent callers use one request. */
+function getToken(): Promise<TokenResponse> {
+  const hit = cachedToken();
+  if (hit) return Promise.resolve(hit);
+  if (tokenInflight) return tokenInflight;
+  const fetchedAt = Date.now();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TOKEN_TIMEOUT_MS);
+  const p = (async () => {
+    const res = await fetch('/v1/speech/token', { method: 'POST', signal: ctl.signal });
+    if (!res.ok) throw new Error(`Token request failed (${res.status}).`);
+    const info = (await res.json()) as TokenResponse;
+    if (!info || typeof info.token !== 'string' || !info.token) throw new Error('Token response was empty.');
+    tokenCache = { info, expiresAt: fetchedAt + TOKEN_TTL_MS };
+    return info;
+  })().finally(() => {
+    clearTimeout(timer);
+    if (tokenInflight === p) tokenInflight = null;
+  });
+  tokenInflight = p;
+  return p;
+}
+
+function socketUrl(info: TokenResponse): string {
+  return `${info.ws_url}?cartesia_version=${encodeURIComponent(info.cartesia_version)}&access_token=${encodeURIComponent(info.token)}`;
+}
+
+/** Park a socket as the idle one; any failure or close discards it. */
+function parkIdle(ws: WebSocket, info: TokenResponse): void {
+  if (idle && idle.ws !== ws) { try { idle.ws.close(); } catch { /* ignore */ } }
+  idle = { ws, info };
+  const drop = () => { if (idle?.ws === ws) idle = null; };
+  ws.onmessage = null;
+  ws.onerror = drop;
+  ws.onclose = drop;
+}
+
+/** Hand the idle socket (open or still connecting) to a speaker; it must replace the handlers. */
+function takeIdle(): { ws: WebSocket; info: TokenResponse } | null {
+  const it = idle;
+  idle = null;
+  if (!it) return null;
+  if (it.ws.readyState === WebSocket.OPEN || it.ws.readyState === WebSocket.CONNECTING) return it;
+  return null;
+}
+
+/**
+ * Fire-and-forget warm-up: cache a speech token and open an idle Cartesia socket so the next
+ * speakTeacher starts without a connect delay. Silently does nothing if the token endpoint fails.
+ */
+export function prepareTeacher(): void {
+  try {
+    if (typeof WebSocket === 'undefined') return;
+    if (idle && (idle.ws.readyState === WebSocket.OPEN || idle.ws.readyState === WebSocket.CONNECTING)) {
+      if (cachedToken()) return;
+    }
+    void getToken()
+      .then((info) => {
+        if (idle && (idle.ws.readyState === WebSocket.OPEN || idle.ws.readyState === WebSocket.CONNECTING)) return;
+        parkIdle(new WebSocket(socketUrl(info)), info);
+      })
+      .catch(() => undefined);
+  } catch {
+    /* warm-up is best effort */
+  }
+}
 
 function getCtx(sampleRate: number): AudioContext | null {
   try {
@@ -112,7 +193,8 @@ class Impl implements TeacherSpeech {
   private streamDone = false;
   private carry: Uint8Array = new Uint8Array(0);
   private sampleRate = 24000;
-  private abort: AbortController | null = null;
+  private info: TokenResponse | null = null;
+  private gotMessage = false;
 
   // browser fallback
   private utterance: SpeechSynthesisUtterance | null = null;
@@ -170,7 +252,6 @@ class Impl implements TeacherSpeech {
   }
 
   private teardownTransport(sendCancel: boolean): void {
-    this.abort?.abort();
     const ws = this.ws;
     this.ws = null;
     if (ws) {
@@ -235,31 +316,34 @@ class Impl implements TeacherSpeech {
       if (!ctx || typeof WebSocket === 'undefined') throw new Error('Web Audio or WebSocket unavailable.');
       this.ctx = ctx;
       void ctx.resume().catch(() => undefined);
-      this.abort = new AbortController();
-      const timer = setTimeout(() => this.abort?.abort(), TOKEN_TIMEOUT_MS);
-      let info: TokenResponse;
-      try {
-        const res = await fetch('/v1/speech/token', { method: 'POST', signal: this.abort.signal });
-        if (!res.ok) throw new Error(`Token request failed (${res.status}).`);
-        info = (await res.json()) as TokenResponse;
-        if (!info || typeof info.token !== 'string' || !info.token) throw new Error('Token response was empty.');
-      } finally {
-        clearTimeout(timer);
+      let parked = takeIdle();
+      if (!parked) {
+        const info = await getToken();
+        if (this.ended) return;
+        parked = takeIdle(); // a warm-up may have finished while the token was in flight
+        if (!parked) {
+          this.sampleRate = info.sample_rate || 24000;
+          this.openSocket(info, new WebSocket(socketUrl(info)), false);
+          return;
+        }
       }
-      if (this.ended) return;
-      this.sampleRate = info.sample_rate || 24000;
-      this.openSocket(info);
+      if (this.ended) {
+        parkIdle(parked.ws, parked.info);
+        return;
+      }
+      this.sampleRate = parked.info.sample_rate || 24000;
+      this.openSocket(parked.info, parked.ws, true);
     } catch (err) {
       if (this.ended) return;
       this.failTransport(err instanceof Error ? err.message : 'Cartesia was unavailable.');
     }
   }
 
-  private openSocket(info: TokenResponse): void {
-    const url = `${info.ws_url}?cartesia_version=${encodeURIComponent(info.cartesia_version)}&access_token=${encodeURIComponent(info.token)}`;
-    const ws = new WebSocket(url);
+  private openSocket(info: TokenResponse, ws: WebSocket, reused: boolean): void {
     this.ws = ws;
-    ws.onopen = () => {
+    this.info = info;
+    this.gotMessage = false;
+    const send = () => {
       const body: Record<string, unknown> = {
         model_id: info.model_id,
         transcript: this.text,
@@ -274,12 +358,30 @@ class Impl implements TeacherSpeech {
       if (this.speed !== undefined && Math.abs(this.speed - 1) > 0.01) body.generation_config = { speed: this.speed };
       ws.send(JSON.stringify(body));
     };
-    ws.onmessage = (event) => this.onMessage(event.data);
+    ws.onopen = send;
+    ws.onmessage = (event) => { this.gotMessage = true; this.onMessage(event.data); };
     ws.onerror = () => this.failTransport('Cartesia connection error.');
     ws.onclose = () => {
       if (this.ended || this.streamDone) return;
       this.failTransport('Cartesia connection closed early.');
     };
+    if (ws.readyState === WebSocket.OPEN) {
+      try { send(); } catch { this.failTransport('Cartesia connection error.'); return; }
+    }
+    if (reused) {
+      // An idle socket can be dead without a close event; if it stays silent, retry once on a fresh socket.
+      setTimeout(() => {
+        if (this.ended || this.gotMessage || this.ws !== ws) return;
+        this.ws = null;
+        ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
+        try { ws.close(); } catch { /* ignore */ }
+        try {
+          this.openSocket(info, new WebSocket(socketUrl(info)), false);
+        } catch {
+          this.failTransport('Cartesia connection error.');
+        }
+      }, REUSED_SOCKET_WATCHDOG_MS);
+    }
   }
 
   /** Exposed for tests through the module-level helper; merges one server message. */
@@ -342,7 +444,13 @@ class Impl implements TeacherSpeech {
 
   private markStreamDone(): void {
     this.streamDone = true;
-    try { this.ws?.close(); } catch { /* ignore */ }
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      // Clean end of this context: return the socket to the idle slot for the next utterance.
+      if (ws.readyState === WebSocket.OPEN && this.info) parkIdle(ws, this.info);
+      else { try { ws.close(); } catch { /* ignore */ } }
+    }
     if (!this.started) this.finish('finished');
   }
 
