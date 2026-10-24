@@ -175,19 +175,23 @@ export default function PracticeStudio() {
     return () => clearTimeout(t);
   }, [sheetOpen]);
 
-  const micLine =
-    mic.status === 'denied' ? (
-      <span className="ob-status ob-status--warn" role="alert">
-        <TriangleAlert size={16} aria-hidden="true" /> Microphone blocked · allow it in site settings
-      </span>
-    ) : recording ? (
-      <span className="ob-status">Recording · {mic.elapsed.toFixed(1)} s</span>
-    ) : (
-      <span className="ob-status">{mic.status === 'ready' ? 'Microphone ready' : 'Mic starts when you record'}</span>
-    );
+  /* ---------- Panes ---------- */
+  const viewSwitch = (
+    <Segmented
+      className="lp-mini lp-mini--views"
+      label="View"
+      options={[
+        { id: 'graph' as View, label: 'Sound' },
+        { id: 'guide' as View, label: 'Guide' },
+        { id: 'mirror' as View, label: 'Mirror' },
+      ]}
+      value={sideView}
+      onChange={setView}
+    />
+  );
 
-  const graphBody = (
-    <div className="lp-tile-body">
+  const graphPane = (
+    <section className="lp-pane" aria-label="Your sound">
       <VowelGraph
         sound={plan.sound}
         point={tracking.point}
@@ -197,26 +201,31 @@ export default function PracticeStudio() {
         holdSec={tracking.holdSec}
         hidden={!assistanceOn}
       />
-    </div>
+      {compact && <div className="lp-overlay lp-overlay--tl">{viewSwitch}</div>}
+      <label className="lp-overlay lp-overlay--br lp-pill lp-target">
+        Target
+        <Switch label="Show target" checked={assistanceOn} onChange={(on) => updatePlan({ assistance: on ? 'cue-target' : 'none' })} />
+      </label>
+    </section>
   );
 
-  const guideBody = (
-    <div className="lp-tile-body">
+  const guidePane = (
+    <section className="lp-pane" aria-label="Mouth guide">
       <MouthReference sound={plan.sound} view={refView} slow={slow} />
-      <div className="lp-overlay lp-overlay--bl">
-        <p className="ob-label navy">{s.tongue}</p>
-        <p className="ob-fine">{s.lips}</p>
+      <div className="lp-overlay lp-overlay--tl lp-pills">
+        {compact ? (
+          viewSwitch
+        ) : (
+          <button type="button" className="lp-pill" onClick={() => setView('mirror')}>
+            <Video size={16} aria-hidden="true" />
+            Mirror
+          </button>
+        )}
+        <button type="button" className="lp-pill" aria-pressed={slow} onClick={() => setSlow((v) => !v)}>
+          <Snail size={16} aria-hidden="true" />
+          Slow
+        </button>
       </div>
-      <button
-        type="button"
-        className="lp-overlay lp-overlay--tl ob-pill lp-slow"
-        aria-pressed={slow}
-        title={slow ? 'Normal speed' : 'Slow motion'}
-        onClick={() => setSlow((v) => !v)}
-      >
-        <Snail size={16} aria-hidden="true" />
-        Slow
-      </button>
       <Segmented
         className="lp-overlay lp-overlay--tr lp-mini"
         label="Reference view"
@@ -227,40 +236,53 @@ export default function PracticeStudio() {
         value={refView}
         onChange={setRefView}
       />
-    </div>
+      <div className="lp-overlay lp-overlay--bl lp-note">
+        <p className="ob-label navy">{s.tongue}</p>
+        <p className="ob-fine">{s.lips}</p>
+      </div>
+    </section>
   );
 
-  const mirrorBody = (
-    <div className={`lp-tile-body lp-mirror ${camera ? 'is-on' : ''}`}>
+  const mirrorPane = (
+    <section className={`lp-pane lp-mirror ${camera ? 'is-on' : ''}`} aria-label="Mirror">
       {camera ? (
-        <>
-          <CameraTile enabled />
-          <span className="lp-overlay lp-overlay--bl lp-chip">Visible lips only · not saved</span>
-          <button type="button" className="lp-overlay lp-overlay--tr ob-pill" onClick={() => setCamera(false)}>
-            <VideoOff size={16} aria-hidden="true" />
-            <span style={{ marginLeft: 6 }}>Turn off</span>
-          </button>
-        </>
+        <CameraTile enabled />
       ) : (
         <div className="lp-empty">
           <span className="ob-cam-icon" aria-hidden="true">
             <Video size={22} />
           </span>
           <p className="ob-label">See your lips while you practice</p>
-          <p className="ob-fine">The camera stays off unless you turn it on, and nothing is saved.</p>
+          <p className="ob-fine">Nothing is saved.</p>
           <button type="button" className="btn btn--sm" onClick={() => setCamera(true)}>
-            <Video size={16} aria-hidden="true" /> Turn on mirror
+            <Video size={16} aria-hidden="true" /> Turn on camera
           </button>
         </div>
       )}
-    </div>
+      <div className="lp-overlay lp-overlay--tl lp-pills">
+        {compact ? (
+          viewSwitch
+        ) : (
+          <button type="button" className="lp-pill" onClick={() => setView('guide')}>
+            <ScanFace size={16} aria-hidden="true" />
+            Guide
+          </button>
+        )}
+        {camera && (
+          <button type="button" className="lp-pill" onClick={() => setCamera(false)}>
+            <VideoOff size={16} aria-hidden="true" />
+            Turn off
+          </button>
+        )}
+      </div>
+      {camera && <span className="lp-overlay lp-overlay--bl lp-pill">Visible lips only · not saved</span>}
+    </section>
   );
 
-  const viewOptions = [
-    ...(compact ? [{ id: 'graph' as View, label: 'Your sound' }] : []),
-    { id: 'guide' as View, label: 'Mouth guide' },
-    { id: 'mirror' as View, label: 'Mirror' },
-  ];
+  const sidePane = sideView === 'graph' ? graphPane : sideView === 'guide' ? guidePane : mirrorPane;
+
+  const micWarning =
+    mic.status === 'denied' ? 'Microphone blocked · allow it in site settings' : mic.status === 'unsupported' ? 'Microphone unsupported in this browser' : null;
 
   return (
     <OnboardingFrame
@@ -268,7 +290,6 @@ export default function PracticeStudio() {
       total={LESSON_STEPS.length}
       progressLabel="Lesson progress"
       stageKey="practice"
-      width={1040}
       className="lp"
       onClose={{ label: 'Pause or finish', onClick: () => navigate('/summary') }}
       footer={
@@ -277,6 +298,15 @@ export default function PracticeStudio() {
             <Volume2 size={18} aria-hidden="true" />
             {referencePlaying ? 'Playing…' : 'Hear example'}
           </button>
+          <div className="lp-meter" aria-hidden={!recording && !micWarning}>
+            {micWarning ? (
+              <span className="ob-status ob-status--warn" role="alert">
+                <TriangleAlert size={16} aria-hidden="true" /> {micWarning}
+              </span>
+            ) : (
+              recording && <AmplitudeMeter levels={mic.levels} active />
+            )}
+          </div>
           <button
             type="button"
             className={`ob-cta ${recording ? 'ob-cta--stop' : ''}`}
@@ -311,13 +341,11 @@ export default function PracticeStudio() {
     >
       <div className="lp-head">
         <StepHeading
-          eyebrow={`Lesson 1 · ${LESSON_STEPS[stepIndex]}`}
           title={
             <>
               Find your {s.spelled} <span className="navy">{s.ipa}</span>
             </>
           }
-          hint={recording ? 'Keep a comfortable sound. Stop when you’re ready.' : `Take a breath and hold “${s.spelled}” for about 3 seconds.`}
         />
         <Segmented
           className="lp-sounds"
@@ -339,42 +367,9 @@ export default function PracticeStudio() {
         />
       </div>
 
-      <div className="lp-tiles">
-        {!compact && (
-          <section className="lp-tile" aria-label="Your sound">
-            <div className="lp-tile-head">
-              <h2 className="ob-label">Your sound</h2>
-              <label className="row fine" style={{ gap: 10 }}>
-                Show target
-                <Switch label="Show target" checked={assistanceOn} onChange={(on) => updatePlan({ assistance: on ? 'cue-target' : 'none' })} />
-              </label>
-            </div>
-            {graphBody}
-            <div className="lp-tile-foot">
-              <AmplitudeMeter levels={mic.levels} active={recording} />
-              {micLine}
-            </div>
-          </section>
-        )}
-
-        <section className="lp-tile" aria-label={sideView === 'mirror' ? 'Mirror' : sideView === 'guide' ? 'Mouth guide' : 'Your sound'}>
-          <div className="lp-tile-head">
-            <Segmented className="lp-views" label="View" options={viewOptions} value={sideView} onChange={setView} />
-          </div>
-          {sideView === 'graph' ? graphBody : sideView === 'guide' ? guideBody : mirrorBody}
-          {compact ? (
-            <div className="lp-tile-foot">
-              <AmplitudeMeter levels={mic.levels} active={recording} />
-              {micLine}
-            </div>
-          ) : (
-            <div className="lp-tile-foot">
-              <span className="ob-status">
-                <ScanFace size={16} aria-hidden="true" /> “{s.spelled}” · {s.cue}
-              </span>
-            </div>
-          )}
-        </section>
+      <div className="lp-stage">
+        {!compact && graphPane}
+        {sidePane}
       </div>
     </OnboardingFrame>
   );
