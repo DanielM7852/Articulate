@@ -18,6 +18,7 @@ import { AttemptRecorder } from '../live/attemptRecorder';
 import { offlineSink, type MetricSink } from '../live/metricSink';
 import { createSpacetimeSink, type SinkStatus } from '../live/spacetimeSink';
 import { profileIdFor, requestLiveCoach, type LiveCoachResponse } from '../live/liveCoach';
+import { uploadArticulation } from '../live/articulationUpload';
 import { useCoachSequence } from '../live/useCoachSequence';
 import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
 import { useSpeech } from '../audio/useSpeech';
@@ -238,6 +239,7 @@ export default function PracticeStudio() {
   async function finishCapture(): Promise<CaptureOutcome | null> {
     const myRun = ++runId.current;
     captureActive.current = false;
+    const attemptPcm = convAudio.takeAttemptPcm(); // taken now so a later segment can't replace it
     prepareTeacher(); // fetch the speech token and open the socket while the coach call runs
     void unlockTeacherAudio();
     const target = tracking.endWindow();
@@ -285,6 +287,17 @@ export default function PracticeStudio() {
 
     // Live coaching first; any failure falls back to the existing local/agent path.
     let live: LiveCoachResponse | null = null;
+    // Background articulation analysis: fire-and-forget, parallel to (never blocking) the coach call.
+    if (attemptPcm) {
+      void uploadArticulation({
+        attemptId: attempt.attemptId,
+        profileId,
+        sound: attempt.sound,
+        pcm: attemptPcm.pcm,
+        captureStartMonotonicMs: attemptPcm.startMs,
+        timeOriginUnixMs: performance.timeOrigin,
+      });
+    }
     try {
       const rec = await recorded;
       const ctl = new AbortController();

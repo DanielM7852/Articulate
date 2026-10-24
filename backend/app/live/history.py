@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from app.config import Settings
 from app.integrations.spacetime import SpacetimeClient, profile_literal, timestamp_micros, unwrap
+from app.live.articulation import annotate_attempts
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,22 @@ class LearnerHistory(Protocol):
     async def record(self, profile_id: str, attempt_id: str, summary: dict, decision: dict) -> bool: ...
 
     async def save_notes(self, profile_id: str, notes: dict) -> bool: ...
+
+    async def record_articulation(self, profile_id: str, attempt_id: str, sound: str, features: dict) -> bool: ...
+
+
+ARTIC_LOOKBACK = 3  # load limit * 3 attempts so older on_target anchors are available to annotate_attempts
+
+
+def _annotate(compacts: list[dict[str, Any]], features: dict[str, dict], limit: int) -> list[dict[str, Any]]:
+    """Attach stored features by attemptId, run the gate over the longer list, return the newest `limit`."""
+    if not features:
+        return compacts[:limit]
+    for item in compacts:
+        stored = features.get(item.get("attemptId"))
+        if stored is not None:
+            item["artic"] = stored
+    return annotate_attempts(compacts)[:limit]
 
 
 def compact_attempt(summary: dict, decision: dict | None = None) -> dict[str, Any]:
@@ -55,6 +72,10 @@ def _safe_name(profile_id: str) -> str:
 class LocalHistory:
     def __init__(self, settings: Settings) -> None:
         self._dir = Path(settings.store_dir) / "learners"
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _lock(self, profile_id: str) -> asyncio.Lock:
+        return self._locks.setdefault(self._path(profile_id).name, asyncio.Lock())
 
     def _path(self, profile_id: str) -> Path:
         return self._dir / f"{_safe_name(profile_id)}.json"
@@ -76,9 +97,15 @@ class LocalHistory:
     async def load(self, profile_id: str, limit: int) -> LearnerContext:
         data = await asyncio.to_thread(self._read, profile_id)
         turns = [t for t in data.get("attempts", []) if isinstance(t, dict)]
-        recent = list(reversed(turns))[:limit]
+        recent = list(reversed(turns))[: limit * ARTIC_LOOKBACK]
+        stored = data.get("articulation")
+        features = {
+            k: v["features"] for k, v in (stored.items() if isinstance(stored, dict) else [])
+            if isinstance(v, dict) and isinstance(v.get("features"), dict)
+        }
+        compacts = [compact_attempt(t.get("summary") or {}, t.get("decision")) for t in recent]
         return LearnerContext(
-            attempts=[compact_attempt(t.get("summary") or {}, t.get("decision")) for t in recent],
+            attempts=_annotate(compacts, features, limit),
             notes=data.get("notes") if isinstance(data.get("notes"), dict) else None,
         )
 
@@ -91,10 +118,29 @@ class LocalHistory:
             self._write(profile_id, data)
 
         try:
-            await asyncio.to_thread(work)
+            async with self._lock(profile_id):
+                await asyncio.to_thread(work)
             return True
         except OSError as exc:
             logger.warning("local history write failed: %s", type(exc).__name__)
+            return False
+
+    async def record_articulation(self, profile_id: str, attempt_id: str, sound: str, features: dict) -> bool:
+        def work() -> None:
+            data = self._read(profile_id)
+            store = data.get("articulation")
+            store = dict(store) if isinstance(store, dict) else {}
+            store.pop(attempt_id, None)
+            store[attempt_id] = {"sound": sound, "features": features}
+            data["articulation"] = dict(list(store.items())[-200:])
+            self._write(profile_id, data)
+
+        try:
+            async with self._lock(profile_id):
+                await asyncio.to_thread(work)
+            return True
+        except OSError as exc:
+            logger.warning("local articulation write failed: %s", type(exc).__name__)
             return False
 
     async def save_notes(self, profile_id: str, notes: dict) -> bool:
@@ -104,7 +150,8 @@ class LocalHistory:
             self._write(profile_id, data)
 
         try:
-            await asyncio.to_thread(work)
+            async with self._lock(profile_id):
+                await asyncio.to_thread(work)
             return True
         except OSError as exc:
             logger.warning("local notes write failed: %s", type(exc).__name__)
@@ -138,8 +185,17 @@ class SpacetimeHistory:
             summary.setdefault("attemptId", unwrap(row.get("attempt_id")))
             summary.setdefault("sound", unwrap(row.get("sound")))
             attempts.append(compact_attempt(summary))
-            if len(attempts) >= limit:
+            if len(attempts) >= limit * ARTIC_LOOKBACK:
                 break
+        features: dict[str, dict] = {}
+        try:
+            for row in await self._client.sql(f"SELECT * FROM learner_articulation WHERE profile_id = {lit}"):
+                stored = _loads(row.get("features"))
+                if stored:
+                    features[unwrap(row.get("attempt_id"))] = stored
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("learner articulation read failed: %s", type(exc).__name__)
+        attempts = _annotate(attempts, features, limit)
         notes = None
         try:
             note_rows = await self._client.sql(f"SELECT * FROM learner_note WHERE profile_id = {lit}")
@@ -158,6 +214,16 @@ class SpacetimeHistory:
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning("record_coach_turn failed: %s", type(exc).__name__)
+            return False
+
+    async def record_articulation(self, profile_id: str, attempt_id: str, sound: str, features: dict) -> bool:
+        try:
+            await self._client.call(
+                "record_articulation", [attempt_id, profile_id, json.dumps(features, separators=(",", ":"))]
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("record_articulation failed: %s", type(exc).__name__)
             return False
 
     async def save_notes(self, profile_id: str, notes: dict) -> bool:

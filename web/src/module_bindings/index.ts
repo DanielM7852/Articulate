@@ -38,6 +38,7 @@ import BeginAttemptReducer from "./begin_attempt_reducer";
 import CommitEventReducer from "./commit_event_reducer";
 import EndAttemptReducer from "./end_attempt_reducer";
 import PushMetricsReducer from "./push_metrics_reducer";
+import RecordArticulationReducer from "./record_articulation_reducer";
 import RecordCoachTurnReducer from "./record_coach_turn_reducer";
 import RegisterLearnerReducer from "./register_learner_reducer";
 import SetLearnerNoteReducer from "./set_learner_note_reducer";
@@ -59,6 +60,7 @@ const reducersSchema = __reducers(
   __reducerSchema("commit_event", CommitEventReducer),
   __reducerSchema("end_attempt", EndAttemptReducer),
   __reducerSchema("push_metrics", PushMetricsReducer),
+  __reducerSchema("record_articulation", RecordArticulationReducer),
   __reducerSchema("record_coach_turn", RecordCoachTurnReducer),
   __reducerSchema("register_learner", RegisterLearnerReducer),
   __reducerSchema("set_learner_note", SetLearnerNoteReducer),

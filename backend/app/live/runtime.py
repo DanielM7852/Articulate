@@ -5,12 +5,14 @@ Test hooks on app.state (live_client, live_spacetime_transport, live_history) ta
 """
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
 import httpx
 
 from app.config import Settings
+from app.integrations.articulation import ArticulationClient
 from app.integrations.spacetime import SpacetimeClient, new_http_client
 from app.live import llm
 from app.live.history import LearnerHistory, LocalHistory, SpacetimeHistory
@@ -30,6 +32,11 @@ class LiveRuntime:
         self.anthropic_created = 0
         self.http_created = 0
         self._tasks: set[asyncio.Task] = set()
+        self._artic_http: httpx.AsyncClient | None = None
+        self._artic_transport: Any = None
+        self._artic_lock: asyncio.Lock | None = None
+        self._artic_waiting = 0
+        self._artic_drop_logged = False
 
     def anthropic(self) -> Any:
         if self._anthropic is None and self.settings.anthropic_configured:
@@ -61,6 +68,47 @@ class LiveRuntime:
         if self._history is None:
             self._history = SpacetimeHistory(client) if client is not None else LocalHistory(self.settings)
         return self._history
+
+    def articulation(self, transport: httpx.AsyncBaseTransport | None = None) -> ArticulationClient | None:
+        """Client for the local collector on one shared AsyncClient; None when ARTICULATION_URL is unset."""
+        if not self.settings.articulation_configured:
+            return None
+        if transport is None:
+            transport = self._artic_transport
+        if self._artic_http is not None and transport is not self._artic_transport:
+            self._artic_http = None  # different injected transport (tests only)
+        if self._artic_http is None:
+            self._artic_http = httpx.AsyncClient(transport=transport, timeout=self.settings.articulation_timeout_s)
+            self._artic_transport = transport
+        return ArticulationClient(self.settings, transport, self._artic_http)
+
+    def reserve_articulation(self) -> bool:
+        """Claim a place (one in flight plus at most articulation_max_queue waiting); False when full."""
+        if self._artic_waiting >= max(0, self.settings.articulation_max_queue) + 1:
+            if not self._artic_drop_logged:
+                self._artic_drop_logged = True
+                logger.warning("articulation queue full; dropping jobs")
+            return False
+        self._artic_waiting += 1
+        return True
+
+    @contextlib.asynccontextmanager
+    async def articulation_slot(self, reserved: bool = False):
+        """`async with runtime.articulation_slot(reserved=True) as ok:` runs one analysis at a time.
+
+        ok is False (job should be skipped) when the queue was full; pass reserved=True after a successful
+        reserve_articulation(). The place is released on exit.
+        """
+        if not reserved and not self.reserve_articulation():
+            yield False
+            return
+        if self._artic_lock is None:
+            self._artic_lock = asyncio.Lock()
+        try:
+            async with self._artic_lock:
+                yield True
+        finally:
+            self._artic_waiting -= 1
 
     async def warm_up(self) -> None:
         """Best effort connection warm-up; never raises."""
@@ -97,6 +145,11 @@ class LiveRuntime:
         if self._http is not None:
             try:
                 await self._http.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+        if self._artic_http is not None:
+            try:
+                await self._artic_http.aclose()
             except Exception:  # noqa: BLE001
                 pass
         close = getattr(self._anthropic, "close", None)

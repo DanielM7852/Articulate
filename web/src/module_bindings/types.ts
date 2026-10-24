@@ -60,6 +60,14 @@ export const Learner = __t.object("Learner", {
 });
 export type Learner = __Infer<typeof Learner>;
 
+export const LearnerArticulation = __t.object("LearnerArticulation", {
+  attemptId: __t.string(),
+  profileId: __t.string(),
+  features: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type LearnerArticulation = __Infer<typeof LearnerArticulation>;
+
 export const LearnerAttempt = __t.object("LearnerAttempt", {
   attemptId: __t.string(),
   learner: __t.identity(),

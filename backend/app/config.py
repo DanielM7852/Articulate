@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     live_session_ttl_s: float = 3600.0
     live_coach_timeout_s: float = 15.0
     live_history_limit: int = 12
+    articulation_url: str = ""  # local collector (services/articulation); blank disables background analysis
+    articulation_timeout_s: float = 30.0
+    articulation_models: str = "sparc,silero_vad"
+    articulation_max_queue: int = 2
     moss_project_id: str | None = None
     moss_project_key: str | None = None
     moss_index_name: str = "articulate-cues"
@@ -83,6 +87,10 @@ class Settings(BaseSettings):
     @property
     def spacetime_configured(self) -> bool:
         return bool(self.spacetime_database and self.spacetime_token)
+
+    @property
+    def articulation_configured(self) -> bool:
+        return bool(self.articulation_url.strip())
 
     @property
     def moss_configured(self) -> bool:
