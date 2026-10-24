@@ -1,0 +1,19 @@
+# Node
+node_modules/
+dist/
+.cache/
+test-results/
+playwright-report/
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.pyc
+*.egg-info/
+
+# Local secrets and data
+.env
+.data/
+.local_store/

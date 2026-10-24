@@ -1,0 +1,19 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    env_file: ../.env
+    environment:
+      DATA_DIR: /app/.data
+      ALLOWED_ORIGINS: '["http://localhost:8080","http://127.0.0.1:8080"]'
+    volumes: ["practice-data:/app/.data"]
+    restart: unless-stopped
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    ports: ["127.0.0.1:8080:80"]
+    depends_on: [api]
+volumes:
+  practice-data:

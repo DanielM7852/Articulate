@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Mic, Play, ScanFace, Square, TriangleAlert, Video, VideoOff, Volume2 } from 'lucide-react';
+import { CheckCircle2, Mic, Play, ScanFace, Snail, Square, TriangleAlert, Video, VideoOff, Volume2 } from 'lucide-react';
 import { OnboardingFrame, Segmented, StepHeading, Switch } from '../components/Onboarding';
 import { AmplitudeMeter, CameraTile, LESSON_STEPS } from '../components/practice';
-import { ReferenceModelPlaceholder, VowelGraphPlaceholder, type RefView } from '../components/placeholders';
-import { useMicrophone } from '../audio/useMicrophone';
+import { VowelGraph } from '../components/VowelGraph';
+import { MouthReference, type MouthView } from '../components/MouthReference';
+import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
 import { useSpeech } from '../audio/useSpeech';
+import { useVowelTracking, type TrackingStatus } from '../audio/useVowelTracking';
 import { analyzeAttempt, type CoachResponse } from '../services/coach';
 import { attemptsFor, useAppState } from '../state/AppState';
 import { SOUNDS, SOUND_ORDER, type Attempt } from '../state/types';
+import { TARGETS } from '../vowel/targets';
 
 /**
  * Practice Studio: one screen, explicit states.
@@ -28,6 +31,34 @@ const FEELINGS = [
 ] as const;
 
 const SHEET_EXIT_MS = 220;
+
+/** One short line for the graph's status chip. Tracking words come from the vowel-mapper engine. */
+function trackingLabel(tracking: TrackingStatus, mic: MicStatus) {
+  if (mic === 'denied') return 'Microphone blocked';
+  if (mic === 'unsupported') return 'Microphone unsupported';
+  switch (tracking) {
+    case 'off':
+      return 'Starts when you record';
+    case 'starting':
+      return 'Starting…';
+    case 'tracking':
+      return 'Tracking your vowel';
+    case 'acquiring':
+    case 'uncertain':
+      return 'Finding your vowel';
+    case 'quiet':
+      return 'Listening';
+    case 'unvoiced':
+      return 'Hold a steady vowel';
+    case 'clipped':
+      return 'Too loud · move back a little';
+    case 'paused':
+      return 'Audio paused';
+    case 'invalid':
+    case 'error':
+      return 'Tracking unavailable';
+  }
+}
 
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
@@ -55,8 +86,12 @@ export default function PracticeStudio() {
   // One tile on phones (switch between views), two side by side on wider screens.
   const compact = useMediaQuery('(max-width: 720px)');
   const [view, setView] = useState<View>(camera ? 'mirror' : 'guide');
-  const [refView, setRefView] = useState<RefView>('cutaway');
+  const [refView, setRefView] = useState<MouthView>('front');
+  const [slow, setSlow] = useState(false);
   const sideView: View = compact ? view : view === 'graph' ? 'guide' : view;
+
+  // Live F1/F2 on the same microphone stream; it runs whenever the mic is open.
+  const tracking = useVowelTracking(mic.stream, TARGETS[plan.sound]);
 
   const s = SOUNDS[plan.sound];
   const history = useMemo(() => attemptsFor(attempts, plan.sound), [attempts, plan.sound]);
@@ -86,10 +121,13 @@ export default function PracticeStudio() {
     setReferencePlaying(false);
     setCoach(null);
     const ok = await mic.beginRecording();
-    if (ok) setPhase('recording');
+    if (!ok) return;
+    tracking.beginWindow();
+    setPhase('recording');
   }
 
   async function stopRecording() {
+    const target = tracking.endWindow();
     const summary = await mic.endRecording();
     if (recordingUrl) URL.revokeObjectURL(recordingUrl);
     setRecordingUrl(summary.recordingUrl);
@@ -101,9 +139,9 @@ export default function PracticeStudio() {
       startedAt: Date.now(),
       durationSec: summary.durationSec,
       usableVoicedSec: summary.usableVoicedSec,
-      // Filled by the formant measurement service once connected.
-      timeInTargetSec: null,
-      longestHoldSec: null,
+      // From the on-device F1/F2 tracker; null if tracking never ran during this take.
+      timeInTargetSec: target?.timeInTargetSec ?? null,
+      longestHoldSec: target?.longestHoldSec ?? null,
       quality: summary.quality,
       qualityReason: summary.qualityReason,
       recognizedText: null,
@@ -154,24 +192,41 @@ export default function PracticeStudio() {
 
   const graphBody = (
     <div className="lp-tile-body">
-      <VowelGraphPlaceholder sound={plan.sound} hidden={!assistanceOn} height="100%" />
+      <VowelGraph
+        sound={plan.sound}
+        point={tracking.point}
+        trace={tracking.trace}
+        tracking={tracking.tracking}
+        statusLabel={trackingLabel(tracking.status, mic.status)}
+        holdSec={tracking.holdSec}
+        hidden={!assistanceOn}
+      />
     </div>
   );
 
   const guideBody = (
     <div className="lp-tile-body">
-      <ReferenceModelPlaceholder sound={plan.sound} view={refView} />
+      <MouthReference sound={plan.sound} view={refView} slow={slow} />
       <div className="lp-overlay lp-overlay--bl">
         <p className="ob-label navy">{s.tongue}</p>
         <p className="ob-fine">{s.lips}</p>
       </div>
+      <button
+        type="button"
+        className="lp-overlay lp-overlay--tl ob-pill lp-slow"
+        aria-pressed={slow}
+        title={slow ? 'Normal speed' : 'Slow motion'}
+        onClick={() => setSlow((v) => !v)}
+      >
+        <Snail size={16} aria-hidden="true" />
+        Slow
+      </button>
       <Segmented
         className="lp-overlay lp-overlay--tr lp-mini"
         label="Reference view"
         options={[
-          { id: 'front' as RefView, label: 'Front' },
-          { id: 'side' as RefView, label: 'Side' },
-          { id: 'cutaway' as RefView, label: 'Cutaway' },
+          { id: 'front' as MouthView, label: 'Front' },
+          { id: 'side' as MouthView, label: 'Side · tongue' },
         ]}
         value={refView}
         onChange={setRefView}

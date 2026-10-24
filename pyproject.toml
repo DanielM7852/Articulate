@@ -1,0 +1,33 @@
+[project]
+name = "articulate-backbone"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1", "pydantic-settings>=2.7,<3",
+  "numpy>=2.2,<3", "praat-parselmouth>=0.4.5,<0.5", "httpx>=0.28,<1",
+  "anthropic>=0.75,<1", "websockets>=15,<16",
+]
+
+[project.optional-dependencies]
+moss = ["moss"]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]
+
+[tool.pytest.ini_options]
+pythonpath = ["services/api", "."]
+asyncio_mode = "auto"
+testpaths = ["services/api/tests"]
+markers = ["live: explicit opt-in smoke tests that can incur provider usage"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Standalone scripts bootstrap the service package from the repository root.
+"scripts/*.py" = ["E402"]
+
+[tool.uv]
+package = false

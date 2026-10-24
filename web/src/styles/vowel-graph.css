@@ -1,0 +1,223 @@
+/* ---------- Live vowel graph (vg-) ----------
+ * Fills its tile. The plot is inset for the axis captions and the status chip.
+ * Static marks are one SVG; the cursor is HTML moved with transform so it stays
+ * round and animates on the compositor. Colour carries state: navy while
+ * tracking, success green while inside the target region.
+ */
+.vg {
+  position: relative;
+  height: 100%;
+  min-height: 220px;
+  border-radius: inherit;
+  background: var(--color-cream);
+  overflow: hidden;
+}
+.vg--hidden {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+}
+.vg--hidden .ob-fine {
+  max-width: 24em;
+}
+
+.vg-plot {
+  position: absolute;
+  inset: 44px 24px 36px 44px;
+}
+.vg-plot > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.vg-grid {
+  stroke: var(--color-line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.vg-space {
+  fill: none;
+  stroke: var(--color-navy-mist);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  vector-effect: non-scaling-stroke;
+}
+.vg-target {
+  fill: rgba(203, 215, 230, 0.32);
+  stroke: var(--color-navy);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+  transition: fill 240ms ease, stroke 240ms ease;
+}
+.vg[data-inside='true'] .vg-target {
+  fill: rgba(53, 100, 85, 0.16);
+  stroke: var(--color-success);
+}
+.vg-trail {
+  fill: none;
+  stroke: var(--color-navy);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.38;
+  vector-effect: non-scaling-stroke;
+}
+
+.vg-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1;
+  color: var(--color-navy-mist);
+  pointer-events: none;
+  transition: color 200ms ease;
+}
+.vg-label.is-active {
+  color: var(--color-navy);
+}
+
+/* Cursor: dot plus hold ring. Position comes from the tracker at about 40 Hz;
+ * a short linear transition bridges frames without lagging behind the voice. */
+.vg-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  display: grid;
+  place-items: center;
+  will-change: transform;
+  transition: transform 90ms linear, opacity 240ms ease;
+}
+.vg-cursor.is-faded {
+  opacity: 0.3;
+}
+.vg-cursor.is-hidden {
+  opacity: 0;
+}
+.vg-dot {
+  grid-area: 1 / 1;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-navy);
+  box-shadow: 0 0 0 4px rgba(203, 215, 230, 0.65), 0 2px 6px rgba(32, 62, 104, 0.25);
+  transition: background-color 200ms ease, transform 220ms var(--ease-out), box-shadow 200ms ease;
+}
+.vg[data-inside='true'] .vg-dot {
+  background: var(--color-success);
+  box-shadow: 0 0 0 4px rgba(53, 100, 85, 0.22), 0 2px 6px rgba(53, 100, 85, 0.25);
+  transform: scale(1.12);
+}
+.vg-ring {
+  grid-area: 1 / 1;
+  width: 44px;
+  height: 44px;
+  transform: rotate(-90deg);
+}
+.vg-ring-track {
+  fill: none;
+  stroke: rgba(32, 62, 104, 0.1);
+  stroke-width: 3;
+}
+.vg-ring-fill {
+  fill: none;
+  stroke: var(--color-success);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  transition: stroke-dashoffset 120ms linear, opacity 200ms ease;
+}
+
+.vg-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 24px;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 240ms ease;
+}
+.vg-empty.is-hidden {
+  opacity: 0;
+}
+.vg-empty .ob-fine {
+  max-width: 22em;
+}
+
+.vg-axis {
+  position: absolute;
+  font-size: 12px;
+  color: var(--color-muted);
+  pointer-events: none;
+}
+.vg-axis--x {
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.vg-axis--y {
+  left: 12px;
+  top: 12px;
+}
+
+/* Status chip: a translucent pill, dot colour follows tracking */
+.vg-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(10px) saturate(160%);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  transition: color 200ms ease;
+}
+.vg-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-navy-mist);
+  transition: background-color 200ms ease;
+}
+.vg[data-tracking='true'] .vg-status {
+  color: var(--color-navy);
+}
+.vg[data-tracking='true'] .vg-status::before {
+  background: var(--color-success);
+}
+
+@media (max-width: 720px) {
+  .vg-plot {
+    inset: 40px 16px 32px 36px;
+  }
+  .vg-label {
+    font-size: 14px;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .vg-status {
+    background: var(--color-surface);
+    backdrop-filter: none;
+  }
+}

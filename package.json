@@ -1,0 +1,25 @@
+{
+  "name": "articulate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web",
+    "spacetimedb"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspace apps/web && npm run check --workspace spacetimedb",
+    "test:audio": "node --test apps/web/tests/*.test.mjs",
+    "test:e2e": "playwright test",
+    "test:database": "vitest run",
+    "contracts:check": "node scripts/check-contracts.mjs",
+    "contracts": "json2ts -i packages/contracts/schema.json -o packages/contracts/generated.d.ts --declareExternallyReferenced"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "json-schema-to-typescript": "^15.0.4",
+    "prettier": "^3.9.10",
+    "vitest": "^5.0.5"
+  }
+}

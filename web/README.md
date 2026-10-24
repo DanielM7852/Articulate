@@ -27,16 +27,19 @@ Every visit starts at sign-in and always runs through welcome, the quiz, setup a
 | `#/practice` | Lesson ready, Recording, Feedback and retry (one screen, state machine) |
 | `#/summary` | Independent attempt and session summary |
 
-## Where teammates plug in
+## How the pieces connect
 
-- **F1/F2 vowel graph** and **3D mouth reference**: static placeholders live in `src/components/placeholders.tsx` and appear in Practice after onboarding. Replace `VowelGraphPlaceholder` and `ReferenceModelPlaceholder` with the real components.
-- **Coaching agents (Claude)**: set `VITE_COACH_URL` to an endpoint that accepts `{ attempt, history }` and returns the `CoachResponse` shape in `src/services/coach.ts`. Without it, a local response is generated from measured fields only.
-- **Cartesia narration**: swap the browser `speechSynthesis` call in `src/audio/useSpeech.ts`.
-- **Formant metrics**: `timeInTargetSec` and `longestHoldSec` on `Attempt` stay `null` until the measurement service fills them; the UI shows "—" until then.
+- **F1/F2 vowel graph**: `src/components/VowelGraph.tsx` draws the cursor, trail, target region and hold ring. `src/audio/useVowelTracking.ts` feeds it from the vowel-mapper engine (`../vowel-mapper/src/audio`, imported through the `@vowel-mapper` alias in `vite.config.ts`), running on the same microphone stream `useMicrophone` opens. Target regions live in `src/vowel/targets.ts` and are generic orientation regions, not personalised targets.
+- **3D mouth reference**: `src/components/MouthReference.tsx` mounts the mouth-demo hologram (`../mouth-demo/src/mouth-demo.js`, alias `@mouth-demo`) and maps each sound to its cue (ee → spread lips, oo → round lips, ah → open jaw). three.js and the avatar load on first use.
+- **Coaching agents (Claude)**: practice posts `{ attempt, history }` to `/v1/coach`. The Vite dev server proxies that to the FastAPI app in `../backend`. The response uses the `CoachResponse` shape in `src/services/coach.ts`. If the request fails, the screen keeps its local wording.
+- **Cartesia narration**: `useSpeech` posts the line to `/v1/speech` and plays the WAV. Without a Cartesia key, that call returns unavailable and the browser `speechSynthesis` voice is used.
+- **Formant metrics**: guided attempts in Practice fill `timeInTargetSec` and `longestHoldSec` from the on-device tracker. Baseline and independent attempts leave them `null`, since no target is shown.
+
+Because `web/` imports sibling source, clone the whole repository rather than this folder alone.
 
 ## What the browser measures today
 
-Input amplitude and a voiced-duration estimate (capture quality only: silence, clipping, too short). Nothing here is a pronunciation score. Recordings stay in memory and are never persisted.
+Input amplitude and a voiced-duration estimate (capture quality: silence, clipping, too short), plus F1/F2 estimates from a Burg LPC tracker that gates silence, noise, clipping and implausible frames. Formant positions are acoustic estimates on fixed axes and are not a pronunciation score. Recordings stay in memory and are never persisted.
 
 ## Changes from the Figma
 
