@@ -11,20 +11,20 @@ npm run dev        # http://localhost:5173
 npm run build      # typecheck + production build
 ```
 
-Use Chrome or Edge and allow microphone access. The app uses a hash router, so the built `dist/` folder works on any static host.
+Use Chrome or Edge and allow camera and microphone access. The app uses a hash router, so the built `dist/` folder works on any static host.
+
+`npm run smoke` walks the whole flow in headless Chromium against a running dev server (fake camera and microphone), prints what each screen showed, and saves screenshots to `smoke-out/`. Run `npx playwright install chromium` once first.
 
 ## Routes
 
-Every visit starts at sign-in and always runs through welcome, the quiz, setup and the plan before practice. Sign-in and onboarding progress are session-only; preferences and attempt summaries persist.
+Every visit starts with the 3D guide and runs through the quiz and the tutorial before practice. Progress and quiz answers are session-only; the practice plan and attempt summaries persist.
 
-| Route | Figma frame |
+| Route | Screen |
 | --- | --- |
-| `#/` | Sign in with the mock account (`demo@articulate.app` / `articulate`, set in `src/state/auth.ts`) |
-| `#/welcome` | New learner welcome |
-| `#/quiz/1` to `#/quiz/3` | Goals, Routine, Comfort |
-| `#/setup` | Setup and baseline (live mic meter, optional camera, recorded first try) |
-| `#/plan` | Suggested starting plan |
-| `#/practice` | Lesson ready, Recording, Feedback and retry (one screen, state machine) |
+| `#/` | The guide greets the learner. It follows their face through the camera (MediaPipe, on-device) or the pointer if the camera is unavailable. |
+| `#/quiz/1` to `#/quiz/3` | Goals, Routine and pace, Support and guidance. Read aloud with captions; nothing is pre-selected. |
+| `#/tutorial` | The guide explains the F1/F2 graph with a demo cursor, asks for the microphone, then steps aside for the learner's first "ee". |
+| `#/practice` | The graph with the instruction for the current sound; the guide or the mirror open on request. Recording, feedback and retry. |
 | `#/summary` | Independent attempt and session summary |
 
 ## How the pieces connect

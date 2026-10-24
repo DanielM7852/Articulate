@@ -74,26 +74,3 @@
   }
 }
 
-/* Overlay controls on the guide tile */
-.lp-overlay--tl {
-  top: 12px;
-  left: 12px;
-}
-.lp-slow {
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(12px);
-}
-.lp-slow[aria-pressed='true'] {
-  background: var(--color-navy);
-  border-color: var(--color-navy);
-  color: #fff;
-}
-@media (prefers-reduced-transparency: reduce) {
-  .lp-slow,
-  .lp-mini,
-  .lp-overlay--bl {
-    background: var(--color-surface);
-    backdrop-filter: none;
-  }
-}

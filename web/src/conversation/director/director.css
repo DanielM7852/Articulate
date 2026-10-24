@@ -147,3 +147,12 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* Practice screen (full-bleed layout): footer session controls, Ava caption card, off-screen camera. */
+.sd-bar--footer { flex: 1; min-width: 0; justify-content: flex-end; margin: 0; }
+.sd-begin-note { flex-direction: column; gap: 4px; text-align: center; }
+.sd-begin-note .ob-fine, .sd-begin-note .sd-error { margin: 0; font-size: 12px; }
+.cap.cap-card.sd-cap { flex-direction: column; align-items: stretch; gap: 6px; }
+.sd-cap .cap-text { margin: 0; }
+.sd-cap .sd-heard { font-size: 0.85rem; }
+.sd-offscreen { position: fixed; left: -9999px; top: 0; width: 320px; height: 240px; opacity: 0; pointer-events: none; }

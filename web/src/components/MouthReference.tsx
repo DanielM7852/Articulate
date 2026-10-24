@@ -1,15 +1,17 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { MouthCueId, MouthDemo, MouthView, SpeakOptions, SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
-import avatarUrl from '@mouth-demo/public/avatars/brunette.glb?url';
+import { acquireGuide, releaseGuide } from '../guide/guide';
 import type { SoundId } from '../state/types';
 
 /**
- * The rotatable 3D mouth reference: the mouth-demo workstream's hologram face,
- * mounted inside a React tile. three.js, the avatar and the choreography load on
- * first use so onboarding never pays for them. The demo loops the cue silently;
- * the practice screen draws its own overlays and controls around it.
+ * The 3D guide: the mouth-demo workstream's hologram face, mounted inside React.
+ * The face itself is a session singleton (see guide.ts), so mounting this
+ * component on a new screen just moves it there. Screens draw their own captions
+ * and controls around it, turn the head toward the learner (`look`), move the
+ * camera closer (`zoom`) and can freeze it (`paused`). A ref exposes the demo's
+ * imperative surface (cues, view, lip-synced `speak`) for session-driven screens.
  */
-export type { MouthView };
+export type { MouthCueId, MouthView };
 
 export const CUE_FOR_SOUND: Record<SoundId, MouthCueId> = {
   i: 'spread-lips',
@@ -17,23 +19,42 @@ export const CUE_FOR_SOUND: Record<SoundId, MouthCueId> = {
   a: 'open-jaw',
 };
 
-type LoadState = 'loading' | 'ready' | 'error';
+export const cueForSound = (sound: SoundId) => CUE_FOR_SOUND[sound];
+
+export type Look = { x: number; y: number };
+type LoadState = { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; message: string };
 
 export interface MouthReferenceHandle {
   readonly ready: boolean;
   setView(v: MouthView): Promise<void>;
-  showCue(id: string): void;
+  showCue(id: MouthCueId): void;
   stop(): void;
+  /** Lip-synced speech on the guide; null until the guide is ready. */
   speak(opts: SpeakOptions): SpeechHandle | null;
 }
 
-export const MouthReference = forwardRef<MouthReferenceHandle, { sound: SoundId; view: MouthView; slow: boolean }>(function MouthReference(
-  { sound, view, slow },
+export interface MouthReferenceProps {
+  /** Mouth shape to loop; null rests the face. */
+  cue: MouthCueId | null;
+  view?: MouthView;
+  slow?: boolean;
+  /** Where the learner is, -1 to 1 on each axis; null lets the head rest. */
+  look?: Look | null;
+  zoom?: number;
+  /** Freeze the face and its choreography. */
+  paused?: boolean;
+  onReady?: () => void;
+  /** The 3D guide could not load; the screen should carry on without it. */
+  onError?: () => void;
+}
+
+export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferenceProps>(function MouthReference(
+  { cue, view = 'front', slow = false, look = null, zoom = 1, paused = false, onReady, onError },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
   const demoRef = useRef<MouthDemo | null>(null);
-  const [state, setState] = useState<LoadState>('loading');
+  const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
   useImperativeHandle(
     ref,
@@ -45,7 +66,7 @@ export const MouthReference = forwardRef<MouthReferenceHandle, { sound: SoundId;
         await demoRef.current?.setView(v);
       },
       showCue(id) {
-        demoRef.current?.showCue(id as MouthCueId);
+        demoRef.current?.showCue(id);
       },
       stop() {
         demoRef.current?.stop();
@@ -61,53 +82,70 @@ export const MouthReference = forwardRef<MouthReferenceHandle, { sound: SoundId;
     const host = hostRef.current;
     if (!host) return;
     let cancelled = false;
-    let demo: MouthDemo | null = null;
-    setState('loading');
-    import('@mouth-demo/src/mouth-demo.js')
-      .then((m) => m.createMouthDemo(host, { avatarUrl, controls: false }))
-      .then((d) => {
-        if (cancelled) {
-          d.dispose();
-          return;
-        }
-        demo = d;
-        demoRef.current = d;
-        setState('ready');
+    acquireGuide(host)
+      .then((demo) => {
+        if (cancelled) return;
+        demoRef.current = demo;
+        setState({ kind: 'ready' });
       })
-      .catch(() => {
-        if (!cancelled) setState('error');
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[guide] could not load:', err);
+        setState({ kind: 'error', message });
       });
     return () => {
       cancelled = true;
-      demo?.dispose();
       demoRef.current = null;
+      releaseGuide(host);
     };
   }, []);
 
-  // Props apply once the demo exists and again whenever they change.
+  const ready = state.kind === 'ready';
   useEffect(() => {
-    if (state === 'ready') demoRef.current?.showCue(CUE_FOR_SOUND[sound]);
-  }, [sound, state]);
+    if (ready) onReady?.();
+    if (state.kind === 'error') onError?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.kind]);
+
+  // Props apply once the demo is here and again whenever they change.
   useEffect(() => {
-    if (state === 'ready') void demoRef.current?.setView(view);
-  }, [view, state]);
+    if (!ready) return;
+    if (cue) demoRef.current?.showCue(cue);
+    else demoRef.current?.stop();
+  }, [cue, ready]);
   useEffect(() => {
-    if (state === 'ready') demoRef.current?.setSpeed(slow ? 0.5 : 1);
-  }, [slow, state]);
+    if (ready) void demoRef.current?.setView(view);
+  }, [view, ready]);
+  useEffect(() => {
+    if (ready) demoRef.current?.setSpeed(slow ? 0.5 : 1);
+  }, [slow, ready]);
+  useEffect(() => {
+    if (ready) demoRef.current?.lookAt(look);
+  }, [look, ready]);
+  useEffect(() => {
+    if (ready) demoRef.current?.setZoom(zoom);
+  }, [zoom, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    if (paused) demoRef.current?.pause();
+    else demoRef.current?.resume();
+  }, [paused, ready]);
 
   return (
-    <div className="mr" data-state={state}>
+    <div className="mr" data-state={state.kind}>
       <div className="mr-host" ref={hostRef} aria-hidden="true" />
       <div className="mr-cover" role="status" aria-live="polite">
-        {state === 'error' ? (
+        {state.kind === 'error' ? (
           <>
-            <p className="ob-label">The mouth guide couldn’t load</p>
-            <p className="ob-fine">This device may not support 3D here. The written cue still applies.</p>
+            <p className="ob-label">The guide couldn’t load</p>
+            <p className="ob-fine">{state.message}</p>
+            <p className="ob-fine">Try reloading the page. The written cues still apply.</p>
           </>
         ) : (
           <>
             <span className="mr-spinner" aria-hidden="true" />
-            <p className="ob-fine">{state === 'loading' ? 'Loading the mouth guide…' : ''}</p>
+            <p className="ob-fine">{state.kind === 'loading' ? 'Loading your guide…' : ''}</p>
           </>
         )}
       </div>

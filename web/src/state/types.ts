@@ -7,12 +7,13 @@ export type Support = 'mouth' | 'words' | 'hear' | 'self';
 export type Guidance = 'guided' | 'explore';
 export type Assistance = 'cue-target' | 'target-only' | 'none';
 
+/** Null means not answered yet; the quiz never pre-selects. */
 export interface Preferences {
   goals: Goal[];
-  routine: Routine;
-  pace: Pace;
-  support: Support;
-  guidance: Guidance;
+  routine: Routine | null;
+  pace: Pace | null;
+  support: Support | null;
+  guidance: Guidance | null;
 }
 
 export interface Plan {

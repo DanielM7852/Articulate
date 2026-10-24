@@ -9,9 +9,9 @@ import { useAppState } from '../state/AppState';
  * Top bar (back, progress, access toggles), a centered stage, and a fixed action bar,
  * so the learner never scrolls to find Continue.
  *
- * Step order: welcome (0), quiz 1-3, mic check, first try, plan (6).
+ * Step order: guide intro (0), quiz 1-3, tutorial (4).
  */
-export const ONBOARDING_STEPS = 6;
+export const ONBOARDING_STEPS = 4;
 
 type Direction = 'forward' | 'back';
 type ViewTransitionDocument = Document & { startViewTransition?: (update: () => void) => unknown };
@@ -77,9 +77,13 @@ export function OnboardingFrame({
   primary,
   secondary,
   footer,
+  caption,
   overlay,
   width,
   className = '',
+  progress = true,
+  bar = 'full',
+  actions = true,
   children,
 }: {
   step: number;
@@ -94,14 +98,25 @@ export function OnboardingFrame({
   secondary?: Action;
   /** Replaces the primary/secondary action bar contents. */
   footer?: ReactNode;
+  /** The guide's caption, rendered between the stage and the action bar. */
+  caption?: ReactNode;
   /** Rendered over the action bar, e.g. a result sheet. */
   overlay?: ReactNode;
   /** Column width in px; 640 by default. */
   width?: number;
   className?: string;
+  /** false hides the progress bar (the intro, before the learner has started). */
+  progress?: boolean;
+  /**
+   * full: back, progress and access toggles in their own row.
+   * float: no row; only the toggles, floating over the stage's top-right corner.
+   * none: nothing; the screen places `AccessToggles` itself.
+   */
+  bar?: 'full' | 'float' | 'none';
+  /** false removes the action bar; the screen floats its own buttons over the stage. */
+  actions?: boolean;
   children: ReactNode;
 }) {
-  const { captions, setCaptions, audio, setAudio } = useAppState();
   const stageRef = useRef<HTMLDivElement>(null);
 
   // Move focus to the new question so screen readers announce it.
@@ -114,8 +129,9 @@ export function OnboardingFrame({
       <a href="#ob-stage" className="sr-only">
         Skip to content
       </a>
-      <header className="ob-bar">
-        {onClose ? (
+      {bar !== 'none' && (
+      <header className={`ob-bar ${bar === 'float' ? 'ob-bar--float' : ''}`}>
+        {bar === 'float' ? null : onClose ? (
           <button type="button" className="ob-icon-btn" aria-label={onClose.label} title={onClose.label} onClick={onClose.onClick}>
             <X size={22} aria-hidden="true" />
           </button>
@@ -130,30 +146,14 @@ export function OnboardingFrame({
             <ChevronLeft size={22} aria-hidden="true" />
           </button>
         )}
-        <Progress step={step} total={total} label={progressLabel} />
-        <div className="ob-access">
-          <button
-            type="button"
-            className="ob-pill"
-            aria-pressed={captions}
-            aria-label={`Captions ${captions ? 'on' : 'off'}`}
-            title={`Captions ${captions ? 'on' : 'off'}`}
-            onClick={() => setCaptions(!captions)}
-          >
-            CC
-          </button>
-          <button
-            type="button"
-            className="ob-pill"
-            aria-pressed={audio}
-            aria-label={`Audio ${audio ? 'on' : 'off'}`}
-            title={`Audio ${audio ? 'on' : 'off'}`}
-            onClick={() => setAudio(!audio)}
-          >
-            {audio ? <Volume2 size={17} aria-hidden="true" /> : <VolumeX size={17} aria-hidden="true" />}
-          </button>
-        </div>
+        {bar === 'float' ? null : progress ? (
+          <Progress step={step} total={total} label={progressLabel} />
+        ) : (
+          <span className="grow" aria-hidden="true" />
+        )}
+        <AccessToggles />
       </header>
+      )}
 
       <main id="ob-stage" className="ob-stage" ref={stageRef}>
         <div key={stageKey} className={['ob-content', className].filter(Boolean).join(' ')}>
@@ -161,6 +161,9 @@ export function OnboardingFrame({
         </div>
       </main>
 
+      {caption && <div className="ob-caption">{caption}</div>}
+
+      {actions && (
       <footer className="ob-actions">
         <div className="ob-actions-inner">
           {footer ?? (
@@ -182,7 +185,37 @@ export function OnboardingFrame({
           )}
         </div>
       </footer>
+      )}
       {overlay}
+    </div>
+  );
+}
+
+/** Captions and audio toggles. Every screen keeps them within reach. */
+export function AccessToggles() {
+  const { captions, setCaptions, audio, setAudio } = useAppState();
+  return (
+    <div className="ob-access">
+      <button
+        type="button"
+        className="ob-pill"
+        aria-pressed={captions}
+        aria-label={`Captions ${captions ? 'on' : 'off'}`}
+        title={`Captions ${captions ? 'on' : 'off'}`}
+        onClick={() => setCaptions(!captions)}
+      >
+        CC
+      </button>
+      <button
+        type="button"
+        className="ob-pill"
+        aria-pressed={audio}
+        aria-label={`Audio ${audio ? 'on' : 'off'}`}
+        title={`Audio ${audio ? 'on' : 'off'}`}
+        onClick={() => setAudio(!audio)}
+      >
+        {audio ? <Volume2 size={17} aria-hidden="true" /> : <VolumeX size={17} aria-hidden="true" />}
+      </button>
     </div>
   );
 }
