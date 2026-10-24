@@ -13,6 +13,7 @@ import { createThreeDriver } from "./drivers/three.js";
 import { CUES } from "./cues.js";
 import { createTimeline, easeInOutCubic } from "./timeline.js";
 import { createCutaway } from "./cutaway.js";
+import { createLipSync } from "./lipsync.js";
 
 const DEFAULT_AVATAR = "/avatars/brunette.glb";
 const TH_TIMEOUT_MS = 10000;
@@ -335,6 +336,12 @@ export async function createMouthDemo(container, options = {}) {
     run([...pre, ...loop], { loop: true, loopStart: pre.length });
   };
 
+  // Lip sync. A cue owns the mouth: while a cue is chosen (cue) or its shapes are still easing out
+  // (driven), speech keeps its clock and events but writes no shapes, then eases in from rest.
+  const emitSpeech = (type) => container.dispatchEvent(new CustomEvent(type, { bubbles: true }));
+  const lipsync = createLipSync({ driver, isBlocked: () => cue !== null || driven !== null, emit: emitSpeech });
+  disposers.push(() => lipsync.dispose());
+
   const demo = {
     driverName: driver.name,
 
@@ -414,6 +421,10 @@ export async function createMouthDemo(container, options = {}) {
       renderDebug();
     },
 
+    speak(opts = {}) {
+      return lipsync.speak(opts);
+    },
+
     toggleCalibration() {
       highlight.toggleCalibration();
     },
@@ -435,6 +446,7 @@ export async function createMouthDemo(container, options = {}) {
     get view() { return view; },
     get speed() { return timeline.speed; },
     get cueId() { return cueId; },
+    get speaking() { return lipsync.speaking; },
   };
 
   // Ready
@@ -453,6 +465,7 @@ export async function createMouthDemo(container, options = {}) {
     const step = Math.min(dt, 100);
     const scaled = step * timeline.speed;
     timeline.update(step);
+    lipsync.update(step);
     driver.update(step);
     views.update(scaled);
     highlight.update(scaled);

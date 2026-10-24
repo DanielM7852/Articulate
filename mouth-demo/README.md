@@ -35,16 +35,37 @@ The container needs a height (the component fills it). It builds its own layout:
 | `replay()` | Restart the current cue for the current view. |
 | `setSpeed(0.5 \| 1)` | Slow-mo on or off; applies immediately to face, camera, cutaway and effects. |
 | `setView("front" \| "side")` | Animated camera swing; side view shows the cutaway. Returns a promise that resolves `true` when the swing ends, `false` if interrupted. |
+| `speak({ clock, timeline? })` | Lip sync from streamed timestamps (see Lip sync). Returns `{ append(t), end(), stop() }`. |
 | `stop()` | Ease back to neutral and stop looping; clears the caption. |
 | `setStyle("hologram" \| "solid")` | Switch look at runtime. |
 | `toggleCalibration()` / `handleCalibrationKey(e)` | Highlight ring calibration (see below). `handleCalibrationKey` returns `true` if it consumed the key. |
 | `dispose()` | Free GPU resources, listeners and DOM. Safe to call twice. |
-| `driverName`, `style`, `view`, `speed`, `cueId` | Read-only state. |
+| `driverName`, `style`, `view`, `speed`, `cueId`, `speaking` | Read-only state. |
 
 Events are dispatched on the container (they bubble):
 
 - `demo:ready` with `detail: { driver }`, fired once after loading (asynchronously, so listeners added after `await` still receive it).
+- `speech:start` / `speech:end` (no detail): the first non-negative `clock()` reading, and the end or stop of that speech (only fires if it started).
 - `cue:phase` with `detail: { cueId, phase }` at the start of every phase. Phases: `reset`, `in`, `hold`, `out`, `rest`, `swing`, `relax`. `cueId` is `null` for view-only or stop sequences.
+
+## Lip sync
+
+```js
+const speech = demo.speak({
+  clock: () => audioSecondsSinceStart,   // negative = audio not started yet
+  timeline: { phonemes: [{ p: "AA1", start: 0, end: 0.12 }], words: [{ text: "hello", start: 0, end: 0.4 }] },
+});
+speech.append({ phonemes: [...] });      // more timestamps as they stream in
+speech.end();                            // no more data: relax after the last item
+speech.stop();                           // or release now (eases to rest)
+```
+
+- Timestamps are seconds from audio start; the mouth is read from `clock()` every frame (30 ms ahead, so lips anticipate), so audio and avatar stay together however frames pace. If `clock()` stalls or goes backwards the current shape is held. `setSpeed` does not affect speech.
+- Phonemes: IPA or ARPAbet symbols, case and stress digits ignored, unknown symbols get a neutral half-open mouth. Groups: open (aa ae ah), mid (eh ey), spread (iy ih), round (ao ow), pucker (uw w), bilabial (p b m: lips close, jaw shuts), labiodental (f v), postalveolar (sh zh ch jh), sibilant (s z), tongue (t d n l th), velar (k g ng h), r. Non-bilabial jaw never drops below about 0.06. Short gaps inside speech hold the neighbouring shape.
+- Words only (no phonemes covering the moment): one open/close per estimated syllable across each word, closed between words.
+- Motion is a critically damped spring (about 60 ms) per blend shape, so shapes blend into each other.
+- Priority: a cue owns the mouth. While a cue is chosen (`cueId` set) or its shapes are still easing out after `stop()`, speech runs its clock and events but writes no shapes; it eases in from rest afterwards. Calling `speak()` again stops the previous handle.
+- Dev only: press `L` on the harness page to play a canned timeline against a `performance.now()` clock (it calls `stop()` first so no cue is active).
 
 ## Drivers and fallback
 
@@ -73,6 +94,7 @@ URL parameters override options:
 | V | Toggle side view |
 | G | Highlight calibration mode |
 | H | Toggle hologram / solid style |
+| L | Dev only: canned lip sync timeline, no audio |
 | 0 | Stop and reset to neutral |
 
 ## Highlight calibration
@@ -98,6 +120,7 @@ Press `G` to toggle calibration. Arrow keys nudge the ring up/down/left/right, `
 | `src/particles.js` | Background drifting particles |
 | `src/cutaway.js` | SVG cutaway and pose morphing |
 | `src/timeline.js` | Tween engine with a speed multiplier |
+| `src/lipsync.js` | Timed lip sync: phoneme to viseme table, smoothing, session handling |
 | `src/cues.js` | Cue definitions (data only) |
 | `src/styles.css` | Panel styles |
 | `public/avatars/brunette.glb` | Avatar |
