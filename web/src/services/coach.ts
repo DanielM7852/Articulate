@@ -7,7 +7,8 @@ import { SOUNDS } from '../state/types';
  * endpoint exists, `analyzeAttempt` produces a grounded local response from the
  * attempt's own measured fields only, so it never claims more than was measured.
  *
- * Set VITE_COACH_URL to POST attempts to the backend instead.
+ * The practice app posts to /v1/coach, which the dev server proxies to the backend.
+ * Set VITE_COACH_URL to override that path. A failed request keeps the local wording.
  */
 export interface CoachResponse {
   attemptId: string;
@@ -18,20 +19,21 @@ export interface CoachResponse {
   evidence: string[];
 }
 
-const COACH_URL = import.meta.env.VITE_COACH_URL as string | undefined;
+const COACH_URL = (import.meta.env.VITE_COACH_URL as string | undefined) || '/v1/coach';
 
 export async function analyzeAttempt(attempt: Attempt, history: Attempt[]): Promise<CoachResponse> {
-  if (COACH_URL) {
-    try {
-      const res = await fetch(COACH_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attempt, history }),
-      });
-      if (res.ok) return { ...(await res.json()), source: 'agent' } as CoachResponse;
-    } catch {
-      /* fall through to local response */
+  try {
+    const res = await fetch(COACH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attempt, history }),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as CoachResponse;
+      return { ...body, source: body.source === 'local' ? 'local' : 'agent' };
     }
+  } catch {
+    /* fall through to local response */
   }
   return localResponse(attempt, history);
 }

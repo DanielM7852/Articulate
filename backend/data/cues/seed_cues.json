@@ -1,0 +1,116 @@
+{
+  "library_id": "articulate-intonation-seed",
+  "review_notice": "Every cue in this file is an unreviewed draft. Retrieval does not establish clinical correctness.",
+  "cues": [
+    {
+      "cue_id": "cue-rise-ending-draft",
+      "exercise": "intonation_rising",
+      "finding": "ending_direction_mismatch",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "At the end of the phrase, let your pitch glide up, as in the reference example.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-fall-ending-draft",
+      "exercise": "intonation_falling",
+      "finding": "ending_direction_mismatch",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "At the end of the phrase, let your pitch glide down, as in the reference example.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-steady-ending-draft",
+      "exercise": "intonation_steady",
+      "finding": "ending_direction_mismatch",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "Keep the pitch steady through the end of the phrase, as in the reference example.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-more-rise-draft",
+      "exercise": "intonation_rising",
+      "finding": "ending_range_smaller",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "Make the rise at the end a little larger, closer to the reference example.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-less-rise-draft",
+      "exercise": "intonation_rising",
+      "finding": "ending_range_larger",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "Make the rise at the end a little smaller, closer to the reference example.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-shape-repeat-draft",
+      "exercise": "intonation_any",
+      "finding": "contour_differs",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "Listen to the reference example once more, then match its pitch shape on the whole phrase.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-close-again-draft",
+      "exercise": "intonation_any",
+      "finding": "contour_close",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "That shape is close. Say the phrase once more, with a little less help from the reference.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-rerecord-draft",
+      "exercise": "intonation_any",
+      "finding": "insufficient_usable_pitch",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "There was not enough usable voice to compare. Record the phrase again in a quieter spot.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-capture-draft",
+      "exercise": "intonation_any",
+      "finding": "capture_problem",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "The pitch track was unreliable. Record again, a little closer to the microphone, without touching it.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-align-draft",
+      "exercise": "intonation_any",
+      "finding": "alignment_failed",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "Those two takes were hard to line up. Record the phrase again at a similar pace to the reference.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    },
+    {
+      "cue_id": "cue-reference-pause-draft",
+      "exercise": "intonation_any",
+      "finding": "reference_unusable",
+      "language": "en",
+      "difficulty": "easy",
+      "instruction_text": "The reference example could not be measured, so pause before another comparison.",
+      "source": "articulate-seed-2026-10-23",
+      "review_status": "draft"
+    }
+  ]
+}

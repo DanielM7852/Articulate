@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Articulate listening check</title>
+  <style>
+    body { font-family: Georgia, serif; margin: 2rem auto; max-width: 860px; color: #1c1917; background: #faf7f2; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.2rem; }
+    p { line-height: 1.45; }
+    .note { color: #57534e; }
+    button { font: inherit; margin: 0 0.4rem 0.4rem 0; padding: 0.35rem 0.7rem; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    audio { width: 100%; margin-top: 0.4rem; }
+    #spoken { font-size: 1.25rem; }
+    svg { width: 100%; height: 280px; background: #fff; border: 1px solid #d6d3d1; }
+    .legend span { margin-right: 1rem; }
+    .ref { color: #1d4ed8; }
+    .learn { color: #b45309; }
+    pre { white-space: pre-wrap; background: #fff; padding: 0.8rem; border: 1px solid #d6d3d1; }
+  </style>
+</head>
+<body>
+  <h1>Listening check</h1>
+  <p class="note">This page plays the prepared reference and a synthetic learner take, then reads the cue. With a Cartesia key, the reference is spoken. The practice takes on the buttons stay synthetic. The product interface is separate.</p>
+  <div id="scenarios"></div>
+  <p id="status">Choose a comparison.</p>
+  <p id="spoken"></p>
+  <div class="row">
+    <div>
+      <div>Reference</div>
+      <audio id="reference" controls></audio>
+    </div>
+    <div>
+      <div>Learner take</div>
+      <audio id="learner" controls></audio>
+    </div>
+  </div>
+  <p class="legend"><span class="ref">Reference pitch</span><span class="learn">Learner pitch</span></p>
+  <svg id="plot" viewBox="0 0 800 280" role="img" aria-label="Pitch contours"></svg>
+  <pre id="detail"></pre>
+  <script>
+    const scenarios = ["rising_vs_falling", "identical", "baseline_shift", "faster_speech", "silence", "content_mismatch"];
+    const box = document.querySelector("#scenarios");
+    for (const name of scenarios) {
+      const button = document.createElement("button");
+      button.textContent = name.replaceAll("_", " ");
+      button.addEventListener("click", () => run(name));
+      box.append(button);
+    }
+
+    function usable(frames) {
+      return (frames || []).filter((frame) => frame.usable && frame.relative_pitch_st !== null);
+    }
+
+    function path(frames, minT, maxT, minP, maxP, color) {
+      const points = usable(frames);
+      if (!points.length) return "";
+      const x = (time) => 28 + ((time - minT) / (maxT - minT || 1)) * 744;
+      const y = (pitch) => 252 - ((pitch - minP) / (maxP - minP || 1)) * 224;
+      const d = points.map((frame, index) => `${index ? "L" : "M"}${x(frame.time_s).toFixed(1)},${y(frame.relative_pitch_st).toFixed(1)}`).join(" ");
+      return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5"/>`;
+    }
+
+    function draw(result) {
+      const reference = usable(result.reference_contour && result.reference_contour.frames);
+      const learner = usable(result.learner_contour && result.learner_contour.frames);
+      const all = reference.concat(learner);
+      const plot = document.querySelector("#plot");
+      if (!all.length) {
+        plot.innerHTML = `<text x="28" y="40">No usable pitch in this take.</text>`;
+        return;
+      }
+      const times = all.map((frame) => frame.time_s);
+      const pitches = all.map((frame) => frame.relative_pitch_st);
+      const minT = Math.min(...times);
+      const maxT = Math.max(...times);
+      const minP = Math.min(...pitches, -1);
+      const maxP = Math.max(...pitches, 1);
+      plot.innerHTML = path(result.reference_contour.frames, minT, maxT, minP, maxP, "#1d4ed8")
+        + path(result.learner_contour.frames, minT, maxT, minP, maxP, "#b45309");
+    }
+
+    async function run(scenario) {
+      const status = document.querySelector("#status");
+      status.textContent = "Comparing the two recordings…";
+      document.querySelector("#spoken").textContent = "";
+      document.querySelector("#detail").textContent = "";
+      const attempt = `demo-${scenario}-${Date.now()}`;
+      const response = await fetch(`/v1/comparisons/fixtures/${scenario}?session_id=demo-session&attempt_id=${attempt}`, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) {
+        status.textContent = "The comparison request failed.";
+        document.querySelector("#detail").textContent = JSON.stringify(result, null, 2);
+        return;
+      }
+      status.textContent = `${result.status} · ${result.finding || "no finding"}`;
+      document.querySelector("#spoken").textContent = result.feedback.spoken_text;
+      document.querySelector("#reference").src = `/v1/references/${result.reference_id}/audio`;
+      document.querySelector("#learner").src = `/v1/fixtures/${scenario}/audio`;
+      draw(result);
+      const metrics = result.metrics || {};
+      document.querySelector("#detail").textContent = [
+        `Reference ending: ${metrics.reference_ending_direction}`,
+        `Learner ending: ${metrics.learner_ending_direction}`,
+        `Ending change (semitones): ${metrics.reference_ending_change_st} vs ${metrics.learner_ending_change_st}`,
+        `Aligned difference (semitones): ${metrics.aligned_rmse_st}`,
+        `Cue: ${result.feedback.cue_id} (${result.feedback.cue_review_status})`,
+        result.limitations.join(", "),
+      ].join("\n");
+    }
+
+    run("rising_vs_falling");
+  </script>
+</body>
+</html>
