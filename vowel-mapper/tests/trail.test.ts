@@ -66,4 +66,11 @@ describe('presentation-only trail', () => {
     }
     expect(buildTrail([sample(0), sample(50)], null, false)[0].d).toContain(' L');
   });
+
+  it('projects through a custom projector when supplied', () => {
+    const strokes = buildTrail([sample(0), sample(50, 500, 1500)], null, false, (p) => ({ x: p.f2 / 100, y: p.f1 / 100 }));
+    expect(strokes[0].start).toEqual({ x: 23, y: 3 });
+    expect(strokes[0].end).toEqual({ x: 15, y: 5 });
+    expect(strokes[0].d).toBe('M23,3 L15,5');
+  });
 });

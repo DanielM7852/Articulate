@@ -68,6 +68,10 @@
   vector-effect: non-scaling-stroke;
 }
 
+.vg-trail.is-live {
+  opacity: 0.8;
+}
+
 .vg-label {
   position: absolute;
   transform: translate(-50%, -50%);

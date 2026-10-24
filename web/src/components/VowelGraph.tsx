@@ -1,5 +1,7 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { VowelPoint } from '@vowel-mapper/audio/tracker';
+import { buildTrail, sampleKey, trailOpacity } from '@vowel-mapper/components/trail';
+import { useTrailAnimation } from '@vowel-mapper/components/useTrailAnimation';
 import { SOUNDS, SOUND_ORDER, type SoundId } from '../state/types';
 import { HOLD_GOAL_SEC, TARGETS, inTarget, project, targetEllipse } from '../vowel/targets';
 
@@ -18,6 +20,7 @@ export function VowelGraph({
   statusLabel,
   holdSec,
   hidden,
+  live = false,
 }: {
   sound: SoundId;
   point: VowelPoint | null;
@@ -28,7 +31,10 @@ export function VowelGraph({
   holdSec: number;
   /** Independent attempts hide the cursor, target and hold ring. */
   hidden?: boolean;
+  /** Ink fades over 3 s while true; false keeps the whole supplied trace at full strength. */
+  live?: boolean;
 }) {
+  const id = useId();
   const plotRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -41,6 +47,12 @@ export function VowelGraph({
     ro.observe(el);
     return () => ro.disconnect();
   }, [hidden]);
+
+  // Cosmetic only: geometry and fade never feed tracking, targets or scoring.
+  const { now, arrivals, reducedMotion } = useTrailAnimation(trace, point, live);
+  const geometry = useMemo(() => buildTrail(trace, point, !reducedMotion, project), [trace, point, reducedMotion]);
+  const opacity = (sample: VowelPoint) => (live ? trailOpacity(now - (arrivals.get(sampleKey(sample)) ?? now)) : 1);
+  const strokes = geometry.filter((stroke) => opacity(stroke.to) > 0);
 
   if (hidden) {
     return (
@@ -56,12 +68,13 @@ export function VowelGraph({
   const inside = point !== null && tracking && inTarget(point, target);
   const holdProgress = inside ? Math.min(1, holdSec / HOLD_GOAL_SEC) : 0;
 
-  const segments = new Map<number, VowelPoint[]>();
-  for (const p of trace) {
-    const seg = segments.get(p.segment) ?? [];
-    seg.push(p);
-    segments.set(p.segment, seg);
-  }
+  const cursorStyle: CSSProperties | undefined = cursor
+    ? {
+        transform: `translate(${(cursor.x / 100) * size.w}px, ${(cursor.y / 100) * size.h}px)`,
+        // Live: the cursor fades with its newest sample (and stays dimmed when not confidently tracking).
+        ...(live ? { opacity: opacity(point!) * (tracking ? 1 : 0.3), transition: 'transform 90ms linear' } : {}),
+      }
+    : undefined;
 
   return (
     <div
@@ -87,16 +100,30 @@ export function VowelGraph({
             }).join(' ')}
           />
           <ellipse className="vg-target" cx={ellipse.cx} cy={ellipse.cy} rx={ellipse.rx} ry={ellipse.ry} />
-          {Array.from(segments, ([seg, pts]) => (
-            <polyline
-              key={seg}
-              className="vg-trail"
-              points={pts
-                .map((p) => {
-                  const c = project(p);
-                  return `${c.x},${c.y}`;
-                })
-                .join(' ')}
+          {live && (
+            <defs>
+              {strokes.map((stroke) => (
+                <linearGradient
+                  key={stroke.key}
+                  id={`${id}-${stroke.key}`}
+                  gradientUnits="userSpaceOnUse"
+                  x1={stroke.start.x}
+                  y1={stroke.start.y}
+                  x2={stroke.end.x}
+                  y2={stroke.end.y}
+                >
+                  <stop offset="0" style={{ stopColor: 'var(--color-navy)' }} stopOpacity={opacity(stroke.from)} />
+                  <stop offset="1" style={{ stopColor: 'var(--color-navy)' }} stopOpacity={opacity(stroke.to)} />
+                </linearGradient>
+              ))}
+            </defs>
+          )}
+          {strokes.map((stroke) => (
+            <path
+              key={stroke.key}
+              className={`vg-trail${live ? ' is-live' : ''}`}
+              d={stroke.d}
+              stroke={live ? `url(#${id}-${stroke.key})` : undefined}
             />
           ))}
         </svg>
@@ -117,7 +144,7 @@ export function VowelGraph({
 
         <div
           className={`vg-cursor ${cursor ? (tracking ? '' : 'is-faded') : 'is-hidden'}`}
-          style={cursor ? { transform: `translate(${(cursor.x / 100) * size.w}px, ${(cursor.y / 100) * size.h}px)` } : undefined}
+          style={cursorStyle}
           aria-hidden="true"
         >
           <svg className="vg-ring" viewBox="0 0 44 44">

@@ -26,10 +26,15 @@ function tangent(before: number, after: number) {
 
 /** Cosmetic geometry only. Never returns measurements to tracking or scoring.
  * Every curve ends at the accepted point: no buffering or head smoothing delay. */
-export function buildTrail(trace: readonly VowelPoint[], point: VowelPoint | null, smooth = true) {
+export function buildTrail(
+  trace: readonly VowelPoint[],
+  point: VowelPoint | null,
+  smooth = true,
+  project: (point: VowelPoint) => { x: number; y: number } = projectVowel,
+) {
   const samples = [...trace];
   if (point && (!samples.length || point.timestampMs > samples.at(-1)!.timestampMs)) samples.push(point);
-  const projected = samples.map(projectVowel);
+  const projected = samples.map((sample) => project(sample));
   return samples.flatMap((sample, index) => {
     if (index === 0) return [];
     const previous = samples[index - 1];
