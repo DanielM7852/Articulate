@@ -4,3 +4,4 @@ dist
 *.log
 public/mediapipe/wasm/
 tsconfig.tsbuildinfo
+smoke-out/

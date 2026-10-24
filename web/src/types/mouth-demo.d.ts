@@ -53,6 +53,13 @@ declare module '@mouth-demo/src/mouth-demo.js' {
     /** Ease back to neutral and stop looping. */
     stop(): void;
     setStyle(style: MouthStyle): void;
+    /** Turn the head toward a point in front of the screen. x: -1 left to +1 right, y: -1 down to +1 up. Null releases it. */
+    lookAt(target: { x: number; y: number } | null): void;
+    /** Camera distance multiplier, eased. 1 is the default framing; 0.8 is closer. */
+    setZoom(zoom: number): void;
+    /** Freeze the face, camera and choreography clock without losing state. */
+    pause(): void;
+    resume(): void;
     /** Frees GPU resources, listeners and DOM. Safe to call twice. */
     dispose(): void;
   }

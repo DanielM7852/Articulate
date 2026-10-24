@@ -18,6 +18,7 @@ import { createLipSync } from "./lipsync.js";
 const DEFAULT_AVATAR = "/avatars/brunette.glb";
 const TH_TIMEOUT_MS = 10000;
 const SWING_MS = 1200;
+const LOOK = { yaw: 0.45, pitch: 0.28, ease: 0.08 }; // radians at full deflection, per-frame lerp
 const NOTE = "Mouth demonstrations are illustrative and would be reviewed by speech therapists before real use.";
 const DRIVERS = ["auto", "talkinghead", "three"];
 const STYLES = ["hologram", "porcelain", "hybrid", "solid"];
@@ -142,6 +143,9 @@ export async function createMouthDemo(container, options = {}) {
   let views = null;
   let cutaway = null;
   let style = opts.style;
+  let look = null; // { x, y } in [-1, 1], +x = viewer's right, +y = up; null releases the head
+  const lookNow = { x: 0, y: 0 };
+  let headRest = null;
 
   const renderDebug = () => {
     if (debugEl) debugEl.textContent = `driver: ${driver?.name ?? "-"} | style: ${style} | ${NOTE}`;
@@ -163,6 +167,7 @@ export async function createMouthDemo(container, options = {}) {
     });
     disposers.push(() => driver.dispose());
 
+    headRest = driver.headBone.rotation.clone();
     const anchor = computeMouthAnchor(driver);
     highlight = createHighlight({ headBone: driver.headBone, camera: scene.camera, anchor });
     if (!highlight.mesh.parent) driver.headBone.add(highlight.mesh);
@@ -411,6 +416,26 @@ export async function createMouthDemo(container, options = {}) {
       run([tween("reset", 300, { w: 0, vis: 0, show: showTarget() }, d)]);
     },
 
+    // Turn the head toward a point in front of the screen (camera or pointer). Eased in the render loop.
+    lookAt(target) {
+      look = target && Number.isFinite(target.x) && Number.isFinite(target.y)
+        ? { x: Math.max(-1, Math.min(1, target.x)), y: Math.max(-1, Math.min(1, target.y)) }
+        : null;
+    },
+
+    setZoom(z) {
+      views.setZoom(z);
+    },
+
+    // Freeze everything (face, camera, effects, choreography clock) without losing state.
+    pause() {
+      if (!disposed) scene.stopLoop();
+    },
+
+    resume() {
+      if (!disposed) scene.startLoop(frame);
+    },
+
     setStyle(next) {
       if (!STYLES.includes(next)) return;
       style = next;
@@ -456,7 +481,8 @@ export async function createMouthDemo(container, options = {}) {
   syncButtons();
   renderDebug();
 
-  scene.startLoop((dt) => {
+  // One frame of the demo; also the resume target for pause()/resume().
+  function frame(dt) {
     if (pendingSize) {
       scene.setSize(pendingSize.w, pendingSize.h);
       hologram.setSize(pendingSize.w, pendingSize.h);
@@ -467,13 +493,26 @@ export async function createMouthDemo(container, options = {}) {
     timeline.update(step);
     lipsync.update(step);
     driver.update(step);
+    if (look || Math.abs(lookNow.x) > 1e-3 || Math.abs(lookNow.y) > 1e-3) {
+      const goal = look ?? { x: 0, y: 0 };
+      const k = Math.min(1, LOOK.ease * (step / 16.7));
+      lookNow.x += (goal.x - lookNow.x) * k;
+      lookNow.y += (goal.y - lookNow.y) * k;
+      if (headRest) {
+        // Override the driver's head pose for this frame; +y rotation turns toward world +x, the viewer's right.
+        driver.headBone.rotation.copy(headRest);
+        driver.headBone.rotation.y += lookNow.x * LOOK.yaw;
+        driver.headBone.rotation.x -= lookNow.y * LOOK.pitch;
+      }
+    }
     views.update(scaled);
     highlight.update(scaled);
     hologram.setHold(highlight.pulseValue);
     hologram.update(scaled);
     particles.update(scaled);
     hologram.render();
-  });
+  }
+  scene.startLoop(frame);
 
   setTimeout(() => {
     if (!disposed) container.dispatchEvent(new CustomEvent("demo:ready", { bubbles: true, detail: { driver: driver.name } }));
