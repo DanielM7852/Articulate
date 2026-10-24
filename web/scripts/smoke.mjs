@@ -11,7 +11,10 @@ const ctx = await browser.newContext({ permissions: ['camera', 'microphone'], vi
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text().slice(0, 300)}`); });
+page.on('console', (m) => {
+  if (m.type() === 'error') errors.push(`console: ${m.text().slice(0, 300)}`);
+  else if (m.text().includes('[pointcloud]')) console.log(m.text().slice(0, 600));
+});
 const snap = async (name) => page.screenshot({ path: `${process.env.SMOKE_OUT ?? 'smoke-out'}/${name}.png` });
 
 await page.goto(base + '/#/', { waitUntil: 'networkidle' });
@@ -33,8 +36,14 @@ await page.screenshot({ path: `${process.env.SMOKE_OUT ?? 'smoke-out'}/eyes-righ
 await page.mouse.move(20, 760);
 await page.waitForTimeout(1800);
 await page.screenshot({ path: `${process.env.SMOKE_OUT ?? 'smoke-out'}/eyes-left-down.png`, clip: eyes });
-await page.mouse.move(640, 400);
-await page.waitForTimeout(800);
+// Pointer over the face: dots near it scatter, then settle back once it leaves.
+await page.mouse.move(600, 330, { steps: 12 });
+await page.mouse.move(680, 400, { steps: 12 });
+await page.waitForTimeout(250);
+await page.screenshot({ path: `${process.env.SMOKE_OUT ?? 'smoke-out'}/scatter.png`, clip: { x: 420, y: 200, width: 440, height: 360 } });
+await page.mouse.move(1100, 700);
+await page.waitForTimeout(1500);
+await page.screenshot({ path: `${process.env.SMOKE_OUT ?? 'smoke-out'}/scatter-settled.png`, clip: { x: 420, y: 200, width: 440, height: 360 } });
 
 await page.getByRole('button', { name: /begin/i }).click();
 await page.waitForTimeout(1200);

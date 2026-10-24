@@ -22,7 +22,7 @@ import { createMouthDemo } from "./src/mouth-demo.js";
 const demo = await createMouthDemo(containerElement, {
   avatarUrl: "/avatars/brunette.glb",
   driver: "auto",       // "auto" | "talkinghead" | "three"
-  style: "hologram",    // "hologram" | "solid"
+  style: "hologram",    // "hologram" | "particles" | "porcelain" | "hybrid" | "solid"
   controls: true,       // false: host provides its own buttons
 });
 ```
@@ -37,7 +37,7 @@ The container needs a height (the component fills it). It builds its own layout:
 | `setView("front" \| "side")` | Animated camera swing; side view shows the cutaway. Returns a promise that resolves `true` when the swing ends, `false` if interrupted. |
 | `speak({ clock, timeline? })` | Lip sync from streamed timestamps (see Lip sync). Returns `{ append(t), end(), stop() }`. |
 | `stop()` | Ease back to neutral and stop looping; clears the caption. |
-| `setStyle("hologram" \| "solid")` | Switch look at runtime. |
+| `setStyle("hologram" \| "particles" \| "porcelain" \| "hybrid" \| "solid")` | Switch look at runtime. |
 | `toggleCalibration()` / `handleCalibrationKey(e)` | Highlight ring calibration (see below). `handleCalibrationKey` returns `true` if it consumed the key. |
 | `dispose()` | Free GPU resources, listeners and DOM. Safe to call twice. |
 | `driverName`, `style`, `view`, `speed`, `cueId`, `speaking` | Read-only state. |
@@ -80,7 +80,7 @@ URL parameters override options:
 | Parameter | Effect |
 |---|---|
 | `?driver=three\|talkinghead\|auto` | Choose the driver. |
-| `?style=solid\|hologram` | Choose the look. |
+| `?style=hologram\|particles\|porcelain\|hybrid\|solid` | Choose the look. |
 | `?debug` | Show an overlay with the driver name and style. |
 | `?thfail` | Force the TalkingHead attempt to fail, to test the fallback. |
 
@@ -93,7 +93,7 @@ URL parameters override options:
 | S | Toggle slow-mo |
 | V | Toggle side view |
 | G | Highlight calibration mode |
-| H | Toggle hologram / solid style |
+| H | Cycle the styles |
 | L | Dev only: canned lip sync timeline, no audio |
 | 0 | Stop and reset to neutral |
 
@@ -104,6 +104,8 @@ Press `G` to toggle calibration. Arrow keys nudge the ring up/down/left/right, `
 ## Style option
 
 `hologram` renders the avatar as navy sphere dots with bloom and background particles. `solid` restores the original materials with studio lighting, no bloom, and the same light panel. Use `?style=solid` if the hologram does not read well on a projector.
+
+`particles` is a real point cloud. At load the head, hair, eyes and teeth meshes are sampled into evenly spaced dots (dart throwing on the surface), each dot sized by the darkness of the skin texture under it so brows, lips and nostrils read. Every frame the meshes are deformed on the CPU (morph targets, then skinning) and each dot is placed back on its triangle, so lip shapes, blinks, gaze and the head turn carry through. The original meshes stay as an invisible depth prepass so dots on the far side are hidden. Moving the pointer through the head scatters nearby dots, which spring back. Reduced motion turns the scatter off; machines with few cores get fewer dots.
 
 ## File map
 
@@ -117,6 +119,7 @@ Press `G` to toggle calibration. Arrow keys nudge the ring up/down/left/right, `
 | `src/views.js` | Front/side camera orbit, head-following pivot |
 | `src/highlight.js` | Lip highlight ring and calibration |
 | `src/hologram.js` | Hologram materials, depth prepass, bloom |
+| `src/pointcloud.js` | Particle head: surface-sampled dots riding the deforming mesh, pointer scatter |
 | `src/particles.js` | Background drifting particles |
 | `src/cutaway.js` | SVG cutaway and pose morphing |
 | `src/timeline.js` | Tween engine with a speed multiplier |

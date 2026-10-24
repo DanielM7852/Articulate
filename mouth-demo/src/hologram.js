@@ -91,7 +91,7 @@ const CLASS_PARAMS = {
 
 const HIDDEN_RE = /body|outfit|footwear|shoe|shirt|top|bottom|cloth|jacket|pants/i;
 
-function classify(name) {
+export function classify(name) {
   if (/eye/i.test(name) && !/lash|brow/i.test(name)) return "eyes";
   if (/teeth/i.test(name)) return "teeth";
   if (/head|tongue/i.test(name)) return "full";

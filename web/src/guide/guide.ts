@@ -30,7 +30,8 @@ export function acquireGuide(host: HTMLElement): Promise<MouthDemo> {
   holder = host;
   if (!loading) {
     loading = import('@mouth-demo/src/mouth-demo.js')
-      .then((m) => m.createMouthDemo(el, { avatarUrl, controls: false }))
+      // The particle head is the default look; `?style=hologram` on the page URL compares the painted lattice.
+      .then((m) => m.createMouthDemo(el, { avatarUrl, controls: false, style: 'particles' }))
       .catch((err: unknown) => {
         loading = null; // allow a retry on the next screen
         el.replaceChildren();

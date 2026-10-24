@@ -8,6 +8,7 @@ import { computeMouthAnchor } from "./mouth-anchor.js";
 import { createHighlight } from "./highlight.js";
 import { createHologram } from "./hologram.js";
 import { createParticles } from "./particles.js";
+import { createPointCloud } from "./pointcloud.js";
 import { createTalkingHeadDriver } from "./drivers/talkinghead.js";
 import { createThreeDriver } from "./drivers/three.js";
 import { CUES } from "./cues.js";
@@ -28,7 +29,7 @@ const GAZE = { yaw: 0.8, pitch: 0.4, rest: -0.12 };
 const GAZE_SHAPES = ["eyeLookOutLeft", "eyeLookInLeft", "eyeLookOutRight", "eyeLookInRight", "eyesLookUp", "eyesLookDown"];
 const NOTE = "Mouth demonstrations are illustrative and would be reviewed by speech therapists before real use.";
 const DRIVERS = ["auto", "talkinghead", "three"];
-const STYLES = ["hologram", "porcelain", "hybrid", "solid"];
+const STYLES = ["hologram", "particles", "porcelain", "hybrid", "solid"];
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -146,6 +147,7 @@ export async function createMouthDemo(container, options = {}) {
   let scene = null;
   let hologram = null;
   let particles = null;
+  let cloud = null;
   let highlight = null;
   let views = null;
   let cutaway = null;
@@ -196,14 +198,23 @@ export async function createMouthDemo(container, options = {}) {
 
     particles = createParticles({ camera: scene.camera, reducedMotion: mq.matches });
     if (!particles.points.parent) scene.scene.add(particles.points);
-    particles.setVisible(style === "hologram");
+    particles.setVisible(style === "hologram" || style === "particles");
     disposers.push(() => particles.dispose());
+
+    // The particle head: a sibling of the hologram style, sampled from the same meshes.
+    cloud = createPointCloud({
+      renderer: scene.renderer, scene: scene.scene, camera: scene.camera, canvas: scene.canvas,
+      root: driver.root, anchor, reducedMotion: mq.matches,
+    });
+    disposers.push(() => cloud.dispose());
+    if (style === "particles") cloud.setActive(true);
     if (params.debug) window.__mouthDemo = { scene, driver, anchor, highlight, views, hologram, particles };
 
     const onMotion = (e) => {
       views.setReducedMotion(e.matches);
       hologram.setReducedMotion(e.matches);
       particles.setReducedMotion(e.matches);
+      cloud.setReducedMotion(e.matches);
     };
     views.setReducedMotion(mq.matches);
     mq.addEventListener("change", onMotion);
@@ -448,9 +459,15 @@ export async function createMouthDemo(container, options = {}) {
       if (!STYLES.includes(next)) return;
       style = next;
       root.dataset.style = next;
-      hologram.setStyle(next);
+      if (next === "particles") {
+        hologram.setStyle("solid"); // restores the meshes; the cloud then hides them behind its depth prepass
+        cloud.setActive(true);
+      } else {
+        cloud.setActive(false);
+        hologram.setStyle(next);
+      }
       scene.setSolidLighting(next === "solid");
-      particles.setVisible(next === "hologram");
+      particles.setVisible(next === "hologram" || next === "particles");
       renderDebug();
     },
 
@@ -530,7 +547,9 @@ export async function createMouthDemo(container, options = {}) {
     views.update(scaled);
     highlight.update(scaled);
     hologram.setHold(highlight.pulseValue);
+    cloud.setHold(highlight.pulseValue);
     hologram.update(scaled);
+    cloud.update(step);
     particles.update(scaled);
     hologram.render();
   }
