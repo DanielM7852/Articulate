@@ -12,6 +12,8 @@ import './game.css';
 export type FrameListener = (frame: TrackedFrame) => void;
 
 interface GameModeProps {
+  zones: ZoneSet | null;
+  setZones: (zones: ZoneSet) => void;
   session: ReturnType<typeof useVowelSession>;
   /** App forwards every tracked frame here; see `useVowelSession`'s `onFrame`. */
   frames: MutableRefObject<FrameListener | null>;
@@ -29,13 +31,12 @@ type Stage =
 
 type Engine = { kind: 'warmup'; warmUp: WarmUp } | { kind: 'play'; run: GameRun };
 
-const TEMPOS = [{ label: 'Relaxed · 5 s per word', spacingMs: 5000 }, { label: 'Steady · 3.5 s per word', spacingMs: 3500 }];
+const TEMPOS = [{ label: 'Relaxed · at least 5 s per word', spacingMs: 5000 }, { label: 'Steady · at least 3.5 s per word', spacingMs: 3500 }];
 const sound = (vowel: keyof typeof VOWEL_LABEL) => VOWEL_LABEL[vowel].sound;
 const RECENT_TRACE_MS = 3000;
 
-export function GameMode({ session, frames, point, tracking }: GameModeProps) {
-  const [stage, setStage] = useState<Stage>({ kind: 'intro' });
-  const [zones, setZones] = useState<ZoneSet | null>(null);
+export function GameMode({ zones, setZones, session, frames, point, tracking }: GameModeProps) {
+  const [stage, setStage] = useState<Stage>(zones ? { kind: 'ready' } : { kind: 'intro' });
   const [pacing, setPacing] = useState<'self' | 'timed'>('self');
   const [spacingMs, setSpacingMs] = useState(TEMPOS[0].spacingMs);
   const engine = useRef<Engine | null>(null);
@@ -54,7 +55,7 @@ export function GameMode({ session, frames, point, tracking }: GameModeProps) {
     const snapshot = current.run.push(frame);
     if (snapshot.phase === 'finished') { engine.current = null; setStage({ kind: 'finished', snapshot }); }
     else setStage({ kind: 'playing', snapshot, options: current.run.options });
-  }, []);
+  }, [setZones]);
 
   useEffect(() => {
     frames.current = onFrame;
@@ -83,6 +84,10 @@ export function GameMode({ session, frames, point, tracking }: GameModeProps) {
     engine.current = { kind: 'play', run };
     setStage({ kind: 'playing', snapshot: run.snapshot(), options: run.options });
     ensureMicrophone();
+  };
+  const beginAttempt = () => {
+    const current = engine.current;
+    if (current?.kind === 'play') setStage({ kind: 'playing', snapshot: current.run.beginAttempt(), options: current.run.options });
   };
   const stop = () => {
     engine.current = null;
@@ -165,7 +170,7 @@ export function GameMode({ session, frames, point, tracking }: GameModeProps) {
           <WordCard step={step} />
           <NotePrompt step={step} note={note} previous={currentIndex ? playing.snapshot.notes[currentIndex - 1] : undefined} timeMs={playing.snapshot.timeMs} />
           <p className={`game-mic ${tracking ? 'is-tracking' : ''}`} data-testid="game-mic">{micOn ? (tracking ? 'Hearing a steady vowel' : 'No clear vowel right now') : session.phase === 'requesting' ? 'Allow microphone access' : session.stale ? 'Audio paused. Return to this tab.' : 'Microphone off'}</p>
-          <div className="controls"><button type="button" className="button-secondary" onClick={stop}>Stop</button></div>
+          <div className="controls">{note.status === 'waiting' && <button type="button" className="button-primary" onClick={beginAttempt}>Try this word</button>}<button type="button" className="button-secondary" onClick={stop}>Stop</button></div>
         </>}
 
         {stage.kind === 'finished' && <Results snapshot={stage.snapshot} onPlay={play} onRedo={beginWarmUp} />}
@@ -226,7 +231,7 @@ function NotePrompt({ step, note, previous, timeMs }: { step: Step; note: NoteSt
   let hint = detail;
   if (note.status === 'resting' && previous?.outcome) [title, hint] = outcomeCopy(previous.outcome);
   else if (note.status === 'resting') [title, hint] = ['Get ready', `First word: “${step.word}”.`];
-  else if (note.status === 'waiting') hint = `${detail} Start whenever you’re ready.`;
+  else if (note.status === 'waiting') hint = `${detail} Start whenever you’re ready. If no vowel appears, choose “Try this word”.`;
   else if (note.status === 'approaching' || note.status === 'upcoming') [title, hint] = [`Say “${step.word}” as the ring closes`, detail];
   else if (note.status === 'open') [title, hint] = [action, detail];
   const remaining = note.status === 'open' ? Math.max(0, Math.min(1, (note.windowEndMs - timeMs) / (note.windowEndMs - note.windowStartMs))) : null;

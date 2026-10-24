@@ -77,3 +77,8 @@
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 @media (max-width: 720px) { .game-word b { font-size: 48px; } }
+
+@media (max-width: 720px) {
+  .game-panel { grid-row: 1; }
+  .game-word { padding-top: 12px; }
+}

@@ -42,15 +42,15 @@ export function zoneFromPoints(vowel: VowelId, points: VowelPoint[]): ZoneResult
   return { ok: true, zone: { vowel, ...centre, radius }, count: points.length };
 }
 
-export function buildZones(pointsByVowel: Record<VowelId, VowelPoint[]>): CalibrationResult {
+export function buildZones(pointsByVowel: Partial<Record<VowelId, VowelPoint[]>>, vowels: readonly VowelId[] = VOWELS): CalibrationResult {
   const problems: CalibrationProblem[] = [];
   const zones: Partial<ZoneSet> = {};
-  for (const vowel of VOWELS) {
-    const result = zoneFromPoints(vowel, pointsByVowel[vowel]);
+  for (const vowel of vowels) {
+    const result = zoneFromPoints(vowel, pointsByVowel[vowel] ?? []);
     if (result.ok) zones[vowel] = result.zone;
     else problems.push(result.problem);
   }
-  const built = VOWELS.flatMap((vowel) => zones[vowel] ?? []);
+  const built = vowels.flatMap((vowel) => zones[vowel] ?? []);
   for (const zone of built) {
     const others = built.filter((other) => other !== zone);
     if (!others.length) continue;
@@ -61,15 +61,17 @@ export function buildZones(pointsByVowel: Record<VowelId, VowelPoint[]>): Calibr
     const a = built[i], b = built[j];
     if (zoneDistance(a, b) * CALIBRATION.overlapShare < CALIBRATION.tooCloseRadius) problems.push({ kind: 'too-close', vowels: [a.vowel, b.vowel] });
   }
-  return problems.length ? { ok: false, problems } : { ok: true, zones: zones as ZoneSet };
+  return problems.length ? { ok: false, problems } : { ok: true, zones };
 }
 
 export type WarmUpState =
   | { kind: 'rest'; next: VowelId; untilMs: number }
   | { kind: 'collecting'; vowel: VowelId; startedAtMs: number; timeoutAtMs: number; collected: number; target: number }
-  | { kind: 'done'; result: CalibrationResult; counts: Record<VowelId, number> };
+  | { kind: 'done'; result: CalibrationResult; counts: Partial<Record<VowelId, number>> };
 
 export interface WarmUpOptions {
+  /** Each extra target is measured from its own prompted vowel. */
+  vowels: readonly VowelId[];
   /** Pause before each phase, so the player can read the next prompt and stop the previous sound. */
   restMs: number;
   /** Points at the start of a phase are ignored; they are often the tail of the previous sound. */
@@ -80,14 +82,14 @@ export interface WarmUpOptions {
   timeoutMs: number;
 }
 
-export const WARM_UP_DEFAULTS: WarmUpOptions = { restMs: 1200, settleMs: 300, targetPoints: 40, timeoutMs: 6000 };
+export const WARM_UP_DEFAULTS: WarmUpOptions = { vowels: VOWELS, restMs: 1200, settleMs: 300, targetPoints: 40, timeoutMs: 6000 };
 
 /** Hold eee, ah, oo in turn. Driven only by the frame stream, so it is deterministic to test. */
 export class WarmUp {
   readonly options: WarmUpOptions;
   private index = 0;
   private state: WarmUpState | null = null;
-  private readonly points: Record<VowelId, VowelPoint[]> = { ee: [], ah: [], oo: [] };
+  private readonly points: Record<VowelId, VowelPoint[]> = { ee: [], ah: [], oo: [], aw: [], ih: [], eh: [], ae: [] };
 
   constructor(options: Partial<WarmUpOptions> = {}) {
     this.options = { ...WARM_UP_DEFAULTS, ...options };
@@ -99,8 +101,8 @@ export class WarmUp {
 
   push(frame: TrackedFrame): WarmUpState {
     const t = frame.timestampMs;
-    const { restMs, settleMs, targetPoints, timeoutMs } = this.options;
-    if (!this.state) this.state = { kind: 'rest', next: VOWELS[0], untilMs: t + restMs };
+    const { restMs, settleMs, targetPoints, timeoutMs, vowels } = this.options;
+    if (!this.state) this.state = { kind: 'rest', next: vowels[0], untilMs: t + restMs };
     const state = this.state;
     if (state.kind === 'rest' && t >= state.untilMs) {
       this.state = { kind: 'collecting', vowel: state.next, startedAtMs: t, timeoutAtMs: t + timeoutMs, collected: 0, target: targetPoints };
@@ -109,9 +111,9 @@ export class WarmUp {
       if (frame.status === 'tracking' && frame.point && t - state.startedAtMs >= settleMs) bucket.push(frame.point);
       if (bucket.length >= targetPoints || t >= state.timeoutAtMs) {
         this.index++;
-        this.state = this.index < VOWELS.length
-          ? { kind: 'rest', next: VOWELS[this.index], untilMs: t + restMs }
-          : { kind: 'done', result: buildZones(this.points), counts: { ee: this.points.ee.length, ah: this.points.ah.length, oo: this.points.oo.length } };
+        this.state = this.index < vowels.length
+          ? { kind: 'rest', next: vowels[this.index], untilMs: t + restMs }
+          : { kind: 'done', result: buildZones(this.points, vowels), counts: Object.fromEntries(vowels.map((vowel) => [vowel, this.points[vowel].length])) };
       } else {
         this.state = { ...state, collected: bucket.length };
       }

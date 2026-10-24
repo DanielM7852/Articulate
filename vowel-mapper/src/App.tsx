@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { DEFAULT_SETTINGS } from './audio/estimator';
 import { VowelPlot } from './components/VowelPlot';
 import { GameMode, type FrameListener } from './game/GameMode';
+import type { ZoneSet } from './game/zones';
 import { useVowelSession } from './useVowelSession';
 
 const trackingCopy = {
@@ -18,6 +19,7 @@ export default function App() {
   const [ceilingHz, setCeilingHz] = useState(DEFAULT_SETTINGS.ceilingHz);
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ceilingHz }), [ceilingHz]);
   const [mode, setMode] = useState<'map' | 'game'>('map');
+  const [gameZones, setGameZones] = useState<ZoneSet | null>(null);
   const gameFrames = useRef<FrameListener | null>(null);
   const session = useVowelSession(settings, { onFrame: (frame) => gameFrames.current?.(frame) });
   const active = session.phase === 'running' || session.phase === 'requesting';
@@ -56,7 +58,7 @@ export default function App() {
         </>}
       </section>
 
-      {mode === 'game' && <GameMode session={session} frames={gameFrames} point={point} tracking={tracking} />}
+      {mode === 'game' && <GameMode zones={gameZones} setZones={setGameZones} session={session} frames={gameFrames} point={point} tracking={tracking} />}
       {mode === 'map' && <div className="workspace">
         <section className="map-panel" aria-labelledby="map-title">
           <div className="panel-heading">

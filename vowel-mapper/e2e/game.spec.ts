@@ -82,6 +82,11 @@ test('zone game: warm-up sets personal zones, then hit, miss and "not heard clea
   await warmUp(page, true);
   for (const vowel of ['ee', 'ah', 'oo']) await expect(page.getByTestId(`zone-${vowel}`)).toBeVisible();
   await expect(page.getByLabel('Wait for me')).toBeChecked();
+  const eeShape = await page.getByTestId('zone-ee').locator('polygon').getAttribute('points');
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await expect(status).toHaveText('Your zones are set');
+  await expect(page.getByTestId('zone-ee').locator('polygon')).toHaveAttribute('points', eeShape!);
 
   await page.getByRole('button', { name: 'Play', exact: true }).click();
   const outcome = (i: number) => page.getByTestId(`outcome-${i}`);
@@ -89,6 +94,12 @@ test('zone game: warm-up sets personal zones, then hit, miss and "not heard clea
   // 1. "ah": hold steady → hit.
   await expect(status).toHaveText('Say “ah”', { timeout: 10000 });
   await expect(page.getByTestId('game-word')).toHaveAttribute('aria-label', 'Word: ah');
+  await page.setViewportSize({ width: 320, height: 844 });
+  const card = await page.getByTestId('game-word').boundingBox();
+  const plot = await page.locator('.game-workspace .vowel-plot').boundingBox();
+  expect(card!.y + card!.height).toBeLessThan(plot!.y);
+  await page.screenshot({ path: '/Users/Git/Articulate-overnight/screenshots/game/game-playing-320.png', fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 900 });
   await say(page, 'ah');
   await expect(outcome(0)).toHaveAttribute('data-outcome', 'hit', { timeout: 10000 });
   await say(page, null);
@@ -115,6 +126,9 @@ test('zone game: warm-up sets personal zones, then hit, miss and "not heard clea
   // 4. "we" with only broadband noise: the tracker accepts nothing, so it is not heard clearly, not a miss.
   await expect(status).toHaveText('Say “we”', { timeout: 10000 });
   await say(page, 'noise');
+  await page.waitForTimeout(3000);
+  await expect(status).toHaveText('Say “we”');
+  await page.getByRole('button', { name: 'Try this word' }).click();
   await expect(status).toHaveText('2 of 3 zones hit', { timeout: 10000 });
   await say(page, null);
   await expect(page.getByTestId('game-tally')).toHaveText('1 not heard clearly, so not counted.');

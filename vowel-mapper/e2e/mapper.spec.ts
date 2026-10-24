@@ -71,6 +71,7 @@ test('Finish during a pending permission request releases the eventual microphon
 });
 
 test('stopping analysis leaves an externally owned stream live', async ({ page }) => {
+  test.skip(process.env.MAPPER_PREVIEW === '1', 'Reusable source API is exercised in dev; preview serves only the production bundle.');
   await page.goto('/');
   const result = await page.evaluate(async () => {
     // Exercise the reusable capture API, with a stream owned by the parent app.
