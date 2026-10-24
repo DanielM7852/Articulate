@@ -75,7 +75,7 @@ export default function PracticeStudio() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration, learnerEmail } = useAppState();
   const [phase, setPhase] = useState<Phase>('ready');
   const [current, setCurrent] = useState<Attempt | null>(null);
   const [coach, setCoach] = useState<CoachResponse | null>(null);
@@ -149,7 +149,8 @@ export default function PracticeStudio() {
     addAttempt(attempt);
     setCurrent(attempt);
     setPhase('analyzing');
-    const response = await analyzeAttempt(attempt, history);
+    const response = await analyzeAttempt(attempt, history, { learnerId: learnerEmail, plan });
+    if (response.plan) updatePlan(response.plan);
     setCoach(response);
     setPhase('feedback');
     if (narration) speech.speak(`${response.observation} ${response.nextCue}`);

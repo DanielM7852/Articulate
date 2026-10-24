@@ -21,7 +21,7 @@ export default function Summary() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, audio, setAudio, signOut } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, audio, setAudio, signOut, learnerEmail } = useAppState();
   const [envelope, setEnvelope] = useState<number[]>([]);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [coach, setCoach] = useState<CoachResponse | null>(null);
@@ -65,7 +65,8 @@ export default function Summary() {
     addAttempt(attempt);
     setLatest(attempt);
     setAnalyzing(true);
-    const res = await analyzeAttempt(attempt, history);
+    const res = await analyzeAttempt(attempt, history, { learnerId: learnerEmail, plan });
+    if (res.plan) updatePlan(res.plan);
     setCoach(res);
     setAnalyzing(false);
   }

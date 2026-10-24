@@ -3,7 +3,7 @@
 import re
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,7 @@ from app.audio.content import RejectingContentVerifier
 from app.audio.gateway import FIXTURE_SCENARIOS, fixture_wav
 from app.errors import ArticulateError, StaleAttemptError
 from app.integrations.cartesia import cached_speech_wav
+from app.integrations.spacetimedb import FeatureBatch, SpacetimeClient
 from app.reasoning.orchestrate import ComparisonJob
 from app.reasoning.vowel_coach import VowelCoachRequest, VowelCoachResponse, coach_attempt
 from app.schemas import ComparisonResult, ErrorBody, HealthResponse, ReferenceView
@@ -74,6 +75,40 @@ def speak_line(body: SpeechRequest, request: Request) -> Response:
     return Response(content=wav, media_type="audio/wav")
 
 
+@router.post("/v1/feature-batches")
+def append_feature_batch(
+    body: FeatureBatch,
+    request: Request,
+    x_spacetime_token: str | None = Header(default=None),
+) -> dict:
+    """Forward one provisional pitch batch. The caller token is the learner identity."""
+
+    if not x_spacetime_token:
+        raise HTTPException(status_code=401, detail="X-Spacetime-Token is required.")
+    client = SpacetimeClient.from_settings(request.app.state.settings)
+    if not client.configured:
+        raise HTTPException(status_code=503, detail="SpacetimeDB is not configured.")
+    result = client.append_batch(body, learner_token=x_spacetime_token)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail="The feature batch was not stored.")
+    return {"stored": True, "elapsed_ms": result.elapsed_ms, "sequence": body.sequence}
+
+
+@router.post("/v1/feedback/{delivery_id}/spoken")
+def mark_feedback_spoken(delivery_id: str, request: Request) -> dict:
+    """Record one Cartesia delivery. A repeat call does not speak the line again."""
+
+    if not re.fullmatch(r"^[A-Za-z0-9_.:-]{1,120}$", delivery_id):
+        raise HTTPException(status_code=422, detail="delivery_id must be 1-120 characters of letters, numbers, or . _ : -.")
+    client = SpacetimeClient.from_settings(request.app.state.settings)
+    if not client.configured:
+        raise HTTPException(status_code=503, detail="SpacetimeDB is not configured.")
+    result = client.call("mark_feedback_spoken", [delivery_id])
+    if not result.ok:
+        raise HTTPException(status_code=502, detail="The delivery was not recorded.")
+    return {"delivery_id": delivery_id, "elapsed_ms": result.elapsed_ms}
+
+
 @router.get("/health", response_model=HealthResponse)
 def health(request: Request) -> HealthResponse:
     settings = request.app.state.settings
@@ -82,6 +117,7 @@ def health(request: Request) -> HealthResponse:
         anthropic_configured=settings.anthropic_configured,
         moss_configured=settings.moss_configured,
         cartesia_configured=settings.cartesia_configured,
+        spacetimedb_configured=settings.spacetimedb_configured,
         audio_retained_by_default=False,
     )
 
@@ -136,6 +172,7 @@ async def create_comparison(
     session_id: str = Form(...),
     capture_state: str = Form(...),
     learner_audio: UploadFile = File(...),
+    x_spacetime_token: str | None = Header(default=None),
 ) -> ComparisonResult:
     if capture_state != "learner_recording":
         raise HTTPException(
@@ -154,6 +191,7 @@ async def create_comparison(
         reference_id=reference_id,
         audio=data,
         filename=learner_audio.filename or "learner.wav",
+        spacetime_token=x_spacetime_token,
     )
     return await _run(request, job)
 

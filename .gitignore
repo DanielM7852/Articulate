@@ -17,3 +17,7 @@ __pycache__/
 .env
 .data/
 .local_store/
+.tools/
+spacetimedb/node_modules/
+spacetimedb/dist/
+spacetimedb/target/
