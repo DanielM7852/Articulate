@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EyeOff, Mic, Play, Square, Type, Volume2, VolumeX } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
@@ -10,6 +10,7 @@ import { useSpeech } from '../audio/useSpeech';
 import { analyzeAttempt, assistanceLabel, type CoachResponse } from '../services/coach';
 import { attemptsFor, useAppState } from '../state/AppState';
 import { SOUNDS, SOUND_ORDER, type Attempt } from '../state/types';
+import { profileIdFor, requestLiveNotes } from '../live/liveCoach';
 
 /**
  * Independent attempt + session summary. Task-specific cues (cursor, target,
@@ -21,7 +22,15 @@ export default function Summary() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, audio, setAudio, signOut } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, audio, setAudio, signOut, learnerName } = useAppState();
+
+  // Refresh the learner's notes once when the session summary opens; non-blocking, failures ignored.
+  useEffect(() => {
+    const ctl = new AbortController();
+    requestLiveNotes(profileIdFor(learnerName), ctl.signal).catch(() => undefined);
+    return () => ctl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [envelope, setEnvelope] = useState<number[]>([]);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [coach, setCoach] = useState<CoachResponse | null>(null);

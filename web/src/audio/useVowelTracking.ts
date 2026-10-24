@@ -42,6 +42,7 @@ export function useVowelTracking(stream: MediaStream | null, target: VowelTarget
   const hold = useRef({ sec: 0, lastInMs: -Infinity, lastMs: 0 });
   const window = useRef({ open: false, inTarget: 0, longest: 0, frames: 0 });
   const lastFrameAt = useRef(0);
+  const subs = useRef(new Set<(f: TrackedFrame) => void>());
 
   // A new target resets the hold; a hold on /i/ says nothing about /u/.
   useEffect(() => {
@@ -52,6 +53,13 @@ export function useVowelTracking(stream: MediaStream | null, target: VowelTarget
 
   const onFrame = useCallback((frame: TrackedFrame) => {
     lastFrameAt.current = performance.now();
+    subs.current.forEach((fn) => {
+      try {
+        fn(frame);
+      } catch {
+        /* subscriber errors never break tracking */
+      }
+    });
     const now = frame.timestampMs;
     const h = hold.current;
     const dt = h.lastMs ? Math.min(100, Math.max(0, now - h.lastMs)) / 1000 : 0;
@@ -118,6 +126,14 @@ export function useVowelTracking(stream: MediaStream | null, target: VowelTarget
     };
   }, [stream, onFrame]);
 
+  /** Per-frame subscription for recorders; frames arrive at the engine's rate, outside React state. */
+  const subscribe = useCallback((fn: (f: TrackedFrame) => void) => {
+    subs.current.add(fn);
+    return () => {
+      subs.current.delete(fn);
+    };
+  }, []);
+
   const beginWindow = useCallback(() => {
     window.current = { open: true, inTarget: 0, longest: 0, frames: 0 };
   }, []);
@@ -133,7 +149,7 @@ export function useVowelTracking(stream: MediaStream | null, target: VowelTarget
     };
   }, []);
 
-  return { ...state, tracking: state.status === 'tracking', beginWindow, endWindow };
+  return { ...state, tracking: state.status === 'tracking', subscribe, beginWindow, endWindow };
 }
 
 export type VowelTracking = ReturnType<typeof useVowelTracking>;

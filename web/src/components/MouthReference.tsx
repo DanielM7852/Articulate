@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { MouthCueId, MouthDemo, MouthView } from '@mouth-demo/src/mouth-demo.js';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import type { MouthCueId, MouthDemo, MouthView, SpeakOptions, SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
 import avatarUrl from '@mouth-demo/public/avatars/brunette.glb?url';
 import type { SoundId } from '../state/types';
 
@@ -11,7 +11,7 @@ import type { SoundId } from '../state/types';
  */
 export type { MouthView };
 
-const CUE_FOR_SOUND: Record<SoundId, MouthCueId> = {
+export const CUE_FOR_SOUND: Record<SoundId, MouthCueId> = {
   i: 'spread-lips',
   u: 'round-lips',
   a: 'open-jaw',
@@ -19,10 +19,43 @@ const CUE_FOR_SOUND: Record<SoundId, MouthCueId> = {
 
 type LoadState = 'loading' | 'ready' | 'error';
 
-export function MouthReference({ sound, view, slow }: { sound: SoundId; view: MouthView; slow: boolean }) {
+export interface MouthReferenceHandle {
+  readonly ready: boolean;
+  setView(v: MouthView): Promise<void>;
+  showCue(id: string): void;
+  stop(): void;
+  speak(opts: SpeakOptions): SpeechHandle | null;
+}
+
+export const MouthReference = forwardRef<MouthReferenceHandle, { sound: SoundId; view: MouthView; slow: boolean }>(function MouthReference(
+  { sound, view, slow },
+  ref,
+) {
   const hostRef = useRef<HTMLDivElement>(null);
   const demoRef = useRef<MouthDemo | null>(null);
   const [state, setState] = useState<LoadState>('loading');
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      get ready() {
+        return demoRef.current !== null;
+      },
+      async setView(v) {
+        await demoRef.current?.setView(v);
+      },
+      showCue(id) {
+        demoRef.current?.showCue(id as MouthCueId);
+      },
+      stop() {
+        demoRef.current?.stop();
+      },
+      speak(opts) {
+        return demoRef.current?.speak(opts) ?? null;
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const host = hostRef.current;
@@ -80,4 +113,4 @@ export function MouthReference({ sound, view, slow }: { sound: SoundId; view: Mo
       </div>
     </div>
   );
-}
+});

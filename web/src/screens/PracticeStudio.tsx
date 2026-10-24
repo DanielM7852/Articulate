@@ -4,7 +4,14 @@ import { CheckCircle2, Mic, Play, ScanFace, Snail, Square, TriangleAlert, Video,
 import { OnboardingFrame, Segmented, StepHeading, Switch } from '../components/Onboarding';
 import { AmplitudeMeter, CameraTile, LESSON_STEPS } from '../components/practice';
 import { VowelGraph } from '../components/VowelGraph';
-import { MouthReference, type MouthView } from '../components/MouthReference';
+import { MouthReference, type MouthReferenceHandle, type MouthView } from '../components/MouthReference';
+import { TeacherCaptions } from '../components/TeacherCaptions';
+import { unlockTeacherAudio } from '../audio/teacher';
+import { useLipTracking } from '../vision/useLipTracking';
+import { AttemptRecorder } from '../live/attemptRecorder';
+import { offlineSink } from '../live/metricSink';
+import { profileIdFor, requestLiveCoach, type LiveCoachResponse } from '../live/liveCoach';
+import { useCoachSequence } from '../live/useCoachSequence';
 import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
 import { useSpeech } from '../audio/useSpeech';
 import { useVowelTracking, type TrackingStatus } from '../audio/useVowelTracking';
@@ -75,7 +82,17 @@ export default function PracticeStudio() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration, captions, learnerName } = useAppState();
+  const profileId = profileIdFor(learnerName);
+  const [liveResp, setLiveResp] = useState<LiveCoachResponse | null>(null);
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const lip = useLipTracking(videoEl, camera);
+  const mouthRef = useRef<MouthReferenceHandle | null>(null);
+  const recorder = useRef<AttemptRecorder | null>(null);
+  if (!recorder.current) recorder.current = new AttemptRecorder(offlineSink);
+  const attemptIdRef = useRef<string>('');
+  const runId = useRef(0);
+  const coachAbort = useRef<AbortController | null>(null);
   const [phase, setPhase] = useState<Phase>('ready');
   const [current, setCurrent] = useState<Attempt | null>(null);
   const [coach, setCoach] = useState<CoachResponse | null>(null);
@@ -92,6 +109,25 @@ export default function PracticeStudio() {
 
   // Live F1/F2 on the same microphone stream; it runs whenever the mic is open.
   const tracking = useVowelTracking(mic.stream, TARGETS[plan.sound]);
+
+  const seq = useCoachSequence(
+    () => mouthRef.current,
+    () => setView('guide'),
+  );
+
+  // Real tracker output only: frames are recorded between recorder.begin and recorder.end.
+  useEffect(() => tracking.subscribe((f) => recorder.current?.pushAudio(f)), [tracking.subscribe]);
+  useEffect(() => lip.subscribe((f) => recorder.current?.pushVideo(f)), [lip.subscribe]);
+
+  // Leaving the screen cancels speech, resets the demo and abandons any in-flight request.
+  useEffect(
+    () => () => {
+      runId.current++;
+      coachAbort.current?.abort();
+      recorder.current?.discard();
+    },
+    [],
+  );
 
   const s = SOUNDS[plan.sound];
   const history = useMemo(() => attemptsFor(attempts, plan.sound), [attempts, plan.sound]);
@@ -110,29 +146,49 @@ export default function PracticeStudio() {
   }, [recordingUrl]);
 
   function resetForSound() {
+    runId.current++;
+    coachAbort.current?.abort();
+    recorder.current?.discard();
+    seq.cancel();
     setPhase('ready');
     setCurrent(null);
     setCoach(null);
+    setLiveResp(null);
   }
 
   async function startRecording() {
+    void unlockTeacherAudio(); // must run inside the click gesture
+    runId.current++;
+    coachAbort.current?.abort();
+    seq.cancel(); // cancels teacher speech, lip sync and cue; returns the avatar to front view
     speech.stop(); // playback must stop before the learner is recorded
     replayRef.current?.pause();
     setReferencePlaying(false);
     setCoach(null);
+    setLiveResp(null);
+    const attemptId = crypto.randomUUID();
+    attemptIdRef.current = attemptId;
+    await recorder.current!.begin(attemptId, plan.sound);
     const ok = await mic.beginRecording();
-    if (!ok) return;
+    if (!ok) {
+      recorder.current!.discard();
+      return;
+    }
     tracking.beginWindow();
+    lip.beginWindow();
     setPhase('recording');
   }
 
   async function stopRecording() {
+    const myRun = ++runId.current;
     const target = tracking.endWindow();
+    lip.endWindow();
+    const recorded = recorder.current!.end(); // stops frame capture now; resolves after the final flush
     const summary = await mic.endRecording();
     if (recordingUrl) URL.revokeObjectURL(recordingUrl);
     setRecordingUrl(summary.recordingUrl);
     const attempt: Attempt = {
-      attemptId: crypto.randomUUID(),
+      attemptId: attemptIdRef.current || crypto.randomUUID(),
       sound: plan.sound,
       kind: 'guided',
       assistance: plan.assistance,
@@ -149,10 +205,61 @@ export default function PracticeStudio() {
     addAttempt(attempt);
     setCurrent(attempt);
     setPhase('analyzing');
+
+    // Live coaching first; any failure falls back to the existing local/agent path.
+    let live: LiveCoachResponse | null = null;
+    try {
+      const rec = await recorded;
+      const ctl = new AbortController();
+      coachAbort.current = ctl;
+      live = await requestLiveCoach(
+        {
+          attemptId: attempt.attemptId,
+          profileId,
+          sound: attempt.sound,
+          metricsSource: rec.streamed ? 'spacetimedb' : 'inline',
+          clientSummary: {
+            durationSec: attempt.durationSec,
+            usableVoicedSec: attempt.usableVoicedSec,
+            timeInTargetSec: attempt.timeInTargetSec,
+            longestHoldSec: attempt.longestHoldSec,
+            quality: attempt.quality,
+            qualityReason: attempt.qualityReason ?? null,
+          },
+          frames: rec.streamed ? null : { audio: rec.audio, video: rec.video },
+        },
+        ctl.signal,
+      );
+    } catch {
+      live = null;
+    }
+    if (runId.current !== myRun) return; // a newer attempt or leaving the screen superseded this one
+
+    if (live) {
+      setLiveResp(live);
+      setCoach({
+        attemptId: live.attemptId,
+        source: live.source === 'agent' ? 'agent' : 'local',
+        observation: live.observation,
+        nextCue: '',
+        nextAction: live.nextAction === 'next_sound' ? 'next-context' : live.nextAction === 'rest' ? 'simplify' : 'repeat',
+        evidence: live.evidence.map((e) => `${e.field}: ${String(e.value)}`),
+      });
+      setPhase('feedback');
+      void seq.run(live, { narration });
+      return;
+    }
+
     const response = await analyzeAttempt(attempt, history);
+    if (runId.current !== myRun) return;
     setCoach(response);
     setPhase('feedback');
     if (narration) speech.speak(`${response.observation} ${response.nextCue}`);
+  }
+
+  function readAloud() {
+    if (liveResp) void seq.run(liveResp, { narration: true });
+    else if (coach) speech.speak(`${coach.observation} ${coach.nextCue}`, { force: true });
   }
 
   function playReference() {
@@ -206,7 +313,7 @@ export default function PracticeStudio() {
 
   const guideBody = (
     <div className="lp-tile-body">
-      <MouthReference sound={plan.sound} view={refView} slow={slow} />
+      <MouthReference ref={mouthRef} sound={plan.sound} view={refView} slow={slow} />
       <div className="lp-overlay lp-overlay--bl">
         <p className="ob-label navy">{s.tongue}</p>
         <p className="ob-fine">{s.lips}</p>
@@ -238,7 +345,7 @@ export default function PracticeStudio() {
     <div className={`lp-tile-body lp-mirror ${camera ? 'is-on' : ''}`}>
       {camera ? (
         <>
-          <CameraTile enabled />
+          <CameraTile enabled onVideoElement={setVideoEl} lipStatus={lip.status} />
           <span className="lp-overlay lp-overlay--bl lp-chip">Visible lips only · not saved</span>
           <button type="button" className="lp-overlay lp-overlay--tr ob-pill" onClick={() => setCamera(false)}>
             <VideoOff size={16} aria-hidden="true" />
@@ -305,7 +412,8 @@ export default function PracticeStudio() {
               if (id === 'ready') updatePlan({ assistance: 'target-only' });
             }}
             onReplay={recordingUrl ? replayRecording : undefined}
-            onReadAloud={() => coach && speech.speak(`${coach.observation} ${coach.nextCue}`, { force: true })}
+            onReadAloud={readAloud}
+            captionsNode={captions && liveResp ? <TeacherCaptions speech={seq.speech} text={liveResp.caption} /> : null}
             onTryAgain={startRecording}
             onLessHelp={() => navigate('/summary')}
           />
@@ -364,7 +472,19 @@ export default function PracticeStudio() {
           <div className="lp-tile-head">
             <Segmented className="lp-views" label="View" options={viewOptions} value={sideView} onChange={setView} />
           </div>
-          {sideView === 'graph' ? graphBody : sideView === 'guide' ? guideBody : mirrorBody}
+          {sideView === 'graph' ? graphBody : sideView === 'guide' ? guideBody : null}
+          {/* The mirror stays mounted (off-screen when not shown) so the camera and lip tracking keep running
+              while the mouth guide is up for the teacher sequence. */}
+          <div
+            style={
+              sideView === 'mirror'
+                ? { display: 'contents' }
+                : { position: 'fixed', left: -9999, top: 0, width: 320, height: 240, opacity: 0, pointerEvents: 'none' }
+            }
+            aria-hidden={sideView === 'mirror' ? undefined : true}
+          >
+            {mirrorBody}
+          </div>
           {compact ? (
             <div className="lp-tile-foot">
               <AmplitudeMeter levels={mic.levels} active={recording} />
@@ -393,7 +513,9 @@ function ResultSheet({
   onReadAloud,
   onTryAgain,
   onLessHelp,
+  captionsNode,
 }: {
+  captionsNode?: React.ReactNode;
   attempt: Attempt;
   coach: CoachResponse | null;
   leaving: boolean;
@@ -433,7 +555,8 @@ function ResultSheet({
           {coach ? (
             <>
               <p>{coach.observation}</p>
-              <p className="lp-cue">{coach.nextCue}</p>
+              {coach.nextCue && <p className="lp-cue">{coach.nextCue}</p>}
+              {captionsNode}
             </>
           ) : (
             <p className="ob-fine">Reading your attempt…</p>
