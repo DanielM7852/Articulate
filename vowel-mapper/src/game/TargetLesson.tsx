@@ -14,7 +14,7 @@ import './targets.css';
 const RECENT_TRACE_MS = 3000;
 const REF = { ee: 'iy', ah: 'ah' } as const;
 const SOUND = { ee: 'eee', ah: 'ah' } as const;
-const GROUPS: [VoiceGroup, string][] = [['men', 'Man'], ['women', 'Woman'], ['boys', 'Boy'], ['girls', 'Girl']];
+export const GROUPS: [VoiceGroup, string][] = [['men', 'Man'], ['women', 'Woman'], ['boys', 'Boy'], ['girls', 'Girl']];
 
 type Stage =
   | { kind: 'intro' }
@@ -209,12 +209,12 @@ export function TargetLesson({ session, frames, point, tracking, lessonPicker, s
   );
 }
 
-function ago(ms: number) {
+export function ago(ms: number) {
   const minutes = Math.round((Date.now() - ms) / 60000);
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
 }
 
-function CheckPanel({ prompts, state, micOn, requesting, onCancel }: { prompts: readonly CheckPrompt[]; state: VoiceCheckState | null; micOn: boolean; requesting: boolean; onCancel: () => void }) {
+export function CheckPanel({ prompts, state, micOn, requesting, onCancel }: { prompts: readonly CheckPrompt[]; state: VoiceCheckState | null; micOn: boolean; requesting: boolean; onCancel: () => void }) {
   const index = state && state.kind !== 'done' ? state.index : 0;
   const prompt = prompts[index];
   const collecting = state?.kind === 'collecting' ? state : null;

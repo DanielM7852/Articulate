@@ -7,6 +7,7 @@ import { WarmUp, type CalibrationProblem, type WarmUpState } from './calibration
 import { GameOverlay } from './GameOverlay';
 import { LESSONS, calibrationKey, lessonAvailability, saveCalibration, zonesForLesson, type GameCalibrations } from './lessons';
 import { GameRun, type GameOptions, type GameSnapshot, type NoteState, type Outcome } from './run';
+import { HeadLesson } from './HeadLesson';
 import { TargetLesson } from './TargetLesson';
 import type { VoiceProfile } from './targets';
 import { VOWEL_LABEL, VOWELS, type VowelId } from './zones';
@@ -43,21 +44,24 @@ const sound = (vowel: keyof typeof VOWEL_LABEL) => VOWEL_LABEL[vowel].sound;
 const RECENT_TRACE_MS = 3000;
 const BASE_WARMUP: WarmUpSpec = { key: 'base', vowels: VOWELS };
 
-/** The default lesson: voice-sized reference targets. Every other lesson uses zones set from the player's own voice. */
+/** The default lesson: say "head" like one model voice. The target lesson uses voice-sized reference targets;
+ * every other lesson uses zones set from the player's own voice. */
+const HEAD_LESSON = 'head';
 const TARGET_LESSON = 'targets';
 
 export function GameMode(props: GameModeProps) {
-  const [lessonId, setLessonId] = useState(TARGET_LESSON);
+  const [lessonId, setLessonId] = useState(HEAD_LESSON);
   const picker = <LessonPicker value={lessonId} onChange={setLessonId} />;
-  return lessonId === TARGET_LESSON
-    ? <TargetLesson session={props.session} frames={props.frames} point={props.point} tracking={props.tracking} lessonPicker={picker}
-      saved={props.voiceProfile} onChecked={props.setVoiceProfile} />
+  const shared = { session: props.session, frames: props.frames, point: props.point, tracking: props.tracking, lessonPicker: picker, saved: props.voiceProfile, onChecked: props.setVoiceProfile };
+  return lessonId === HEAD_LESSON ? <HeadLesson {...shared} />
+    : lessonId === TARGET_LESSON ? <TargetLesson {...shared} />
     : <RouteGame {...props} lessonId={lessonId} lessonPicker={picker} />;
 }
 
 function LessonPicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
   return (
     <label className="game-lesson">Lesson<select aria-label="Lesson" value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value={HEAD_LESSON}>Say “head” · model voice</option>
       <option value={TARGET_LESSON}>Reach the targets · eee and ah</option>
       {LESSONS.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
     </select></label>

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
-import { vowelSignal } from '../tests/signals';
+import { VOICE_SIZE_V1 } from '../src/reference/data';
+import { HEAD_MODEL_V1 } from '../src/reference/headModel';
+import { glideSignal, vowelSignal } from '../tests/signals';
 
 // Same synthetic vowels as the file-based fixture in setup.ts, but switchable on cue: the warm-up
 // prompts and self-paced notes decide when each sound starts, so a fixed looping file cannot line up.
@@ -13,8 +15,20 @@ const clips = Object.fromEntries(Object.entries({ ...VOWELS, ...SCALED }).map(([
   const pcm = Int16Array.from(samples, (value) => Math.round(value * 32767));
   return [name, Buffer.from(pcm.buffer).toString('base64')];
 }));
+// A learner with the model speaker's voice size: an "uh" that, with the model's voice group, gives the model's own factor.
+const fromUh = 2 * HEAD_MODEL_V1.factor - VOICE_SIZE_V1.groupFactor[HEAD_MODEL_V1.group];
+clips.mUh = encode(vowelSignal({ formants: [Math.exp(VOICE_SIZE_V1.uh[0] + fromUh), Math.exp(VOICE_SIZE_V1.uh[1] + fromUh), 2500], sampleRate: 48000, seconds: 0.5 }));
+// Said once, not looped: the model's measured path as a 1.2 s glide, log-linear between its points.
+clips.head = encode(glideSignal({ seconds: 1.2, formants: (u) => {
+  const path = HEAD_MODEL_V1.path, at = u * (path.length - 1), i = Math.min(path.length - 2, Math.floor(at)), w = at - i;
+  return [Math.exp(path[i][0] + w * (path[i + 1][0] - path[i][0])), Math.exp(path[i][1] + w * (path[i + 1][1] - path[i][1])), 2700];
+} }));
+function encode(samples: Float32Array) {
+  return Buffer.from(Int16Array.from(samples, (value) => Math.round(value * 32767)).buffer).toString('base64');
+}
+const GROUP_LABEL = { men: 'Man', women: 'Woman', boys: 'Boy', girls: 'Girl' } as const;
 
-type Sound = keyof typeof VOWELS | keyof typeof SCALED | 'noise' | null;
+type Sound = keyof typeof VOWELS | keyof typeof SCALED | 'mUh' | 'head' | 'noise' | null;
 
 async function installSyntheticMicrophone(page: Page) {
   await page.addInitScript((encoded: Record<string, string>) => {
@@ -42,7 +56,7 @@ async function installSyntheticMicrophone(page: Page) {
         if (!sound) return;
         current = context.createBufferSource();
         current.buffer = buffers[sound];
-        current.loop = true;
+        current.loop = sound !== 'head';
         current.connect(destination);
         current.start();
       };
@@ -317,6 +331,7 @@ test('target lesson: noisy-room voice check, voice-sized rings, ee shown but not
   page.on('request', (request) => { if (!request.url().startsWith(baseURL!) && !/^(data|blob):/.test(request.url())) offDevice.push(request.url()); });
   await page.goto('/');
   await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await page.getByLabel('Lesson', { exact: true }).selectOption('targets');
   const status = page.getByTestId('game-status');
   await expect(status).toHaveText('Size the targets to your voice');
   await expect(page.getByText('Same place as last time?')).toHaveCount(0);
@@ -382,6 +397,7 @@ test('target lesson: a learner who cannot say the check words holds "uh" and pic
   await installSyntheticMicrophone(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await page.getByLabel('Lesson', { exact: true }).selectOption('targets');
   const status = page.getByTestId('game-status');
   await page.getByRole('button', { name: 'Not yet' }).click();
   await expect(page.getByRole('button', { name: 'Start voice check' })).toBeDisabled();
@@ -399,4 +415,57 @@ test('target lesson: a learner who cannot say the check words holds "uh" and pic
   await expect(page.getByTestId('approximate-note')).toBeVisible();
   await expect(page.getByTestId('target-caption')).toContainText('Targets sized to your voice (approximate)');
   for (const sound of ['ee', 'ah']) await expect(page.getByTestId(`target-${sound}`).locator('polygon')).toHaveCount(3);
+});
+
+test('say head: "uh" voice check, model path on the map, a far attempt, then three close ones match the model voice', async ({ page, baseURL }) => {
+  test.setTimeout(90_000);
+  await installSyntheticMicrophone(page);
+  const offDevice: string[] = [];
+  page.on('request', (request) => { if (!request.url().startsWith(baseURL!) && !/^(data|blob):/.test(request.url())) offDevice.push(request.url()); });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  const status = page.getByTestId('game-status');
+  await expect(status).toHaveText('Size the model to your voice');
+  await expect(page.getByRole('button', { name: 'Start voice check' })).toBeDisabled();
+  await page.getByRole('button', { name: GROUP_LABEL[HEAD_MODEL_V1.group], exact: true }).click();
+  await page.getByRole('button', { name: 'Start voice check' }).click();
+  await expect(status).toHaveText(/^Say “uh”/, { timeout: 15000 });
+  await say(page, 'mUh');
+  await expect(status).toHaveText('Say “head” like the model voice', { timeout: 10000 });
+  await say(page, null);
+  await expect(page.getByTestId('head-model-path')).toBeVisible();
+  await expect(page.getByTestId('head-overlay').locator('.hd-zone polygon')).toHaveCount(HEAD_MODEL_V1.path.length);
+  await expect(page.getByTestId('head-caption')).toContainText('Sized to your voice (approximate)');
+  await page.screenshot({ path: `${screenshotDir}/head-ready.png`, fullPage: true });
+
+  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await expect(status).toHaveText('Say “heeead”, slowly');
+  const attempt = async (i: number, sound: Sound, ms: number) => {
+    await expect(status).not.toHaveAttribute('data-phase', /hearing|resting/, { timeout: 10000 });
+    await say(page, sound);
+    await page.waitForTimeout(ms);
+    await say(page, null);
+    await expect(page.getByTestId(`attempt-${i}`)).toHaveAttribute('data-outcome', 'measured', { timeout: 10000 });
+  };
+  // "ah" is nowhere near the model's "head".
+  await attempt(0, 'ah', 1200);
+  await expect(page.getByTestId('attempt-0')).toHaveAttribute('data-matched', 'false');
+  await expect(status).toHaveText('Outside the close zone');
+  await expect(page.getByTestId('head-last-path')).toBeVisible();
+  await page.screenshot({ path: `${screenshotDir}/head-far.png`, fullPage: true });
+
+  // Watching the model draws a dot along its path and pauses scoring while it plays.
+  await page.getByRole('button', { name: /^Watch/ }).click();
+  await expect(page.getByTestId('head-overlay').locator('.hd-watch')).toHaveCount(1);
+
+  for (const i of [1, 2, 3]) {
+    await attempt(i, 'head', 1500);
+    await expect(page.getByTestId(`attempt-${i}`)).toHaveAttribute('data-matched', 'true');
+  }
+  await expect(status).toHaveText('Matched the model voice: 3 in a row');
+  await expect(page.getByTestId('head-streak')).toHaveText('3 / 3 in a row');
+  await page.screenshot({ path: `${screenshotDir}/head-matched.png`, fullPage: true });
+
+  expect(await page.evaluate(() => window.localStorage.length)).toBe(0);
+  expect(offDevice).toEqual([]);
 });

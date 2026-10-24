@@ -118,6 +118,14 @@ describe('voice check without the check words', () => {
     expect(far.profile.factor).toBeCloseTo(VOICE_SIZE_V1.groupFactor.men / 2, 6);
   });
 
+  it('can skip the starting ee and ah when a lesson only needs the voice size', () => {
+    const check = new VoiceCheck('quiet', { kind: 'uh', group: 'men' }, { starts: false });
+    expect(check.prompts.map((p) => p.word)).toEqual(['uh']);
+    const state = runCheck(check, () => uh(1));
+    if (state.kind !== 'done' || !state.ok) throw new Error('check failed');
+    expect(state.profile).toMatchObject({ sizing: 'approximate', start: {} });
+  });
+
   it('fails when the "uh" is not heard', () => {
     expect(runCheck(new VoiceCheck('quiet', { kind: 'uh', group: 'girls' }), (i) => i === 0 ? null : at('ah'))).toMatchObject({ kind: 'done', ok: false, missed: ['uh'] });
   });

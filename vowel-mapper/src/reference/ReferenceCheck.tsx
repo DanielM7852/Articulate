@@ -125,7 +125,7 @@ export function ReferenceCheck({ session, frames, point, tracking }: Props) {
       <div className="rc-save" aria-label="Save audio for analysis">
         <p>Save 3 s of audio for analysis. Press, then hold the sound until the button resets. The file goes to your Downloads folder only.</p>
         <div className="controls">
-          {(['eee', 'ah'] as const).map((sound) => <button key={sound} type="button" className="button-secondary" disabled={!!saving || !!recording}
+          {(['eee', 'ah', 'head', 'uh'] as const).map((sound) => <button key={sound} type="button" className="button-secondary" disabled={!!saving || !!recording}
             onClick={() => void saveClip(sound)}>{saving === sound ? 'Hold it…' : `Save 3 s · ${sound}`}</button>)}
         </div>
       </div>

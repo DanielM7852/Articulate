@@ -58,6 +58,12 @@ export const UH_PROMPTS: readonly CheckPrompt[] = [{ word: 'uh', ref: 'uh', say:
 export type VoiceGroup = keyof typeof VOICE_SIZE_V1.groupFactor;
 export type Sizing = { kind: 'words' } | { kind: 'uh'; group: VoiceGroup };
 
+/** Amendment 3: the mean of the held "uh" factor and the chosen group's mean factor. */
+export function uhFactor(uh: Formants, group: VoiceGroup) {
+  const fromUh = (Math.log(uh.f1) - VOICE_SIZE_V1.uh[0] + Math.log(uh.f2) - VOICE_SIZE_V1.uh[1]) / 2;
+  return (fromUh + VOICE_SIZE_V1.groupFactor[group]) / 2;
+}
+
 export type VoiceCheckState =
   | { kind: 'rest'; index: number; untilMs: number }
   | { kind: 'collecting'; index: number; startedAtMs: number; timeoutAtMs: number; collected: number; target: number }
@@ -71,10 +77,12 @@ export interface VoiceCheckOptions {
   /** A prompt ends after this many points (about 1 s of tracked sound) or the timeout. */
   targetPoints: number;
   timeoutMs: number;
+  /** Also record the starting ee and ah. A lesson that only needs the voice size can skip them. */
+  starts: boolean;
   now: () => number;
 }
 
-const CHECK_DEFAULTS: VoiceCheckOptions = { restMs: 1200, settleMs: 300, targetPoints: 40, timeoutMs: 6000, now: () => Date.now() };
+const CHECK_DEFAULTS: VoiceCheckOptions = { restMs: 1200, settleMs: 300, targetPoints: 40, timeoutMs: 6000, starts: true, now: () => Date.now() };
 
 /** The 10-second voice check. Frame-driven like the warm-up, so it is deterministic to test. */
 export class VoiceCheck {
@@ -85,7 +93,7 @@ export class VoiceCheck {
 
   constructor(readonly place: Place, readonly sizing: Sizing = { kind: 'words' }, options: Partial<VoiceCheckOptions> = {}) {
     this.options = { ...CHECK_DEFAULTS, ...options };
-    this.prompts = sizing.kind === 'words' ? CHECK_PROMPTS : UH_PROMPTS;
+    this.prompts = (sizing.kind === 'words' ? CHECK_PROMPTS : UH_PROMPTS).filter((prompt) => this.options.starts || !prompt.start);
     this.points = this.prompts.map(() => []);
   }
 
@@ -117,12 +125,7 @@ export class VoiceCheck {
     let factor: number;
     if (this.sizing.kind === 'words') {
       factor = factorFrom(calibration.map(({ prompt, value }) => ({ vowel: prompt.ref as CalibrationVowel, value: value! })))!;
-    } else {
-      // Amendment 3: the mean of the "uh" factor and the group's mean factor.
-      const uh = calibration[0].value!;
-      const fromUh = (Math.log(uh.f1) - VOICE_SIZE_V1.uh[0] + Math.log(uh.f2) - VOICE_SIZE_V1.uh[1]) / 2;
-      factor = (fromUh + VOICE_SIZE_V1.groupFactor[this.sizing.group]) / 2;
-    }
+    } else factor = uhFactor(calibration[0].value!, this.sizing.group);
     const start: VoiceProfile['start'] = {};
     for (const { prompt, value } of values) if (prompt.start && value) start[prompt.start] = { f1: value.f1, f2: value.f2 };
     const sizing = this.sizing.kind === 'words' ? 'words' : 'approximate';

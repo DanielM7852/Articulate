@@ -14,3 +14,8 @@ export const VOICE_SIZE_V1 = {
   uh: [6.56143, 7.23970],
   groupFactor: { men: -0.13793, women: 0.03970, boys: 0.07655, girls: 0.11792 },
 } as const;
+
+/** /ɛ/ "head" radius (2 SD, natural-log Hz), from `fit()` in experiments/target-scaling/check_refinement.py on the same
+ * tracker-measured tokens as REFERENCE_V1, with "eh" added to TARGETS (experiments/target-scaling/eh_radius.py).
+ * The same run reproduces the iy / ah / uw radii above exactly. */
+export const EH_RADIUS_V1 = [0.14225, 0.13680] as const;
