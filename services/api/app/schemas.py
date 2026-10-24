@@ -52,6 +52,73 @@ class Session(Model):
     state: State = "ready"
 
 
+class VisionMetrics(Model):
+    timestamp_ms: float = Field(ge=0)
+    valid: bool
+    quality_flags: list[str] = Field(default_factory=list, max_length=10)
+    lip_opening: float | None = Field(default=None, ge=0, le=2)
+    outer_lip_height: float | None = Field(default=None, ge=0, le=2)
+    vermilion_flare: float | None = Field(default=None, ge=0, le=2)
+    lip_width: float | None = Field(default=None, ge=0, le=3)
+    lip_aspect_ratio: float | None = Field(default=None, ge=0, le=3)
+    lip_protrusion_z: float | None = Field(default=None, ge=-1, le=1)
+    jaw_drop: float | None = Field(default=None, ge=0, le=3)
+    mouth_symmetry: float | None = Field(default=None, ge=0, le=1)
+    inner_mouth_area: float | None = Field(default=None, ge=0, le=2)
+    rounding_score: float | None = Field(default=None, ge=0, le=1)
+    spread_score: float | None = Field(default=None, ge=0, le=1)
+    openness_score: float | None = Field(default=None, ge=0, le=1)
+    blendshapes: dict[str, float] = Field(default_factory=dict)
+    pitch_deg: float | None = Field(default=None, ge=-90, le=90)
+    yaw_deg: float | None = Field(default=None, ge=-90, le=90)
+    roll_deg: float | None = Field(default=None, ge=-90, le=90)
+
+    @model_validator(mode="after")
+    def validate_vision(self):
+        if not self.valid and self.lip_opening is not None:
+            raise ValueError("invalid vision frames must use null lip_opening")
+        if self.valid and self.lip_opening is None:
+            raise ValueError("valid vision frames require lip_opening")
+        return self
+
+
+class VisionKeyframe(Model):
+    label: Literal["onset", "peak_nucleus", "sustained_hold"]
+    timestamp_ms: float = Field(ge=0)
+    mime_type: Literal["image/jpeg", "image/webp"] = "image/jpeg"
+    data_base64: str = Field(min_length=1, max_length=150000)
+    metrics: VisionMetrics | None = None
+
+
+class VisionSummary(Model):
+    usable_frames: int = Field(default=0, ge=0)
+    total_frames: int = Field(default=0, ge=0)
+    usable_fraction: float = Field(default=0, ge=0, le=1)
+    quality_flags: list[str] = Field(default_factory=list)
+    lip_opening_mean: float | None = None
+    lip_opening_max: float | None = None
+    outer_lip_height_mean: float | None = None
+    vermilion_flare_mean: float | None = None
+    lip_width_mean: float | None = None
+    lip_width_min: float | None = None
+    lip_aspect_ratio_mean: float | None = None
+    lip_protrusion_z_mean: float | None = None
+    jaw_drop_mean: float | None = None
+    mouth_symmetry_mean: float | None = None
+    inner_mouth_area_mean: float | None = None
+    rounding_score_mean: float | None = None
+    rounding_score_max: float | None = None
+    spread_score_mean: float | None = None
+    spread_score_max: float | None = None
+    openness_score_mean: float | None = None
+    openness_score_max: float | None = None
+    posture_stability_std: float | None = None
+    voiced_visual_alignment: float | None = None
+    blendshapes_mean: dict[str, float] = Field(default_factory=dict)
+    head_pose_mean: dict[str, float] = Field(default_factory=dict)
+    keyframes_count: int = Field(default=0, ge=0, le=4)
+
+
 class FeatureFrame(Model):
     sample_offset: int = Field(ge=0)
     timestamp_ms: float = Field(ge=0)
@@ -63,6 +130,14 @@ class FeatureFrame(Model):
     quality_flags: list[str] = Field(default_factory=list, max_length=10)
     source: Literal["microphone", "synthetic"]
     lip_opening: float | None = Field(default=None, ge=0, le=2)
+    lip_width: float | None = Field(default=None, ge=0, le=3)
+    lip_aspect_ratio: float | None = Field(default=None, ge=0, le=3)
+    lip_protrusion_z: float | None = Field(default=None, ge=-1, le=1)
+    jaw_drop: float | None = Field(default=None, ge=0, le=3)
+    rounding_score: float | None = Field(default=None, ge=0, le=1)
+    spread_score: float | None = Field(default=None, ge=0, le=1)
+    openness_score: float | None = Field(default=None, ge=0, le=1)
+    vision: VisionMetrics | None = None
 
     @model_validator(mode="after")
     def measurements(self):
@@ -86,6 +161,11 @@ class AttemptSummary(Model):
     f2_mean: float | None = None
     target_distance: float | None = None
     lip_opening_mean: float | None = None
+    lip_width_mean: float | None = None
+    lip_rounding_mean: float | None = None
+    lip_spread_mean: float | None = None
+    jaw_drop_mean: float | None = None
+    vision_summary: VisionSummary | None = None
     quality_flags: list[str]
     evidence_fields: list[str]
     source: Literal["microphone", "synthetic"]
@@ -110,6 +190,7 @@ class CoachingDecision(Model):
     attempt_id: UUID
     generation_id: UUID
     observation: str = Field(max_length=250)
+    visual_observation: str | None = Field(default=None, max_length=250)
     evidence_fields: list[str]
     cue_id: str | None
     cue_version: int | None
@@ -137,6 +218,7 @@ class AudioManifest(Model):
 EventType = Literal[
     "session.state",
     "features.frame",
+    "vision.frame",
     "attempt.summary",
     "coach.decision",
     "audio.start",
@@ -177,6 +259,13 @@ class Start(Model):
 class End(Model):
     type: Literal["attempt.end"]
     final_sample: int = Field(ge=0)
+    vision_frames: list[VisionMetrics] = Field(default_factory=list, max_length=300)
+    keyframes: list[VisionKeyframe] = Field(default_factory=list, max_length=4)
+
+
+class VisionFrameCommand(Model):
+    type: Literal["vision.frame"]
+    frame: VisionMetrics
 
 
 class Control(Model):
@@ -188,7 +277,9 @@ class Playback(Model):
     generation_id: UUID
 
 
-CommandBody = Annotated[Configure | Start | End | Control | Playback, Field(discriminator="type")]
+CommandBody = Annotated[
+    Configure | Start | End | VisionFrameCommand | Control | Playback, Field(discriminator="type")
+]
 
 
 class Command(Model):

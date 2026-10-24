@@ -9,6 +9,15 @@
     "Session": {
       "$ref": "#/definitions/Session"
     },
+    "VisionMetrics": {
+      "$ref": "#/definitions/VisionMetrics"
+    },
+    "VisionKeyframe": {
+      "$ref": "#/definitions/VisionKeyframe"
+    },
+    "VisionSummary": {
+      "$ref": "#/definitions/VisionSummary"
+    },
     "FeatureFrame": {
       "$ref": "#/definitions/FeatureFrame"
     },
@@ -46,6 +55,9 @@
   "required": [
     "Target",
     "Session",
+    "VisionMetrics",
+    "VisionKeyframe",
+    "VisionSummary",
     "FeatureFrame",
     "AttemptSummary",
     "Cue",
@@ -211,6 +223,632 @@
       "title": "Session",
       "type": "object"
     },
+    "VisionMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "timestamp_ms": {
+          "minimum": 0,
+          "title": "Timestamp Ms",
+          "type": "number"
+        },
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        },
+        "quality_flags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Quality Flags",
+          "type": "array"
+        },
+        "lip_opening": {
+          "anyOf": [
+            {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Opening"
+        },
+        "outer_lip_height": {
+          "anyOf": [
+            {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outer Lip Height"
+        },
+        "vermilion_flare": {
+          "anyOf": [
+            {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vermilion Flare"
+        },
+        "lip_width": {
+          "anyOf": [
+            {
+              "maximum": 3,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Width"
+        },
+        "lip_aspect_ratio": {
+          "anyOf": [
+            {
+              "maximum": 3,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Aspect Ratio"
+        },
+        "lip_protrusion_z": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": -1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Protrusion Z"
+        },
+        "jaw_drop": {
+          "anyOf": [
+            {
+              "maximum": 3,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Jaw Drop"
+        },
+        "mouth_symmetry": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mouth Symmetry"
+        },
+        "inner_mouth_area": {
+          "anyOf": [
+            {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inner Mouth Area"
+        },
+        "rounding_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rounding Score"
+        },
+        "spread_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spread Score"
+        },
+        "openness_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Openness Score"
+        },
+        "blendshapes": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Blendshapes",
+          "type": "object"
+        },
+        "pitch_deg": {
+          "anyOf": [
+            {
+              "maximum": 90,
+              "minimum": -90,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pitch Deg"
+        },
+        "yaw_deg": {
+          "anyOf": [
+            {
+              "maximum": 90,
+              "minimum": -90,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Yaw Deg"
+        },
+        "roll_deg": {
+          "anyOf": [
+            {
+              "maximum": 90,
+              "minimum": -90,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roll Deg"
+        }
+      },
+      "required": [
+        "timestamp_ms",
+        "valid",
+        "quality_flags",
+        "lip_opening",
+        "outer_lip_height",
+        "vermilion_flare",
+        "lip_width",
+        "lip_aspect_ratio",
+        "lip_protrusion_z",
+        "jaw_drop",
+        "mouth_symmetry",
+        "inner_mouth_area",
+        "rounding_score",
+        "spread_score",
+        "openness_score",
+        "blendshapes",
+        "pitch_deg",
+        "yaw_deg",
+        "roll_deg"
+      ],
+      "title": "VisionMetrics",
+      "type": "object"
+    },
+    "VisionKeyframe": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "enum": [
+            "onset",
+            "peak_nucleus",
+            "sustained_hold"
+          ],
+          "title": "Label",
+          "type": "string"
+        },
+        "timestamp_ms": {
+          "minimum": 0,
+          "title": "Timestamp Ms",
+          "type": "number"
+        },
+        "mime_type": {
+          "default": "image/jpeg",
+          "enum": [
+            "image/jpeg",
+            "image/webp"
+          ],
+          "title": "Mime Type",
+          "type": "string"
+        },
+        "data_base64": {
+          "maxLength": 150000,
+          "minLength": 1,
+          "title": "Data Base64",
+          "type": "string"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VisionMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "label",
+        "timestamp_ms",
+        "mime_type",
+        "data_base64",
+        "metrics"
+      ],
+      "title": "VisionKeyframe",
+      "type": "object"
+    },
+    "VisionSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "usable_frames": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Usable Frames",
+          "type": "integer"
+        },
+        "total_frames": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total Frames",
+          "type": "integer"
+        },
+        "usable_fraction": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Usable Fraction",
+          "type": "number"
+        },
+        "quality_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Quality Flags",
+          "type": "array"
+        },
+        "lip_opening_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Opening Mean"
+        },
+        "lip_opening_max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Opening Max"
+        },
+        "outer_lip_height_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outer Lip Height Mean"
+        },
+        "vermilion_flare_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vermilion Flare Mean"
+        },
+        "lip_width_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Width Mean"
+        },
+        "lip_width_min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Width Min"
+        },
+        "lip_aspect_ratio_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Aspect Ratio Mean"
+        },
+        "lip_protrusion_z_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Protrusion Z Mean"
+        },
+        "jaw_drop_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Jaw Drop Mean"
+        },
+        "mouth_symmetry_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mouth Symmetry Mean"
+        },
+        "inner_mouth_area_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inner Mouth Area Mean"
+        },
+        "rounding_score_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rounding Score Mean"
+        },
+        "rounding_score_max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rounding Score Max"
+        },
+        "spread_score_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spread Score Mean"
+        },
+        "spread_score_max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spread Score Max"
+        },
+        "openness_score_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Openness Score Mean"
+        },
+        "openness_score_max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Openness Score Max"
+        },
+        "posture_stability_std": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Posture Stability Std"
+        },
+        "voiced_visual_alignment": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voiced Visual Alignment"
+        },
+        "blendshapes_mean": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Blendshapes Mean",
+          "type": "object"
+        },
+        "head_pose_mean": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Head Pose Mean",
+          "type": "object"
+        },
+        "keyframes_count": {
+          "default": 0,
+          "maximum": 4,
+          "minimum": 0,
+          "title": "Keyframes Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "usable_frames",
+        "total_frames",
+        "usable_fraction",
+        "quality_flags",
+        "lip_opening_mean",
+        "lip_opening_max",
+        "outer_lip_height_mean",
+        "vermilion_flare_mean",
+        "lip_width_mean",
+        "lip_width_min",
+        "lip_aspect_ratio_mean",
+        "lip_protrusion_z_mean",
+        "jaw_drop_mean",
+        "mouth_symmetry_mean",
+        "inner_mouth_area_mean",
+        "rounding_score_mean",
+        "rounding_score_max",
+        "spread_score_mean",
+        "spread_score_max",
+        "openness_score_mean",
+        "openness_score_max",
+        "posture_stability_std",
+        "voiced_visual_alignment",
+        "blendshapes_mean",
+        "head_pose_mean",
+        "keyframes_count"
+      ],
+      "title": "VisionSummary",
+      "type": "object"
+    },
     "FeatureFrame": {
       "additionalProperties": false,
       "properties": {
@@ -305,6 +943,115 @@
           ],
           "default": null,
           "title": "Lip Opening"
+        },
+        "lip_width": {
+          "anyOf": [
+            {
+              "maximum": 3,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Width"
+        },
+        "lip_aspect_ratio": {
+          "anyOf": [
+            {
+              "maximum": 3,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Aspect Ratio"
+        },
+        "lip_protrusion_z": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": -1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Protrusion Z"
+        },
+        "jaw_drop": {
+          "anyOf": [
+            {
+              "maximum": 3,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Jaw Drop"
+        },
+        "rounding_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rounding Score"
+        },
+        "spread_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spread Score"
+        },
+        "openness_score": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Openness Score"
+        },
+        "vision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VisionMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -317,7 +1064,15 @@
         "valid",
         "quality_flags",
         "source",
-        "lip_opening"
+        "lip_opening",
+        "lip_width",
+        "lip_aspect_ratio",
+        "lip_protrusion_z",
+        "jaw_drop",
+        "rounding_score",
+        "spread_score",
+        "openness_score",
+        "vision"
       ],
       "title": "FeatureFrame",
       "type": "object"
@@ -420,6 +1175,65 @@
           "default": null,
           "title": "Lip Opening Mean"
         },
+        "lip_width_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Width Mean"
+        },
+        "lip_rounding_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Rounding Mean"
+        },
+        "lip_spread_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lip Spread Mean"
+        },
+        "jaw_drop_mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Jaw Drop Mean"
+        },
+        "vision_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VisionSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "quality_flags": {
           "items": {
             "type": "string"
@@ -465,6 +1279,11 @@
         "f2_mean",
         "target_distance",
         "lip_opening_mean",
+        "lip_width_mean",
+        "lip_rounding_mean",
+        "lip_spread_mean",
+        "jaw_drop_mean",
+        "vision_summary",
         "quality_flags",
         "evidence_fields",
         "source",
@@ -585,6 +1404,19 @@
           "title": "Observation",
           "type": "string"
         },
+        "visual_observation": {
+          "anyOf": [
+            {
+              "maxLength": 250,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Visual Observation"
+        },
         "evidence_fields": {
           "items": {
             "type": "string"
@@ -655,6 +1487,7 @@
         "attempt_id",
         "generation_id",
         "observation",
+        "visual_observation",
         "evidence_fields",
         "cue_id",
         "cue_version",
@@ -773,6 +1606,7 @@
           "enum": [
             "session.state",
             "features.frame",
+            "vision.frame",
             "attempt.summary",
             "coach.decision",
             "audio.start",
@@ -918,11 +1752,29 @@
           "minimum": 0,
           "title": "Final Sample",
           "type": "integer"
+        },
+        "vision_frames": {
+          "items": {
+            "$ref": "#/definitions/VisionMetrics"
+          },
+          "maxItems": 300,
+          "title": "Vision Frames",
+          "type": "array"
+        },
+        "keyframes": {
+          "items": {
+            "$ref": "#/definitions/VisionKeyframe"
+          },
+          "maxItems": 4,
+          "title": "Keyframes",
+          "type": "array"
         }
       },
       "required": [
         "type",
-        "final_sample"
+        "final_sample",
+        "vision_frames",
+        "keyframes"
       ],
       "title": "End",
       "type": "object"
@@ -983,6 +1835,25 @@
       "title": "Start",
       "type": "object"
     },
+    "VisionFrameCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "vision.frame",
+          "title": "Type",
+          "type": "string"
+        },
+        "frame": {
+          "$ref": "#/definitions/VisionMetrics"
+        }
+      },
+      "required": [
+        "type",
+        "frame"
+      ],
+      "title": "VisionFrameCommand",
+      "type": "object"
+    },
     "Command": {
       "additionalProperties": false,
       "properties": {
@@ -1012,7 +1883,8 @@
               "feedback.cancel": "#/definitions/Control",
               "session.configure": "#/definitions/Configure",
               "session.pause": "#/definitions/Control",
-              "session.resume": "#/definitions/Control"
+              "session.resume": "#/definitions/Control",
+              "vision.frame": "#/definitions/VisionFrameCommand"
             },
             "propertyName": "type"
           },
@@ -1025,6 +1897,9 @@
             },
             {
               "$ref": "#/definitions/End"
+            },
+            {
+              "$ref": "#/definitions/VisionFrameCommand"
             },
             {
               "$ref": "#/definitions/Control"

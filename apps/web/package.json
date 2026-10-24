@@ -1,6 +1,6 @@
 {
   "name":"@articulate/web","version":"0.1.0","private":true,"type":"module",
   "scripts":{"dev":"vite --host 127.0.0.1","build":"tsc --noEmit && vite build","preview":"vite preview --host 127.0.0.1"},
-  "dependencies":{"react":"^19.2.0","react-dom":"^19.2.0","three":"^0.180.0","@react-three/fiber":"^9.4.0","@react-three/drei":"^10.7.0"},
+  "dependencies":{"react":"^19.2.0","react-dom":"^19.2.0","three":"^0.180.0","@react-three/fiber":"^9.4.0","@react-three/drei":"^10.7.0","@mediapipe/tasks-vision":"^0.10.17"},
   "devDependencies":{"@types/react":"^19.2.0","@types/react-dom":"^19.2.0","@types/three":"^0.180.0","typescript":"^5.9.3","vite":"^7.1.0","@vitejs/plugin-react":"^5.0.4","tailwindcss":"^4.1.16","@tailwindcss/vite":"^4.1.16"}
 }

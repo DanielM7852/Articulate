@@ -12,8 +12,8 @@ from websockets.asyncio.client import connect
 
 from .audio import RATE
 from .config import ROOT, Settings
-from .decisions import fallback, observation
-from .schemas import AttemptSummary, CoachingDecision, Cue
+from .decisions import fallback, observation, visual_observation
+from .schemas import AttemptSummary, CoachingDecision, Cue, VisionKeyframe
 
 
 class CueRepository:
@@ -116,30 +116,64 @@ class Reasoner:
                 api_key=settings.anthropic_api_key, max_retries=0, timeout=settings.provider_deadline_seconds
             )
 
-    async def decide(self, summary: AttemptSummary, generation, cues: list[Cue], history: list):
+    async def decide(
+        self,
+        summary: AttemptSummary,
+        generation,
+        cues: list[Cue],
+        history: list,
+        keyframes: list[VisionKeyframe] | None = None,
+    ):
         if self.settings.mock_mode or not cues or "target_distance" not in summary.evidence_fields:
             return fallback(summary, generation, cues)
         if not self.client or not self.settings.claude_model:
             raise RuntimeError("Claude key/model missing")
+        payload = {
+            "summary": summary.model_dump(mode="json"),
+            "generation_id": str(generation),
+            "observation": observation(summary),
+            "cues": [c.model_dump() for c in cues],
+            "recent_outcomes": history[-4:],
+        }
+        vis_obs = visual_observation(summary)
+        if vis_obs is not None:
+            payload["visual_observation"] = vis_obs
+
+        if keyframes:
+            content: str | list[dict] = [{"type": "text", "text": json.dumps(payload)}]
+            for kf in keyframes[:3]:
+                content.append(
+                    {
+                        "type": "text",
+                        "text": f"Mouth keyframe '{kf.label}' at {round(kf.timestamp_ms)} ms:",
+                    }
+                )
+                content.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": kf.mime_type,
+                            "data": kf.data_base64,
+                        },
+                    }
+                )
+        else:
+            content = json.dumps(payload)
+
         response = await self.client.messages.parse(
             model=self.settings.claude_model,
             max_tokens=450,
             output_format=CoachingDecision,
-            system="Select exactly one eligible cue. Do not rewrite instructions. Copy the provided observation "
-            "verbatim; narration must be null. Cite only supplied evidence fields. Allowed next action: "
-            "repeat, change_cue, simplify, reduce_assistance, pause. Never infer anatomy or diagnose.",
+            system="Select exactly one eligible cue using acoustic features, MediaPipe CV lip/jaw telemetry, "
+            "and any supplied mouth keyframe images. Do not rewrite instructions. Copy the provided "
+            "observation (and visual_observation when present) verbatim; narration must be null. Cite only "
+            "supplied evidence fields. Allowed next action: repeat, change_cue, simplify, reduce_assistance, "
+            "pause. Never infer hidden internal anatomy or diagnose.",
             messages=[
                 {
                     "role": "user",
-                    "content": json.dumps(
-                        {
-                            "summary": summary.model_dump(mode="json"),
-                            "generation_id": str(generation),
-                            "observation": observation(summary),
-                            "cues": [c.model_dump() for c in cues],
-                            "recent_outcomes": history[-4:],
-                        }
-                    ),
+                    "content": content,
                 }
             ],
         )

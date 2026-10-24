@@ -30,21 +30,7 @@ export type F11 = number | null;
 export type F21 = number | null;
 export type F0 = number | null;
 export type Valid = boolean;
-/**
- * @maxItems 10
- */
-export type QualityFlags =
-  | []
-  | [string]
-  | [string, string]
-  | [string, string, string]
-  | [string, string, string, string]
-  | [string, string, string, string, string]
-  | [string, string, string, string, string, string]
-  | [string, string, string, string, string, string, string]
-  | [string, string, string, string, string, string, string, string]
-  | [string, string, string, string, string, string, string, string, string]
-  | [string, string, string, string, string, string, string, string, string, string];
+export type QualityFlags = string[];
 export type Source = "microphone" | "synthetic";
 export type LipOpening = number | null;
 export type AttemptId = string;
@@ -82,7 +68,13 @@ export type CueId = string | null;
 export type CueVersion = number | null;
 export type PoseId2 = "vowel-i" | "vowel-u" | "vowel-aa" | "neutral";
 export type NextAction =
-  "repeat" | "change_cue" | "simplify" | "reduce_assistance" | "next_target" | "pause" | "repair_capture";
+  | "repeat"
+  | "change_cue"
+  | "simplify"
+  | "reduce_assistance"
+  | "next_target"
+  | "pause"
+  | "repair_capture";
 export type Narration = string | null;
 export type CacheKey = string;
 export type TextHash = string;
@@ -102,6 +94,7 @@ export type SchemaVersion = 1;
 export type Type =
   | "session.state"
   | "features.frame"
+  | "vision.frame"
   | "attempt.summary"
   | "coach.decision"
   | "audio.start"
@@ -120,7 +113,7 @@ export type Seq = number;
 export type SchemaVersion1 = 1;
 export type CommandId = string;
 export type ExpectedRevision = number;
-export type Payload1 = Configure | Start | End | Control | Playback;
+export type Payload1 = Configure | Start | End | VisionFrameCommand | Control | Playback;
 export type Type1 = "session.configure";
 export type TargetId2 = "i" | "u" | "aa";
 export type AudioEnabled1 = boolean;
@@ -136,12 +129,21 @@ export type GenerationId2 = string;
 export type PoseId3 = "vowel-i" | "vowel-u" | "vowel-aa" | "neutral";
 export type TargetId3 = "i" | "u" | "aa";
 export type Action =
-  "repeat" | "change_cue" | "simplify" | "reduce_assistance" | "next_target" | "pause" | "repair_capture";
+  | "repeat"
+  | "change_cue"
+  | "simplify"
+  | "reduce_assistance"
+  | "next_target"
+  | "pause"
+  | "repair_capture";
 export type State1 = "ready" | "capturing" | "analyzing" | "coaching" | "presenting" | "paused";
 
 export interface Contracts {
   Target: Target;
   Session: Session;
+  VisionMetrics: VisionMetrics;
+  VisionKeyframe: VisionKeyframe;
+  VisionSummary: VisionSummary;
   FeatureFrame: FeatureFrame;
   AttemptSummary: AttemptSummary;
   Cue: Cue;
@@ -176,6 +178,62 @@ export interface Session {
   revision: Revision;
   state: State;
 }
+export interface VisionMetrics {
+  timestamp_ms: number;
+  valid: boolean;
+  quality_flags: string[];
+  lip_opening: number | null;
+  outer_lip_height?: number | null;
+  vermilion_flare?: number | null;
+  lip_width?: number | null;
+  lip_aspect_ratio?: number | null;
+  lip_protrusion_z?: number | null;
+  jaw_drop?: number | null;
+  mouth_symmetry?: number | null;
+  inner_mouth_area?: number | null;
+  rounding_score?: number | null;
+  spread_score?: number | null;
+  openness_score?: number | null;
+  blendshapes?: { [k: string]: number };
+  pitch_deg?: number | null;
+  yaw_deg?: number | null;
+  roll_deg?: number | null;
+}
+export interface VisionKeyframe {
+  label: "onset" | "peak_nucleus" | "sustained_hold";
+  timestamp_ms: number;
+  mime_type?: "image/jpeg" | "image/webp";
+  data_base64: string;
+  metrics?: VisionMetrics | null;
+}
+export interface VisionSummary {
+  usable_frames: number;
+  total_frames: number;
+  usable_fraction: number;
+  quality_flags: string[];
+  lip_opening_mean?: number | null;
+  lip_opening_max?: number | null;
+  outer_lip_height_mean?: number | null;
+  vermilion_flare_mean?: number | null;
+  lip_width_mean?: number | null;
+  lip_width_min?: number | null;
+  lip_aspect_ratio_mean?: number | null;
+  lip_protrusion_z_mean?: number | null;
+  jaw_drop_mean?: number | null;
+  mouth_symmetry_mean?: number | null;
+  inner_mouth_area_mean?: number | null;
+  rounding_score_mean?: number | null;
+  rounding_score_max?: number | null;
+  spread_score_mean?: number | null;
+  spread_score_max?: number | null;
+  openness_score_mean?: number | null;
+  openness_score_max?: number | null;
+  posture_stability_std?: number | null;
+  voiced_visual_alignment?: number | null;
+  blendshapes_mean?: { [k: string]: number };
+  head_pose_mean?: { [k: string]: number };
+  keyframes_count?: number;
+}
 export interface FeatureFrame {
   sample_offset: SampleOffset;
   timestamp_ms: TimestampMs;
@@ -187,6 +245,14 @@ export interface FeatureFrame {
   quality_flags: QualityFlags;
   source: Source;
   lip_opening: LipOpening;
+  lip_width?: number | null;
+  lip_aspect_ratio?: number | null;
+  lip_protrusion_z?: number | null;
+  jaw_drop?: number | null;
+  rounding_score?: number | null;
+  spread_score?: number | null;
+  openness_score?: number | null;
+  vision?: VisionMetrics | null;
 }
 export interface AttemptSummary {
   attempt_id: AttemptId;
@@ -201,6 +267,11 @@ export interface AttemptSummary {
   f2_mean: F2Mean;
   target_distance: TargetDistance;
   lip_opening_mean: LipOpeningMean;
+  lip_width_mean?: number | null;
+  lip_rounding_mean?: number | null;
+  lip_spread_mean?: number | null;
+  jaw_drop_mean?: number | null;
+  vision_summary?: VisionSummary | null;
   quality_flags: QualityFlags1;
   evidence_fields: EvidenceFields;
   source: Source1;
@@ -223,6 +294,7 @@ export interface CoachingDecision {
   attempt_id: AttemptId1;
   generation_id: GenerationId;
   observation: Observation;
+  visual_observation?: string | null;
   evidence_fields: EvidenceFields1;
   cue_id: CueId;
   cue_version: CueVersion;
@@ -281,6 +353,12 @@ export interface Start {
 export interface End {
   type: Type3;
   final_sample: FinalSample;
+  vision_frames?: VisionMetrics[];
+  keyframes?: VisionKeyframe[];
+}
+export interface VisionFrameCommand {
+  type: "vision.frame";
+  frame: VisionMetrics;
 }
 export interface Control {
   type: Type4;

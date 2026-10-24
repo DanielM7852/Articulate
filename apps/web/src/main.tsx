@@ -4,11 +4,17 @@ import type {
   FeatureFrame,
   PoseId,
   Target,
+  VisionMetrics,
 } from "../../../packages/contracts/generated";
 import { Client, type Snapshot } from "./client";
 import { Media } from "./audio";
 import { Cursor } from "./Cursor";
 import { Reference, type ReferenceAdapter } from "./Reference";
+import {
+  CameraTile,
+  type CameraMode,
+  type CameraTileHandle,
+} from "./CameraTile";
 import "./styles.css";
 
 function App() {
@@ -17,17 +23,20 @@ function App() {
   const [status, setStatus] = useState("Connecting…"),
     [error, setError] = useState("");
   const [frame, setFrame] = useState<FeatureFrame | null>(null),
+    [visionFrame, setVisionFrame] = useState<VisionMetrics | null>(null),
     [caption, setCaption] = useState(
       "Choose a vowel, then try one short, comfortable sound.",
     );
   const [source, setSource] = useState<"synthetic" | "microphone">("synthetic"),
+    [cameraMode, setCameraMode] = useState<CameraMode>("off"),
     [busy, setBusy] = useState(false);
   const [diagnostics, setDiagnostics] = useState(false),
     [metrics, setMetrics] = useState<any[]>([]);
   const [readiness, setReadiness] = useState<any>(null);
   const client = useRef<Client | null>(null),
     media = useRef<Media | null>(null),
-    ref = useRef<ReferenceAdapter>(null);
+    ref = useRef<ReferenceAdapter>(null),
+    cameraRef = useRef<CameraTileHandle>(null);
   const current = useRef<Snapshot | null>(null),
     attemptEnded = useRef(0);
   const addMetric = (m: any) => setMetrics((items) => [...items.slice(-24), m]);
@@ -90,6 +99,8 @@ function App() {
           event.attempt_id === current.current?.attempt_id
         )
           setFrame(payload as unknown as FeatureFrame);
+        if (event.type === "vision.frame")
+          setVisionFrame(payload as unknown as VisionMetrics);
         if (event.type === "attempt.summary" && old)
           update({
             ...current.current!,
@@ -194,6 +205,7 @@ function App() {
     await media.current!.stopCapture();
     media.current!.clear();
     setFrame(null);
+    cameraRef.current?.resetAttempt();
     attemptEnded.current = 0;
     let rate = 24000;
     try {
@@ -221,7 +233,14 @@ function App() {
     attemptEnded.current = performance.now();
     const end =
       source === "microphone" ? await media.current!.stopCapture() : 0;
-    await client.current!.command({ type: "attempt.end", final_sample: end });
+    const cvData =
+      cameraMode !== "off" ? cameraRef.current?.getAttemptData() : undefined;
+    await client.current!.command({
+      type: "attempt.end",
+      final_sample: end,
+      vision_frames: cvData?.frames ?? [],
+      keyframes: cvData?.keyframes ?? [],
+    });
   }
   async function control(
     type: "feedback.cancel" | "session.pause" | "session.resume",
@@ -344,7 +363,11 @@ function App() {
           <div className="panel-foot">
             <span>
               {frame?.valid
-                ? `F1 ${Math.round(frame.f1!)} Hz · F2 ${Math.round(frame.f2!)} Hz`
+                ? `F1 ${Math.round(frame.f1!)} Hz · F2 ${Math.round(frame.f2!)} Hz${
+                    frame.lip_opening != null
+                      ? ` · Lip open ${frame.lip_opening.toFixed(2)}`
+                      : ""
+                  }`
                 : frame?.quality_flags.join(", ") ||
                   "Speak to move the acoustic cursor"}
             </span>
@@ -364,6 +387,20 @@ function App() {
           <Reference ref={ref} pose={target.pose_id as PoseId} />
         </section>
       </div>
+
+      <CameraTile
+        ref={cameraRef}
+        targetId={session.target_id}
+        capturing={capturing}
+        mode={cameraMode}
+        onModeChange={setCameraMode}
+        onTelemetry={(vf) => {
+          setVisionFrame(vf);
+          client.current?.sendVisionTelemetry(vf);
+        }}
+        onError={(msg) => setError(msg)}
+      />
+
       <section className="coach" aria-label="Coaching feedback">
         <span className="coach-icon">↗</span>
         <div>
@@ -375,7 +412,9 @@ function App() {
             {snapshot.mock_mode
               ? "Cue drafts are unreviewed engineering demonstrations. "
               : ""}
-            Camera unavailable; no lip evidence is collected.
+            {cameraMode === "off"
+              ? "Camera unavailable; no lip evidence is collected."
+              : `Camera active (${cameraMode}); MediaPipe lip geometry, 22 blendshapes, and 3 keyframe crops are sent to the coach.`}
           </small>
         </div>
       </section>
@@ -453,6 +492,7 @@ function App() {
                   <th>Target</th>
                   <th>Usable audio</th>
                   <th>Acoustic distance</th>
+                  <th>CV lip metrics</th>
                   <th>Input</th>
                 </tr>
               </thead>
@@ -474,6 +514,15 @@ function App() {
                         {a.target_distance == null
                           ? "Unavailable"
                           : a.target_distance.toFixed(2)}
+                      </td>
+                      <td>
+                        {a.lip_opening_mean == null
+                          ? "No camera"
+                          : `open ${a.lip_opening_mean.toFixed(2)} · width ${(a.lip_width_mean ?? 0).toFixed(2)}${
+                              a.vision_summary?.keyframes_count
+                                ? ` · ${a.vision_summary.keyframes_count} keyframes`
+                                : ""
+                            }`}
                       </td>
                       <td>{a.source}</td>
                     </tr>
@@ -501,7 +550,11 @@ function App() {
                 providers: readiness,
                 metrics,
                 session: session.id,
-                camera: "unavailable",
+                camera:
+                  cameraMode === "off"
+                    ? "unavailable"
+                    : `${cameraMode} (${snapshot.camera ?? "active"})`,
+                latest_vision: visionFrame ?? snapshot.latest_vision ?? null,
               },
               null,
               2,
