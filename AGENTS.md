@@ -3,12 +3,43 @@
 These instructions apply to all AI coding agents working in this repository,
 including Codex, Claude Code, Gemini, and similar tools.
 
+## Branches On `origin`
+
+- `main` is the only long-lived branch. On 2026-10-24 every earlier workstream
+  branch (`backbone`, `cv`, `voice-analysis`, `mouth-demo`, `Karsten-2d-f1-f2`,
+  `feature/figma-ui`, `feature/integrate-branches`,
+  `feature/onboarding-redesign`, `feature/live-coaching`) was merged into
+  `main` and deleted from `origin`. Their code now lives in `main`; the
+  directory table in `README.md` says where.
+- Do not recreate, push to, or merge from those old branch names. In an older
+  checkout, `git branch -vv` shows them as `[origin/<name>: gone]`. Move any
+  unpushed commits from such a branch onto a new branch cut from `origin/main`
+  (`git cherry-pick` or `git rebase --onto origin/main`) instead of pushing it.
+
+## Where To Push
+
+- Start every change from the latest `origin/main`:
+
+  ```sh
+  git fetch origin --prune
+  git switch -c <prefix>/<short-topic> origin/main
+  ```
+
+  Use `feature/`, `fix/`, or `docs/` as the prefix, for example
+  `feature/echo-tap`. Keep one feature or fix per branch.
+- Push only your own branch, to `origin`: `git push -u origin <branch>`.
+- Get the change into `main` by opening a pull request into `main` on GitHub.
+  The user reviews and merges it.
+- After the pull request merges, delete the branch on `origin`
+  (`git push origin --delete <branch>`) and locally, then start the next
+  change from `origin/main` again.
+
 ## Branch Safety Rules
 
 - Always work on a feature branch. Do not make code changes directly on `main`.
 - Before starting work, check the current branch with `git branch --show-current`.
-- If currently on `main`, create and switch to a new branch before editing:
-  `git switch -c <descriptive-branch-name>`.
+- If currently on `main`, create and switch to a new branch from the latest
+  `origin/main` before editing (see "Where To Push").
 - Never push directly to `main`.
 - Never force-push `main`.
 - Never merge into `main` locally unless the user explicitly asks for it.
