@@ -16,3 +16,19 @@
 .ruff_cache
 test-results
 playwright-report
+
+# Root Dockerfile (RunPod single image) extras. Agent worktrees under .claude/ are full repo copies.
+.claude
+.github
+graphify-out
+*.md
+**/.ruff_cache
+**/.mypy_cache
+**/test-results
+**/playwright-report
+services/articulation/.models
+spacetimedb/target
+web/public/mediapipe/wasm
+vowel-mapper/research
+vowel-mapper/eval-results
+vowel-mapper/e2e
