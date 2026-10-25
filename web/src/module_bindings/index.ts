@@ -2,6 +2,7 @@
 // WILL NOT BE SAVED. MODIFY TABLES IN YOUR MODULE SOURCE CODE INSTEAD.
 
 // This was generated using spacetimedb cli version 2.13.0 (commit 08e1aba133671f9c631c6e70133a82faa0e7b283).
+// NOTE: hand-updated to add telemetry_event and emit_telemetry; regeneration will replace this.
 
 /* eslint-disable */
 /* tslint:disable */
@@ -36,6 +37,7 @@ import {
 // Import all reducer arg schemas
 import BeginAttemptReducer from "./begin_attempt_reducer";
 import CommitEventReducer from "./commit_event_reducer";
+import EmitTelemetryReducer from "./emit_telemetry_reducer";
 import EndAttemptReducer from "./end_attempt_reducer";
 import PushMetricsReducer from "./push_metrics_reducer";
 import RecordArticulationReducer from "./record_articulation_reducer";
@@ -47,17 +49,20 @@ import SetLearnerProgressReducer from "./set_learner_progress_reducer";
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import TelemetryEventRow from "./telemetry_event_table";
 
 /** Type-only namespace exports for generated type groups. */
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  telemetryEvent: __table({ name: "telemetry_event", indexes: [] }, TelemetryEventRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("begin_attempt", BeginAttemptReducer),
   __reducerSchema("commit_event", CommitEventReducer),
+  __reducerSchema("emit_telemetry", EmitTelemetryReducer),
   __reducerSchema("end_attempt", EndAttemptReducer),
   __reducerSchema("push_metrics", PushMetricsReducer),
   __reducerSchema("record_articulation", RecordArticulationReducer),
