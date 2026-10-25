@@ -292,6 +292,7 @@ async def _ask(deps: LiveDeps, payload: str) -> tuple[TalkDraft | None, int]:
             TALK_MAX_TOKENS,
             model=s.live_coach_model,
             thinking=s.live_coach_thinking,
+            purpose="session",
         )
         return draft, int((time.perf_counter() - t0) * 1000)
     except Exception as exc:  # noqa: BLE001

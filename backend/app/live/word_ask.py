@@ -101,6 +101,7 @@ async def answer_word_question(deps: LiveDeps, body: WordAskRequest) -> WordAskR
                 max_tokens=MAX_TOKENS,
                 model=deps.settings.live_coach_model,
                 thinking=deps.settings.live_coach_thinking,
+                purpose="ask",
             )
             return WordAskResponse(say=validate_say(draft.say), source="model")
         except Exception as exc:  # noqa: BLE001 - timeout, provider error or validation failure uses the fallback

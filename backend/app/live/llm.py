@@ -7,6 +7,7 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from app.config import Settings
+from app import telemetry
 from app.live.decision import DecisionError
 
 T = TypeVar("T", bound=BaseModel)
@@ -86,11 +87,11 @@ def build_client(settings: Settings, timeout_s: float):
 
 def _parse(
     client, settings: Settings, system: str, user: str, output_format: type[T], effort: str, max_tokens: int,
-    model: str | None = None, thinking: str = "on",
+    model: str | None = None, thinking: str = "on", purpose: str = "decide",
 ) -> T:
     model = model or settings.anthropic_model
     extra, effort = request_options(model, thinking, effort)
-    response = client.messages.parse(
+    response = telemetry.claude_call(model, purpose, lambda: client.messages.parse(
         model=model,
         max_tokens=max_tokens,
         system=system,
@@ -98,7 +99,7 @@ def _parse(
         output_format=output_format,
         output_config={"effort": effort},
         **extra,
-    )
+    ))
     if getattr(response, "stop_reason", None) == "refusal":
         raise ModelRefusal("model_refusal")
     parsed = getattr(response, "parsed_output", None)
@@ -120,10 +121,11 @@ async def ask(
     max_tokens: int,
     model: str | None = None,
     thinking: str = "on",
+    purpose: str = "decide",
 ) -> T:
     """Run one structured call off the event loop with a hard timeout. Raises on any failure."""
     active = client or build_client(settings, timeout_s)
     return await asyncio.wait_for(
-        asyncio.to_thread(_parse, active, settings, system, user, output_format, effort, max_tokens, model, thinking),
+        asyncio.to_thread(_parse, active, settings, system, user, output_format, effort, max_tokens, model, thinking, purpose),
         timeout=timeout_s,
     )

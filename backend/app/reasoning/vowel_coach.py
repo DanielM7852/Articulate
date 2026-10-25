@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import telemetry
 from app.config import Settings
 from app.errors import CoachValidationError
 from app.reasoning.learner_progress import (
@@ -305,13 +306,13 @@ def _phrase(settings: Settings, attempt: VowelAttempt, grounded: VowelCoachRespo
             "Write the observation from the measured facts only.",
         ]
     )
-    response = active.messages.parse(
+    response = telemetry.claude_call(settings.anthropic_model, "coach", lambda: active.messages.parse(
         model=settings.anthropic_model,
         max_tokens=400,
         system=_SYSTEM,
         messages=[{"role": "user", "content": facts}],
         output_format=VowelPhrasing,
-    )
+    ))
     parsed = getattr(response, "parsed_output", None)
     if parsed is None:
         raise CoachValidationError("empty_model_output")
