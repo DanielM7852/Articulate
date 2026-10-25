@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 from app import telemetry
 from app.integrations.spacetime import SpacetimeError
-from app.live import insight
+from app.live import insight, llm
 from app.live.articulation import annotate_attempts, extract_features
 from app.live.coordination import Coordination
 from app.live.identity import authorize_profile, issue_identity, read_identity
@@ -146,6 +146,7 @@ def _deps(request: Request) -> LiveDeps:
     return LiveDeps(
         settings=state.settings,
         anthropic_client=getattr(state, "live_client", None) or runtime.anthropic(),
+        openai_client=getattr(state, "live_openai_client", None) or runtime.openai(),
         transport=transport,
         history=getattr(state, "live_history", None) or runtime.history(transport),
         spacetime=runtime.spacetime(transport),
@@ -158,7 +159,8 @@ ACCEPTED = {202: {"description": "Durable job accepted; poll the returned status
 @router.post("/coach", response_model=LiveCoachResponse, responses=ACCEPTED)
 async def live_coach(body: LiveCoachRequest, request: Request, background: BackgroundTasks) -> LiveCoachResponse:
     if _shared(request, body.profileId):
-        return await _coordination(request).submit("attempt.coach", body.model_dump())
+        # Attempt audio is used for one model call on the local path only; it never enters a job row.
+        return await _coordination(request).submit("attempt.coach", body.model_dump(exclude={"attemptAudio"}))
     return await coach_attempt(_deps(request), body, background.add_task)
 
 
@@ -274,7 +276,8 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
         if features is None:
             await sink.set(attempt_id, profile_id, sound, "none")
             return
-        model_client = getattr(state, "live_client", None) or runtime.anthropic()
+        injected = getattr(state, "live_openai_client" if llm.is_openai(state.settings) else "live_client", None)
+        model_client = injected or runtime.model_client()
         await _insight_lane(runtime, sink, history, state.settings, model_client, profile_id, attempt_id, sound, features)
     except Exception as exc:  # noqa: BLE001
         logger.warning("articulation job failed: %s", type(exc).__name__)

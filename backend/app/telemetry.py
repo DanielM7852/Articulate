@@ -139,7 +139,7 @@ def short(text: Any, limit: int = LABEL_MAX) -> str:
     return _clip(text, limit)
 
 
-_LINE_FIELDS = ("line", "text", "cue", "message", "summary", "caption", "observation")
+_LINE_FIELDS = ("line", "say", "text", "cue", "message", "summary", "caption", "observation")
 
 
 def line_of(parsed: Any) -> str:
@@ -154,31 +154,57 @@ def line_of(parsed: Any) -> str:
         return "output"
 
 
-def claude_call(model: str, purpose: str, call):
-    """Run `call()` (a blocking Claude request) and emit claude.request / .response / .error around it.
+def parsed_of(response: Any) -> Any:
+    """Parsed model output from an Anthropic (`parsed_output`) or OpenAI (`message.parsed` / forced tool call) response."""
+    try:
+        parsed = getattr(response, "parsed_output", None)
+        if parsed is not None:
+            return parsed
+        message = response.choices[0].message
+        parsed = getattr(message, "parsed", None)
+        if parsed is not None:
+            return parsed
+        return message.tool_calls[0].function.parsed_arguments
+    except Exception:  # noqa: BLE001
+        return None
 
-    The response value is returned as is. `.response` carries token usage when the SDK object has it and
-    `line` from the parsed output. Errors are re-raised after a claude.error event.
+
+_USAGE_FIELDS = (
+    ("input_tokens", "prompt_tokens", "inputTokens"),
+    ("output_tokens", "completion_tokens", "outputTokens"),
+)
+
+
+def claude_call(model: str, purpose: str, call, provider: str = "anthropic"):
+    """Run `call()` (a blocking model request) and emit claude.request / .response / .error around it.
+
+    The events keep the "claude" node and names the dashboard reads; `provider` says which SDK answered.
+    The response value is returned as is. `.response` carries token usage (either SDK's field names) and
+    `line` from the parsed output. Errors are re-raised after a claude.error event. Request content
+    (including audio) is never sent.
     """
     import time
 
-    emit("backend", "claude", "claude.request", f"{purpose} request", {"model": model, "purpose": purpose})
+    emit("backend", "claude", "claude.request", f"{purpose} request",
+         {"model": model, "purpose": purpose, "provider": provider})
     started = time.perf_counter()
     try:
         response = call()
     except Exception as exc:
         ms = round((time.perf_counter() - started) * 1000)
         emit("claude", "backend", "claude.error", f"{purpose} failed",
-             {"model": model, "purpose": purpose, "latencyMs": ms, "error": type(exc).__name__})
+             {"model": model, "purpose": purpose, "provider": provider, "latencyMs": ms, "error": type(exc).__name__})
         raise
     ms = round((time.perf_counter() - started) * 1000)
-    payload: dict[str, Any] = {"model": model, "purpose": purpose, "latencyMs": ms}
+    payload: dict[str, Any] = {"model": model, "purpose": purpose, "provider": provider, "latencyMs": ms}
     usage = getattr(response, "usage", None)
-    for src, dst in (("input_tokens", "inputTokens"), ("output_tokens", "outputTokens")):
-        value = getattr(usage, src, None)
+    for anthropic_name, openai_name, dst in _USAGE_FIELDS:
+        value = getattr(usage, anthropic_name, None)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            value = getattr(usage, openai_name, None)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             payload[dst] = int(value)
-    line = line_of(getattr(response, "parsed_output", None))
+    line = line_of(parsed_of(response))
     payload["line"] = line
     emit("claude", "backend", "claude.response", line, payload)
     return response

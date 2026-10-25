@@ -1,6 +1,8 @@
 """Per-attempt live coaching: gather metrics, score, load history, decide, validate, persist."""
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import time
@@ -11,6 +13,7 @@ from typing import Any
 import httpx
 
 from app import telemetry
+from app.audio.word_acoustics import measure_word
 from app.config import Settings
 from app.integrations.spacetime import SpacetimeClient, unwrap, uuid_literal
 from app.live import llm
@@ -52,6 +55,7 @@ OPEN_POLL_STEP_S = 0.15
 class LiveDeps:
     settings: Settings
     anthropic_client: Any = None  # tests inject a fake with .messages.parse
+    openai_client: Any = None  # tests inject a fake with .chat.completions.parse
     transport: httpx.AsyncBaseTransport | None = None  # tests inject httpx.MockTransport
     history: LearnerHistory | None = None
     spacetime: SpacetimeClient | None = None  # shared pooled client from the app runtime
@@ -60,8 +64,13 @@ class LiveDeps:
         return self.history or build_history(self.settings, self.transport)
 
     @property
+    def llm_client(self) -> Any:
+        """The injected client for the active live provider (None: llm.ask builds one from settings)."""
+        return self.openai_client if llm.is_openai(self.settings) else self.anthropic_client
+
+    @property
     def model_available(self) -> bool:
-        return self.anthropic_client is not None or self.settings.anthropic_configured
+        return llm.model_configured(self.settings, self.llm_client)
 
 
 def _decode_frames(batches: list[dict[str, Any]]) -> tuple[list[AudioFrame], list[LipFrame]]:
@@ -150,6 +159,7 @@ def _word_user_message(
     score: WordScore,
     candidates: dict[str, float | str],
     context: LearnerContext,
+    acoustics: dict[str, Any] | None = None,
 ) -> str:
     word = body.word
     assert word is not None
@@ -199,7 +209,50 @@ def _word_user_message(
         "allowedEvidenceFields": sorted(candidates),
         "learnerNotes": context.notes,
     }
+    if acoustics is not None:
+        payload["acoustics"] = acoustics
     return json.dumps(payload, separators=(",", ":"))
+
+
+_ACOUSTICS_TIMEOUT_S = 1.5
+_acoustics_warned: set[str] = set()
+
+
+async def _measure_acoustics(settings: Settings, body: LiveCoachRequest, wav: bytes | None) -> dict[str, Any] | None:
+    """Praat measurements of the attempt WAV, or None when disabled, absent, failed or too slow. Never raises."""
+    if wav is None or not settings.word_acoustics_enabled or body.word is None:
+        return None
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(measure_word, wav, list(body.word.zones)), _ACOUSTICS_TIMEOUT_S
+        )
+    except Exception as exc:  # noqa: BLE001 - acoustics are optional evidence
+        name = type(exc).__name__
+        if name not in _acoustics_warned:
+            _acoustics_warned.add(name)
+            logger.warning("word acoustics skipped: %s", name)
+        return None
+
+
+def decode_attempt_audio(body: LiveCoachRequest) -> bytes | None:
+    """The attempt WAV bytes, or None when absent or not strict base64 of a RIFF/WAVE file. Never raises."""
+    audio = body.attemptAudio
+    if audio is None:
+        return None
+    try:
+        raw = base64.b64decode(audio.data, validate=True)
+    except (binascii.Error, ValueError):
+        raw = b""
+    if len(raw) < 44 or raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+        logger.warning("attemptAudio ignored: not a base64 WAV")
+        return None
+    return raw
+
+
+def _reported_model(settings: Settings, wav: bytes | None) -> str:
+    if not llm.is_openai(settings):
+        return settings.live_coach_model
+    return settings.live_openai_audio_model if wav else settings.live_openai_model
 
 
 def _ms(start: float, end: float) -> int:
@@ -238,7 +291,7 @@ async def _decide(
             t0 = time.perf_counter()
             decision = await llm.ask(
                 deps.settings,
-                deps.anthropic_client,
+                deps.llm_client,
                 llm.COACH_SYSTEM,
                 _user_message(body, audio, video, candidates, context),
                 CoachDecision,
@@ -269,6 +322,8 @@ async def _decide_word(
     score: WordScore,
     context: LearnerContext,
     timings: dict[str, int],
+    wav: bytes | None = None,
+    acoustics: dict[str, Any] | None = None,
 ):
     word = body.word
     assert word is not None
@@ -281,9 +336,9 @@ async def _decide_word(
             t0 = time.perf_counter()
             decision = await llm.ask(
                 deps.settings,
-                deps.anthropic_client,
-                llm.WORD_COACH_SYSTEM,
-                _word_user_message(body, score, candidates, context),
+                deps.llm_client,
+                llm.WORD_COACH_SYSTEM + (f"\n{llm.WORD_COACH_AUDIO_NOTE}" if wav else ""),
+                _word_user_message(body, score, candidates, context, acoustics),
                 CoachDecision,
                 deps.settings.live_coach_effort,
                 deps.settings.live_coach_timeout_s,
@@ -291,6 +346,7 @@ async def _decide_word(
                 model=deps.settings.live_coach_model,
                 thinking=deps.settings.live_coach_thinking,
                 purpose="word",
+                audio_wav=wav,
             )
             t1 = time.perf_counter()
             timings["llm"] = _ms(t0, t1)
@@ -334,10 +390,30 @@ async def coach_attempt(
 
     word_score = score_word(body.word, _practice_ids(body)) if body.word is not None else None
     if word_score is not None:
-        source, decision, evidence = await _decide_word(deps, body, word_score, context, timings)
+        decoded = decode_attempt_audio(body)
+        wav = decoded if llm.is_openai(deps.settings) else None
+        t_ac = time.perf_counter()
+        acoustics = await _measure_acoustics(deps.settings, body, decoded)
+        if acoustics is not None:
+            timings["acoustics"] = _ms(t_ac, time.perf_counter())
+        if acoustics is not None and not acoustics["speech"]["clear"] and body.word.quality == "usable":
+            # Praat heard no clear speech in a capture the board called usable: take the existing unclear path
+            # (insufficient score, deterministic retry line) without calling the model.
+            unclear = body.word.model_copy(update={"quality": "unclear", "qualityReason": "no-voice"})
+            word_score = score_word(unclear, _practice_ids(body))
+            candidates = word_evidence_candidates(unclear, word_score)
+            timings["llm"] = 0
+            timings["validate"] = 0
+            decision, evidence = word_fallback_decision(unclear, word_score, candidates, _practice_ids(body))
+            source = "fallback"
+        else:
+            source, decision, evidence = await _decide_word(
+                deps, body, word_score, context, timings, wav, acoustics
+            )
         focus = decision.focusZoneId
         side = word_show_side_view(focus, decision.nextAction)
     else:
+        wav = None
         source, decision, evidence = await _decide(deps, body, audio, video, context, timings)
         focus = None
         side = show_side_view(decision.cueId, decision.nextAction)
@@ -356,7 +432,7 @@ async def coach_attempt(
         nextAction=decision.nextAction,
         evidence=evidence,
         persisted=None,
-        model=deps.settings.live_coach_model if source == "agent" else None,
+        model=_reported_model(deps.settings, wav) if source == "agent" else None,
         word=word_score,
         focusZoneId=focus,
     )
@@ -387,7 +463,9 @@ async def coach_attempt(
             logger.warning("persist failed attempt=%s: %s", body.attemptId, type(exc).__name__)
 
     timings["total"] = _ms(started, time.perf_counter())
-    response.timingsMs = {k: timings[k] for k in ("frames", "history", "scoring", "llm", "validate", "total")}
+    response.timingsMs = {
+        k: timings[k] for k in ("frames", "history", "scoring", "acoustics", "llm", "validate", "total") if k in timings
+    }
     logger.info(
         "live coach timings ms %s source=%s metrics=%s",
         " ".join(f"{k}={v}" for k, v in response.timingsMs.items()),

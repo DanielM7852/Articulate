@@ -150,7 +150,7 @@ async def update_notes(deps: LiveDeps, profile_id: str) -> LearnerNotes:
         try:
             draft = await llm.ask(
                 deps.settings,
-                deps.anthropic_client,
+                deps.llm_client,
                 llm.NOTES_SYSTEM,
                 payload,
                 NotesDraft,

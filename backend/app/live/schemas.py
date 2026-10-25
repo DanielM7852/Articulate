@@ -173,6 +173,14 @@ class WordScore(BaseModel):
     lipUsable: bool
 
 
+class AttemptAudio(BaseModel):
+    """The learner's word attempt as a mono 16-bit PCM WAV at 16 kHz, base64. Used for one model call, never stored."""
+
+    format: Literal["wav"]
+    data: str = Field(min_length=44, max_length=480_000)
+    durationMs: float = Field(ge=0, le=8000)
+
+
 class LiveCoachRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -187,6 +195,8 @@ class LiveCoachRequest(BaseModel):
     word: WordAttempt | None = None
     # Word mode: the zone ids being practised now. Absent: the whole word.
     practiceZoneIds: list[str] | None = Field(default=None, max_length=12)
+    # Word mode: optional recording of this attempt for the OpenAI audio model. Dropped before any job or storage.
+    attemptAudio: AttemptAudio | None = None
 
     @field_validator("attemptId")
     @classmethod

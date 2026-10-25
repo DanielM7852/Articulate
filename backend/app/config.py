@@ -22,6 +22,14 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-5-5"
+    # Live coaching provider. "openai" runs every live model call on GPT; "anthropic" keeps the Claude path.
+    live_coach_provider: Literal["anthropic", "openai"] = "openai"
+    # Praat measurements of the word attempt WAV, added to the word coach message (both providers).
+    word_acoustics_enabled: bool = True
+    openai_api_key: str | None = None  # same OPENAI_API_KEY the realtime session reads
+    live_openai_model: str = "gpt-5.4-mini"  # decide, word coach without audio, session, ask
+    live_openai_background_model: str = "gpt-5.5"  # notes and insight
+    live_openai_audio_model: str = "gpt-audio-1.5"  # word coach with the learner's attempt audio
     spacetime_uri: str = "https://maincloud.spacetimedb.com"
     spacetime_database: str | None = None
     spacetime_token: str | None = None
@@ -115,6 +123,10 @@ class Settings(BaseSettings):
     @property
     def anthropic_configured(self) -> bool:
         return bool(self.anthropic_api_key)
+
+    @property
+    def openai_configured(self) -> bool:
+        return bool(self.openai_api_key)
 
     @property
     def spacetime_configured(self) -> bool:
