@@ -2,9 +2,11 @@
 # One-shot: create the Articulate GPU pod through the RunPod REST API (POST /v1/pods).
 # Usage:
 #   RUNPOD_API_KEY=... IMAGE=<dockerhub-user>/articulate:<tag> deploy/runpod/create-pod.sh
+#   Private GHCR image: also set REGISTRY_AUTH_ID=<RunPod container registry auth id> (see README).
 #   DRY_RUN=1 ... prints the request body without calling the API.
 # Secrets are referenced as {{ RUNPOD_SECRET_<name> }}; create them first in the RunPod console
-# (Secrets). See deploy/runpod/README.md for what each variable does.
+# (Secrets): anthropic_api_key, cartesia_api_key, openai_api_key, hf_token, resend_api_key, spacetime_token
+# (plus azure_speech_key when AZURE_SPEECH_REGION is set). Port 8020 (phones) is never exposed. See deploy/runpod/README.md for what each variable does.
 set -euo pipefail
 
 : "${RUNPOD_API_KEY:?set RUNPOD_API_KEY (RunPod console > Settings > API Keys)}"
@@ -22,10 +24,30 @@ json_list() {
   printf '%s' "$1" | awk -F, '{for (i = 1; i <= NF; i++) { gsub(/^ +| +$/, "", $i); printf "%s\"%s\"", (i > 1 ? "," : ""), $i }}'
 }
 
+# Optional env entries. A RunPod secret reference to a secret that doesn't exist can break pod creation,
+# so the Azure pair is added only when AZURE_SPEECH_REGION is set in this shell (key: secret azure_speech_key),
+# and RECAP_EMAIL_FROM only when set here.
+extra_env=""
+if [ -n "${AZURE_SPEECH_REGION:-}" ]; then
+  extra_env="${extra_env},
+    \"AZURE_SPEECH_KEY\": \"{{ RUNPOD_SECRET_azure_speech_key }}\",
+    \"AZURE_SPEECH_REGION\": \"${AZURE_SPEECH_REGION}\""
+fi
+if [ -n "${RECAP_EMAIL_FROM:-}" ]; then
+  extra_env="${extra_env},
+    \"RECAP_EMAIL_FROM\": \"${RECAP_EMAIL_FROM}\""
+fi
+
+registry_auth=""
+if [ -n "${REGISTRY_AUTH_ID:-}" ]; then
+  registry_auth="
+  \"containerRegistryAuthId\": \"${REGISTRY_AUTH_ID}\","
+fi
+
 body=$(cat <<JSON
 {
   "name": "${NAME}",
-  "imageName": "${IMAGE}",
+  "imageName": "${IMAGE}",${registry_auth}
   "computeType": "GPU",
   "cloudType": "${CLOUD_TYPE}",
   "gpuTypeIds": [$(json_list "$GPU_TYPES")],
@@ -39,11 +61,13 @@ body=$(cat <<JSON
     "ANTHROPIC_API_KEY": "{{ RUNPOD_SECRET_anthropic_api_key }}",
     "CARTESIA_API_KEY": "{{ RUNPOD_SECRET_cartesia_api_key }}",
     "OPENAI_API_KEY": "{{ RUNPOD_SECRET_openai_api_key }}",
+    "HF_TOKEN": "{{ RUNPOD_SECRET_hf_token }}",
+    "RESEND_API_KEY": "{{ RUNPOD_SECRET_resend_api_key }}",
     "SPACETIME_URI": "https://maincloud.spacetimedb.com",
     "SPACETIME_DATABASE": "${SPACETIME_DATABASE:-articulate-live}",
     "SPACETIME_TOKEN": "{{ RUNPOD_SECRET_spacetime_token }}",
     "LIVE_COORDINATION": "local",
-    "STORE_DIR": "/workspace/articulate-store"
+    "STORE_DIR": "/workspace/articulate-store"${extra_env}
   }
 }
 JSON
@@ -78,5 +102,5 @@ fi
 echo "$payload"
 echo
 echo "Pod id:  ${pod_id}"
-echo "App URL: https://${pod_id}-8000.proxy.runpod.net/  (ready once /health answers; first start pulls ~6 GB)"
+echo "App URL: https://${pod_id}-8000.proxy.runpod.net/  (ready once /health answers; first start pulls ~6 GB; the phone model then downloads ~1.2 GB once)"
 echo "Set CORS_ORIGINS=https://${pod_id}-8000.proxy.runpod.net on the pod only if another origin calls this API."
