@@ -53,13 +53,15 @@ const SCALP = { hairlineDrop: 0.085, soft: 0.011, temple: 0.045, nape: 0.17 }; /
 const SCATTER = {
   radius: 0.03, // metres: Gaussian width of the field
   reach: 2.0, // dots farther than reach * radius from the ray are left alone (the field is under 2% there)
-  outward: 0.011, // metres of radial displacement at the centre: a thinning, not a hole (keep below radius)
-  lift: 0.007, // metres toward the viewer at the centre
-  drag: 0.5, // seconds: how much of the pointer's velocity becomes displacement (the wake)
+  // Displacement amounts sit at about 15% of the original tuning (0.011, 0.007, 0.5, 0.06): the same field and
+  // spring, a much gentler stir.
+  outward: 0.0017, // metres of radial displacement at the centre: a thinning, not a hole (keep below radius)
+  lift: 0.001, // metres toward the viewer at the centre
+  drag: 0.075, // seconds: how much of the pointer's velocity becomes displacement (the wake)
   swirl: 0.45, // m/s of curl-like drift per metre of displacement
   k: 90,
   c: 11,
-  maxOffset: 0.06,
+  maxOffset: 0.009,
   settle: 1.5e-4
 };
 const PREPASS_OFFSET = { factor: 2, units: 4 };
