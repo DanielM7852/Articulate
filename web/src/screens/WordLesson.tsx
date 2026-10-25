@@ -17,7 +17,8 @@ import { MAX_CLIP_MS, useAttemptAudio, type AttemptAudio } from '../audio/attemp
 import { useVoiceFrames, type VoiceFrames } from '../audio/useVoiceFrames';
 import { useLipTracking, type LipTrackingStatus } from '../vision/useLipTracking';
 import { CUE_MIN_MS, useCoachSequence, type SequenceLine } from '../live/useCoachSequence';
-import type { CueId } from '../live/liveCoach';
+import type { MouthCueId } from '@mouth-demo/src/mouth-demo.js';
+import { unitDemoCue, zoneDemoCue } from '../game/ghost/demoCues';
 import { usePhoneCursor } from '../live/usePhoneCursor';
 import { ASSUMED_END_LAG_MS, RESCUE_MIN_CLIP_MS, applyPhoneJudgement, canPhoneRescue, clipOffsetMs, isPhoneJudged, scorePhones, unitPhoneZones } from '../live/phoneJudge';
 import { isScored, requestWordAsk, requestWordCoach, scoreWord, wordFallbackLine } from '../live/wordCoach';
@@ -80,9 +81,6 @@ function wordData(key: string): WordData {
   return data;
 }
 
-/** Mouth-demo cues exist only for these vowels; everything else uses the side view with no cue. Mirrors backend ZONE_CUE. */
-const ZONE_CUE: Record<string, CueId> = { a: 'open-jaw', ee: 'spread-lips' };
-
 const PAUSE_BEFORE_AGAIN_MS = 1000;
 /** Extra time past a watch's own length before the lesson stops waiting for the board's onWatchEnd. */
 const WATCH_SLACK_MS = 2500;
@@ -97,15 +95,14 @@ const LINES = {
 };
 
 /** Ava's scripted introduction of one step (the same lines the realtime path never needs: the script speaks these). */
-function introLine(spec: GhostWordSpec, step: LessonStep): { text: string; side: boolean; cueId: CueId | null } {
+function introLine(spec: GhostWordSpec, step: LessonStep): { text: string; side: boolean; cueId: MouthCueId | null; hold?: boolean } {
   const { label, zoneIds } = step.unit;
   if (step.kind === 'part') {
     if (!step.practisable) {
       const hint = spec.zones.find((z) => zoneIds.includes(z.id))?.hint ?? 'Watch the side view.';
-      return { text: `The ${label} is one to feel more than see. ${hint}`, side: true, cueId: null };
+      return { text: `The ${label} is one to feel more than see. ${hint}`, side: true, cueId: unitDemoCue(zoneIds), hold: true };
     }
-    const cueId = zoneIds.length === 1 ? (ZONE_CUE[zoneIds[0]] ?? null) : null;
-    return { text: `Let's work on the ${label} in ${spec.word}. Watch the path.`, side: true, cueId };
+    return { text: `Let's work on the ${label} in ${spec.word}. Watch the path.`, side: true, cueId: unitDemoCue(zoneIds), hold: true };
   }
   return {
     text: step.speedWatch < 1 ? `Now the whole word, slowly: ${spec.word}.` : `And at normal speed: ${spec.word}.`,
@@ -165,7 +162,7 @@ interface PendingRelay {
   gentle: boolean;
   caption: string;
   side: boolean;
-  cueId: CueId | null;
+  cueId: MouthCueId | null;
   focus: string | null;
   /** ava.speechCount() when the tool call returned: a higher count means her relay started. */
   before: number;
@@ -193,7 +190,7 @@ interface Coached {
   finalStep: boolean;
   caption: string;
   focus: string | null;
-  cueId: CueId | null;
+  cueId: MouthCueId | null;
   side: boolean;
   verdict: string;
 }
@@ -317,7 +314,7 @@ export default function WordLesson() {
     watchSpeedRef.current = v;
     setWatchSpeedState(v);
   }, []);
-  const avaCueId = useRef<CueId | null>(null); // the cue on screen from a realtime view, for the screen state
+  const avaCueId = useRef<MouthCueId | null>(null); // the cue on screen from a realtime view, for the screen state
   const lastScreenMsg = useRef('');
   // Late-bound handlers for Ava's show_demo / lesson_control tools (assigned each render below).
   const actionEvents = useRef<{
@@ -490,11 +487,11 @@ export default function WordLesson() {
     return ph === 'cue' && !cur.current.plan[shownStep.current]?.practisable;
   }, []);
 
-  /** The cue the current step would show on its own (one zone with a mouth-demo cue), or null. */
-  const stepCue = useCallback((): CueId | null => {
+  /** The demo cue the current part shows on its own (unitDemoCue), or null for a whole-word step. */
+  const stepCue = useCallback((): MouthCueId | null => {
     const st = cur.current.plan[shownStep.current];
-    if (!st || st.kind !== 'part' || st.unit.zoneIds.length !== 1) return null;
-    return ZONE_CUE[st.unit.zoneIds[0]] ?? null;
+    if (!st || st.kind !== 'part') return null;
+    return unitDemoCue(st.unit.zoneIds);
   }, []);
 
   /**
@@ -552,12 +549,12 @@ export default function WordLesson() {
 
   /** One Ava line. With narration off the caption stays up for its reading time. False if superseded. */
   const line = useCallback(
-    async (text: string, side = false, cueId: CueId | null = null): Promise<boolean> => {
+    async (text: string, side = false, cueId: MouthCueId | null = null, hold = false): Promise<boolean> => {
       const my = runId.current;
       const started = Date.now();
       takeFloor();
       if (side) rememberSide({ text, cueId, showSideView: true });
-      await seq.speakLine({ text, cueId, showSideView: side }, { narration: voiceOnRef.current });
+      await seq.speakLine({ text, cueId, showSideView: side, hold }, { narration: voiceOnRef.current });
       if (runId.current !== my) return false;
       if (!voiceOnRef.current) {
         const left = readingTime(text) - (Date.now() - started);
@@ -695,7 +692,7 @@ export default function WordLesson() {
         sendScreen();
       }
       const intro = introLine(word, step);
-      if (!(await line(intro.text, intro.side, intro.cueId))) return;
+      if (!(await line(intro.text, intro.side, intro.cueId, intro.hold))) return;
       newAttempt();
       setPhase('watch');
       await waitWatch(step);
@@ -810,16 +807,19 @@ export default function WordLesson() {
     takeFloor(true);
     if (!(await gateAva(my))) return;
     newAttempt();
+    const demoCue = step.kind === 'part' ? unitDemoCue(step.unit.zoneIds) : null;
+    if (demoCue) void seq.showHeldCue(demoCue).catch(() => undefined); // side-view demo alongside the ghost board
     setPhase('watch');
     await waitWatch(step);
     if (runId.current !== my) return;
     setWatchSpeed(null);
+    if (demoCue) seq.cancel(false); // avatar back to front for the learner's turn
     if (step.practisable) await beginTurn(my, false);
     else {
       setPhase('cue'); // watch-only: the learner moves on with "Next part"
       sendScreen();
     }
-  }, [beginTurn, endWindow, gateAva, newAttempt, releaseWatch, sendScreen, seq.cancel, setPhase, setWatchSpeed, takeFloor, waitWatch]);
+  }, [beginTurn, endWindow, gateAva, newAttempt, releaseWatch, sendScreen, seq.cancel, seq.showHeldCue, setPhase, setWatchSpeed, takeFloor, waitWatch]);
 
   /** "Next part": leave the current step without (or in the middle of) an attempt. */
   const nextPart = useCallback(async () => {
@@ -852,7 +852,7 @@ export default function WordLesson() {
   );
 
   /** Show the side view / cue for a coaching line. Resolves to when the cue appeared (0 if none or superseded). */
-  const startView = useCallback(async (side: boolean, cueId: CueId | null, my: number, text = ''): Promise<number> => {
+  const startView = useCallback(async (side: boolean, cueId: MouthCueId | null, my: number, text = ''): Promise<number> => {
     avaCue.current = side && cueId !== null;
     avaCueId.current = side ? cueId : null;
     if (side && text) rememberSide({ text, cueId, showSideView: true });
@@ -881,7 +881,7 @@ export default function WordLesson() {
    */
   const coachWithAva = useCallback(
     async (
-      p: { caption: string; focus: string | null; cueId: CueId | null; side: boolean; attemptId: string; verdict: string; instructions?: string },
+      p: { caption: string; focus: string | null; cueId: MouthCueId | null; side: boolean; attemptId: string; verdict: string; instructions?: string },
       my: number,
     ): Promise<'spoken' | 'fallback' | 'aborted'> => {
       const a = avaRef.current;
@@ -947,7 +947,7 @@ export default function WordLesson() {
       coachAbort.current = ctl;
       let caption: string;
       let focus: string | null;
-      let cueId: CueId | null = null;
+      let cueId: MouthCueId | null = null;
       let side: boolean;
       let score = scoreWord(result, practice);
       // Best effort and synchronous: audio must never delay or break coaching.
@@ -977,7 +977,7 @@ export default function WordLesson() {
       coachCache.current.set(result.attemptId, { caption, focusZoneId: focus, verdict });
       lastCoachId.current = result.attemptId;
       setFocusZoneId(focus);
-      return { prog, finalStep, caption, focus, cueId, side, verdict };
+      return { prog, finalStep, caption, focus, cueId: cueId ?? (side ? zoneDemoCue(focus) : null), side, verdict };
     },
     [profileId],
   );

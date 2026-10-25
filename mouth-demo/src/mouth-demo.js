@@ -13,7 +13,7 @@ import { createTalkingHeadDriver } from "./drivers/talkinghead.js";
 import { createThreeDriver } from "./drivers/three.js";
 import { CUES } from "./cues.js";
 import { createTimeline, easeInOutCubic } from "./timeline.js";
-import { createCutaway } from "./cutaway.js";
+import { createCutaway, BLEND_POSES } from "./cutaway.js";
 import { createLipSync } from "./lipsync.js";
 
 const DEFAULT_AVATAR = "/avatars/brunette.glb";
@@ -144,7 +144,7 @@ export async function createMouthDemo(container, options = {}) {
   };
 
   const timeline = createTimeline();
-  const S = { w: 0, vis: 0, show: 0 }; // w: face toward cue target, vis: highlight, show: cutaway opacity
+  const S = { w: 0, vis: 0, show: 0, ab: 0, mk: 0 }; // w: face toward cue target, vis: highlight, show: cutaway opacity, ab: pose A to B progress, mk: contact marker strength
   let view = "front";
   let cueId = null;
   let cue = null;
@@ -253,6 +253,7 @@ export async function createMouthDemo(container, options = {}) {
   }
 
   // Choreography
+  const BLEND_KEY = Object.fromEntries(Object.entries(BLEND_POSES).map(([k, pose]) => [pose, k]));
   const showTarget = () => (view === "side" ? 1 : 0);
 
   const emit = (phase) => {
@@ -263,7 +264,15 @@ export async function createMouthDemo(container, options = {}) {
     if (c) {
       driven = c;
       for (const [name, value] of Object.entries(c.shapes)) driver.setShape(name, value * S.w);
-      if (view === "side" || S.show > 0) cutaway.setPose("neutral", c.cutawayPose, S.w);
+      if (view === "side" || S.show > 0) {
+        if (c.then) {
+          // two-pose cue: neutral -> A, then A -> B, through the weighted blend
+          cutaway.setBlend({ [BLEND_KEY[c.cutawayPose]]: (1 - S.ab) * S.w, [BLEND_KEY[c.then]]: S.ab * S.w });
+        } else {
+          cutaway.setPose("neutral", c.cutawayPose, S.w);
+        }
+        if (c.marker) cutaway.setMarker(c.marker, S.mk);
+      }
     }
     highlight.setVisibility(S.vis);
     cutaway.show(S.show);
@@ -303,18 +312,51 @@ export async function createMouthDemo(container, options = {}) {
   const pulseOff = () => highlight.setPulse(false);
 
   const frontLoop = (c) => [
-    tween("in", 600, { w: 1, vis: 1, show: showTarget() }, c, { onStart: () => hologram.triggerRipple() }),
+    tween("in", 600, { w: 1, vis: 1, show: showTarget() }, c, { onStart: () => { S.ab = 0; hologram.triggerRipple(); } }),
     tween("hold", 2000, null, c, { onStart: pulseOn, onEnd: pulseOff }),
     tween("out", 600, { w: 0, vis: 0 }, c),
     tween("rest", 1500, null, c),
   ];
 
-  const sideLoop = (c) => [
-    tween("in", 600, { w: 1, vis: 1, show: 1 }, c),
-    tween("hold", 2500, null, c, { onStart: () => { pulseOn(); cutaway.setHighlight(1); }, onEnd: pulseOff }),
-    tween("relax", 600, { w: 0, vis: 0 }, c, { onStart: () => cutaway.setHighlight(0) }),
-    tween("rest", 1500, null, c),
-  ];
+  // Marker and label for the side view. The marker shows only while pose A is held.
+  const markOff = () => {
+    S.mk = 0;
+    cutaway.setMarker(null, 0);
+  };
+  const markOn = (c) => {
+    S.mk = c.marker ? 1 : 0;
+    cutaway.setMarker(c.marker ?? null, S.mk);
+  };
+  const labelA = (c) => c.labels?.[0] ?? c.label ?? null;
+  const labelB = (c) => c.labels?.[1] ?? c.label ?? null;
+  const sideStart = (c) => {
+    S.ab = 0;
+    markOff();
+    cutaway.setCueLabel(labelA(c));
+  };
+
+  // Single pose: in 600 + hold 2500 (3100 ms active). Two poses: in 500, hold A 1000, glide 600, hold B 600 (2700 ms active).
+  const sideLoop = (c) => {
+    const onHold = () => { pulseOn(); cutaway.setHighlight(1); markOn(c); };
+    const tail = [
+      tween("relax", 600, { w: 0, vis: 0 }, c, { onStart: () => { cutaway.setHighlight(0); markOff(); } }),
+      tween("rest", 1500, null, c),
+    ];
+    if (c.then) {
+      return [
+        tween("in", 500, { w: 1, vis: 1, show: 1 }, c, { onStart: () => sideStart(c) }),
+        tween("hold", 1000, null, c, { onStart: onHold }),
+        tween("glide", 600, { ab: 1, mk: 0 }, c, { onStart: () => cutaway.setCueLabel(labelB(c)) }),
+        tween("hold2", 600, null, c, { onEnd: pulseOff }),
+        ...tail,
+      ];
+    }
+    return [
+      tween("in", 600, { w: 1, vis: 1, show: 1 }, c, { onStart: () => sideStart(c) }),
+      tween("hold", 2500, null, c, { onStart: onHold, onEnd: () => { pulseOff(); markOff(); } }),
+      ...tail,
+    ];
+  };
 
   const swingHooks = (dir, extra = {}) => ({
     onStart() {
@@ -340,6 +382,7 @@ export async function createMouthDemo(container, options = {}) {
   };
 
   const quiet = () => {
+    markOff();
     highlight.setPulse(false);
     cutaway.setHighlight(0);
     hologram.setSwing(false);
@@ -495,6 +538,7 @@ export async function createMouthDemo(container, options = {}) {
       cueId = id;
       cue = next;
       caption.textContent = next.caption;
+      cutaway.setCueLabel(null);
       const loop = view === "side" ? sideLoop(next) : frontLoop(next);
       run([...pre, ...loop], { loop: true, loopStart: pre.length });
     },
@@ -519,7 +563,12 @@ export async function createMouthDemo(container, options = {}) {
       const pre = prefix(cue);
       let finished;
       const done = new Promise((resolve) => { finished = resolve; });
-      const hooks = swingHooks(dir, { onEnd: () => finished(true) });
+      const hooks = swingHooks(dir, {
+        onStart: () => {
+          if (next === "side") { if (cue) sideStart(cue); } else { cutaway.setCueLabel(null); markOff(); }
+        },
+        onEnd: () => finished(true),
+      });
       let phases;
       let loopStart;
       if (!cue) {
@@ -548,6 +597,7 @@ export async function createMouthDemo(container, options = {}) {
       cueId = null;
       cue = null;
       caption.textContent = "";
+      cutaway.setCueLabel(null);
       run([tween("reset", 300, { w: 0, vis: 0, show: showTarget() }, d)]);
     },
 

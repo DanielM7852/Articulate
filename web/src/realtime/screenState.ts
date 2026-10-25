@@ -1,4 +1,4 @@
-import type { CueId } from '../live/liveCoach';
+import type { MouthCueId } from '@mouth-demo/src/mouth-demo.js';
 
 /**
  * What the learner sees and can do in the word lesson, as one short "On screen: ..." message for Ava
@@ -10,7 +10,7 @@ export interface ScreenState {
   /** stepLabel output, for example "Part 1 of 3 · a" or "Whole word". */
   step: string;
   view: 'front' | 'side';
-  cue: CueId | null;
+  cue: MouthCueId | null;
   /** Caption of the last feedback line given, if any. */
   feedback: string | null;
   canMouthCue: boolean;
@@ -26,10 +26,14 @@ export interface ScreenState {
 export const SCREEN_STATE_MAX = 350;
 const FEEDBACK_MAX = 70;
 
-const CUE_NAME: Record<CueId, string> = {
+const CUE_NAME: Record<MouthCueId, string> = {
   'open-jaw': 'open-jaw mouth shape',
   'spread-lips': 'spread-lips mouth shape',
   'round-lips': 'round-lips mouth shape',
+  'tongue-tip': 'tongue-tip side view',
+  'tongue-tip-r': 'tongue tip into the r side view',
+  'tongue-r': 'r tongue side view',
+  'tongue-back': 'back-of-the-tongue side view',
 };
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 

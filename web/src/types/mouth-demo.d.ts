@@ -3,7 +3,7 @@
  * the `@mouth-demo` Vite alias). Mirrors the API table in mouth-demo/README.md.
  */
 declare module '@mouth-demo/src/mouth-demo.js' {
-  export type MouthCueId = 'round-lips' | 'spread-lips' | 'open-jaw';
+  export type MouthCueId = 'round-lips' | 'spread-lips' | 'open-jaw' | 'tongue-tip' | 'tongue-tip-r' | 'tongue-r' | 'tongue-back';
   export type MouthView = 'front' | 'side';
   export type MouthStyle = 'hologram' | 'particles' | 'porcelain' | 'hybrid' | 'solid';
   export type MouthDriver = 'auto' | 'talkinghead' | 'three';

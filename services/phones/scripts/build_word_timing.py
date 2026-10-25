@@ -71,7 +71,7 @@ def pct(xs, q):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--voices", default=str(REPO.parent / "voices"))
+    ap.add_argument("--voices", default=str(REPO / "fixtures" / "voices"))
     sp = "C:/Users/Omkar/AppData/Local/Temp/claude/c--Users-Omkar-calhacks/4bfa16ca-50e0-47f9-ab14-47534f420762/scratchpad"
     ap.add_argument("--report", default=f"{sp}/word_timing_report.md")
     ap.add_argument("--out", default=str(REPO / "web/src/game/ghost/models/recorded-timing.json"))
