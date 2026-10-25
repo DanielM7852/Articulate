@@ -6,11 +6,15 @@ Run from the backend directory:
 """
 
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.live_routes import health_router, router as live_router
 from app.api.routes import router
@@ -82,11 +86,63 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if request.url.path.startswith("/v1/speech") and read_identity(request) is None:
                 return JSONResponse({"detail": "identity_required"}, status_code=401)
             return await call_next(request)
+    frontend = _frontend_dir(active)
+    if frontend is not None and (frontend / "index.html").is_file():
+        # Registered ahead of the API router so the built app, not the listening-check page, owns "/".
+        app.add_api_route("/", _frontend_index(frontend), methods=["GET", "HEAD"], include_in_schema=False)
     app.include_router(router)
     app.include_router(live_router)
     app.include_router(health_router)
     app.include_router(realtime_router)
+    if frontend is not None:
+        _mount_frontend(app, frontend)
     return app
+
+
+# Paths the frontend fallback never answers, so API 404s stay JSON and are never shadowed by index.html.
+_API_PREFIXES = ("/v1/", "/health", "/docs", "/redoc", "/openapi.json")
+
+
+def _frontend_dir(settings: Settings) -> Path | None:
+    if not settings.static_dir.strip():
+        return None
+    directory = Path(settings.static_dir).resolve()
+    return directory if directory.is_dir() else None
+
+
+def _frontend_index(directory: Path):
+    def index() -> FileResponse:
+        return FileResponse(directory / "index.html", headers={"Cache-Control": "no-cache"})
+
+    return index
+
+
+def _mount_frontend(app: FastAPI, directory: Path) -> None:
+    """Serve the built frontend only where routing found nothing.
+
+    Hooked on 404 instead of a catch-all route or mount, so every API route keeps its own
+    405/404 behavior. GET/HEAD for an existing file returns it; any other path without a file
+    extension falls back to index.html (the app uses a HashRouter, so this is only a safety net).
+    """
+    mimetypes.add_type("application/wasm", ".wasm")
+    mimetypes.add_type("text/javascript", ".mjs")
+    index = directory / "index.html"
+
+    async def not_found(request: Request, exc: StarletteHTTPException):
+        path = request.url.path
+        if request.method not in ("GET", "HEAD") or path == "/v1" or path.startswith(_API_PREFIXES):
+            return await http_exception_handler(request, exc)
+        try:
+            candidate = (directory / path.lstrip("/")).resolve()
+            if candidate.is_relative_to(directory) and candidate.is_file():
+                return FileResponse(candidate)
+        except (OSError, ValueError):
+            return await http_exception_handler(request, exc)
+        if "." not in path.rsplit("/", 1)[-1] and index.is_file():
+            return FileResponse(index, headers={"Cache-Control": "no-cache"})
+        return await http_exception_handler(request, exc)
+
+    app.add_exception_handler(404, not_found)
 
 
 app = create_app()

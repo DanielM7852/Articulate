@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     max_sample_rate_hz: int = 48_000
     analysis_version: str = "pitch-v1"
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    # Built web/dist to serve at / (single-container hosting). Blank or a missing directory keeps the API-only app.
+    static_dir: str = ""
 
     # Engineering comparison thresholds. See docs/backend-contract.md.
     ending_direction_st: float = 1.5
