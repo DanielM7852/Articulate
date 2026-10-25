@@ -80,6 +80,11 @@ const EDGES: [NodeId, NodeId, number][] = [
 
 /** Perception streams (10 Hz): they drive the wireframe and the audio equaliser in place, no packets. */
 const PERCEPT = new Set(['lip.mesh', 'audio.spectrum']);
+/**
+ * Kinds that feed the learner's own perception cards (camera, mic, MediaPipe, Audio). With a `learner` prop these
+ * are taken only from tabs whose sid announced that profile id; stt.transcript is gated for the mic state only.
+ */
+const SCOPED = new Set(['camera.on', 'camera.off', 'stt.open', 'stt.close', 'lip.frame', 'audio.frame', 'lip.mesh', 'audio.spectrum']);
 /** High-rate kinds: they animate but stay out of the ticker. */
 const QUIET = new Set(['lip.frame', 'audio.frame', 'lip.batch', 'audio.batch', ...PERCEPT]);
 
@@ -156,6 +161,8 @@ interface Model {
   lastAt: Record<string, number>;
   /** sid -> last seen (epoch ms); leftAt is set while the dot fades out */
   presence: Map<string, { seen: number; leftAt: number | null }>;
+  /** sid -> classroom profile id, from the `pid` a learner tab puts on ui.join / ui.ping */
+  pidBySid: Map<string, string>;
 }
 
 const freshModel = (): Model => ({
@@ -183,6 +190,7 @@ const freshModel = (): Model => ({
   ticker: [],
   lastAt: {},
   presence: new Map(),
+  pidBySid: new Map(),
 });
 
 interface Snap {
@@ -267,14 +275,18 @@ function prunePresence(m: Model): boolean {
       }
     } else if (wall - v.leftAt > FADE_MS) {
       m.presence.delete(sid);
+      m.pidBySid.delete(sid);
       changed = true;
     }
   }
   return changed;
 }
 
-/** Folds one event into the card model. Older events (backfill) never overwrite newer state of the same kind. */
-function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
+/**
+ * Folds one event into the card model. Older events (backfill) never overwrite newer state of the same kind.
+ * `learner` (a classroom profile id, '' for the whole stream) limits the perception cards to that learner's tabs.
+ */
+function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner = '') {
   m.count += 1;
   const psid = typeof e.payload?.sid === 'string' ? e.payload.sid : null;
   if (psid && Date.now() - e.at <= PRESENCE_MS) {
@@ -284,8 +296,17 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
     } else if (!cur || cur.leftAt === null || e.kind === 'ui.join') {
       m.presence.set(psid, { seen: Math.max(e.at, cur?.seen ?? 0), leftAt: null });
     }
+    if (e.kind === 'ui.join' || e.kind === 'ui.ping') {
+      const pid = e.payload?.pid;
+      if (typeof pid === 'string' && pid.length > 0 && pid.length <= 64) m.pidBySid.set(psid, pid);
+      else m.pidBySid.delete(psid);
+    }
   }
   if (live) m.stamps.push(now);
+  // Per-learner view: other tabs still count as traffic and presence (above), but never reach the perception cards.
+  // Filtered here, at apply time, so a tab is picked up as soon as its ui.join / ui.ping names the learner.
+  const mine = !learner || (psid !== null && m.pidBySid.get(psid) === learner);
+  if (!mine && SCOPED.has(e.kind)) return;
   const prev = m.lastAt[e.kind];
   if (prev !== undefined && e.at < prev) return;
   m.lastAt[e.kind] = e.at;
@@ -349,7 +370,7 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
     }
     case 'stt.transcript':
       m.stt = { text: (str(p.text) ?? '').slice(0, 80), final: p.final === true };
-      if (m.micOpen === null) m.micOpen = true;
+      if (mine && m.micOpen === null) m.micOpen = true;
       break;
     case 'tts.speak':
       m.tts = { chars: num(p.chars) ?? 0, voice: str(p.voice) ?? '—', ms: m.tts?.ms ?? null };
@@ -1296,7 +1317,7 @@ function Spark({ bars, level }: { bars: number[]; level: number | null }) {
 
 const SPARC_LABELS = ['tongue height', 'tongue front', 'jaw open', 'lip forward', 'lip aperture'];
 
-function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HTMLCanvasElement> }): ReactNode {
+function Detail({ id, s, wireRef, scoped }: { id: NodeId; s: Snap; wireRef: RefObject<HTMLCanvasElement>; scoped: boolean }): ReactNode {
   switch (id) {
     case 'camera':
       return <p className="dash-status" data-on={s.camera === true || undefined}>{s.camera === null ? 'waiting' : s.camera ? 'on' : 'off'}</p>;
@@ -1313,7 +1334,7 @@ function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HT
             <div><dt>round</dt><dd>{s.lip ? s.lip.rounding.toFixed(2) : '—'}</dd></div>
             <div><dt>face</dt><dd data-warn={s.lip && !s.lip.ok ? 'true' : undefined}>{s.lip ? (s.lip.ok ? 'ok' : 'lost') : '—'}</dd></div>
           </dl>
-          <p className="dash-meta">{s.meshLive ? `face mesh · ${s.meshPoints} points` : 'no face'}</p>
+          <p className="dash-meta">{s.meshLive ? `face mesh · ${s.meshPoints} points` : scoped ? 'waiting for this learner’s camera' : 'no face'}</p>
         </div>
       );
     case 'audio': {
@@ -1491,6 +1512,11 @@ export type LiveGraphProps = {
   demo?: boolean;
   onEvent?: (event: TelemetryEvent) => void;
   onStream?: (state: { conn: 'connecting' | 'live' | 'offline'; count: number; lastAt: number | null }) => void;
+  /**
+   * A classroom profile id: the face, equaliser and other perception cards show only tabs that announced it
+   * (ui.join / ui.ping `pid`). Empty or undefined, and in demo replay, the whole stream as before.
+   */
+  learner?: string;
 };
 
 export default function Dashboard({
@@ -1500,6 +1526,7 @@ export default function Dashboard({
   demo: demoProp = false,
   onEvent,
   onStream,
+  learner = '',
 }: LiveGraphProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -1523,6 +1550,10 @@ export default function Dashboard({
   const demo = embedded ? demoProp : forced === true;
   const demoRef = useRef(demo);
   demoRef.current = demo;
+  /** the learner the perception cards are limited to; never in demo replay */
+  const scope = demo ? '' : learner;
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   const liveSeen = useRef(false);
   const tickSeq = useRef(0);
   const lastStamp = useRef<number | null>(null);
@@ -1530,7 +1561,7 @@ export default function Dashboard({
   const ingest = useCallback((e: TelemetryEvent, animate: boolean) => {
     const now = performance.now();
     const m = model.current;
-    apply(m, e, now, animate);
+    apply(m, e, now, animate, scopeRef.current);
     if (animate) {
       engine.current?.fire(e);
       if (e.kind === 'claude.response' && m.claudeLine) engine.current?.setLine(m.claudeLine);
@@ -1602,10 +1633,24 @@ export default function Dashboard({
 
   // A switch between live and replay starts from clean cards.
   useEffect(() => {
-    model.current = freshModel();
+    // keep the sid -> profile map: a learner tab only re-announces itself on its next ping
+    model.current = { ...freshModel(), pidBySid: model.current.pidBySid };
     engine.current?.reset();
     dirty.current = true;
   }, [demo]);
+
+  // A different learner (or none) starts the perception cards empty, so no other tab's face lingers.
+  useEffect(() => {
+    const m = model.current;
+    m.camera = null;
+    m.micOpen = null;
+    m.lip = null;
+    m.audio = null;
+    m.mesh = null;
+    m.spectrum = null;
+    for (const k of SCOPED) delete m.lastAt[k];
+    dirty.current = true;
+  }, [scope]);
 
   // Live stream: always subscribed, so a live event can end an automatic replay.
   useEffect(() => {
@@ -1741,7 +1786,7 @@ export default function Dashboard({
                 <span className="dash-node__loc">{titled?.loc ?? n.loc}</span>
               </h2>
               <p className="dash-node__cap">{n.caption}</p>
-              {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} />}
+              {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} scoped={scope !== ''} />}
               {n.id === 'ui' && <Presence dots={snap.dots} />}
             </section>
           );
@@ -1752,7 +1797,9 @@ export default function Dashboard({
           <p>
             Each cluster is one part of the system. A packet runs along the path that event actually took.
             A lesson change can stop at the database. It does not have to pass through a model.
-            The lip wireframe and the equalizer are the live perception streams, not a named learner.
+            {scope
+              ? 'The face and the equalizer show only the selected learner’s tab, once it has announced its profile.'
+              : 'The lip wireframe and the equalizer are the live perception streams, not a named learner.'}
           </p>
         </aside>
 

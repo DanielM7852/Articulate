@@ -1,5 +1,6 @@
 import { DbConnection } from '../module_bindings';
 import { readToken, saveToken } from '../live/stdbToken';
+import { loadSession } from '../classroom/session';
 
 /**
  * Fire-and-forget telemetry for the backend dashboard (see docs/telemetry.md).
@@ -151,6 +152,16 @@ function deviceClass(): 'phone' | 'tablet' | 'desktop' {
   return 'desktop';
 }
 
+/**
+ * The classroom profile id when this tab is a joined classroom learner, else null. Read fresh each time, so a
+ * learner who joins after the page loaded is attributed from the next ping. The teacher's per-learner view maps
+ * sid -> pid from this (display attribution only; see docs/telemetry.md).
+ */
+function learnerPid(): string | null {
+  const s = loadSession();
+  return s?.role === 'learner' && typeof s.profileId === 'string' && s.profileId.length <= 64 ? s.profileId : null;
+}
+
 function startPresence(): void {
   if (presenceStarted) return;
   // The dashboard viewer is not a learner.
@@ -161,10 +172,13 @@ function startPresence(): void {
     /* ignore */
   }
   presenceStarted = true;
-  emit('ui', 'db', 'ui.join', 'learner joined', { sid: getSessionId(), ua: deviceClass() });
+  const pid = learnerPid();
+  emit('ui', 'db', 'ui.join', 'learner joined', pid ? { sid: getSessionId(), ua: deviceClass(), pid } : { sid: getSessionId(), ua: deviceClass() });
   try {
     setInterval(() => {
-      if (document.visibilityState === 'visible') emit('ui', 'db', 'ui.ping', 'presence ping');
+      if (document.visibilityState !== 'visible') return;
+      const p = learnerPid();
+      emit('ui', 'db', 'ui.ping', 'presence ping', p ? { pid: p } : {});
     }, PING_MS);
     window.addEventListener('pagehide', () => {
       emit('ui', 'db', 'ui.leave', 'learner left');

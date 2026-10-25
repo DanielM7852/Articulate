@@ -81,8 +81,8 @@ At most 400 rows. When an insert pushes the count over, the oldest rows among th
 | db.read / db.write | backend -> db       | `{table, rows}`                                                        |
 | backend.up         | backend -> db       | `{provider, model, articulation, pitchTable, coordination, telemetryIdentity}` once at startup when telemetry goes live; label "backend online"; telemetryIdentity is `anonymous` or `configured` |
 | video.score        | backend -> ui       | `{verdict, okFrames}`                                                  |
-| ui.join            | ui -> db            | `{sid, ua}` ua = coarse device class: phone, tablet or desktop; label "learner joined" |
-| ui.ping            | ui -> db            | `{sid}` every 20 s while the tab is visible                            |
+| ui.join            | ui -> db            | `{sid, ua, pid?}` ua = coarse device class: phone, tablet or desktop; pid = classroom profile id, joined learners only; label "learner joined" |
+| ui.ping            | ui -> db            | `{sid, pid?}` every 20 s while the tab is visible                      |
 | ui.leave           | ui -> db            | `{sid}` on `pagehide`, best effort                                     |
 
 Rates: lip.frame and audio.frame are throttled to at most 5 per second each by the browser.
@@ -92,9 +92,13 @@ Everything else is one event per occurrence.
 
 Every browser event carries `sid` in its payload: an anonymous per-tab id (8 lowercase hex chars from
 `crypto.getRandomValues`, kept in `sessionStorage` under `articulate.telemetry.sid`, in memory if storage is
-blocked). It identifies nothing about the person and is not linked to any profile. The client adds it to every
-`emit` unless the payload already has one, and emits `ui.join` once the connection is ready (never from the
-dashboard page itself).
+blocked). On its own it identifies nothing about the person. The client adds it to every `emit` unless the
+payload already has one, and emits `ui.join` once the connection is ready (never from the dashboard page itself).
+
+`ui.join` is `{sid, ua}` and `ui.ping` (every 20 s while the tab is visible) is `{sid}`. Both add an optional
+`pid` when the tab is a joined classroom learner (`loadSession()` has role `learner`): the classroom profile id,
+at most 64 chars. The ping re-reads the session, so a learner who joins the classroom after the page loaded is
+attributed from the next ping. Tabs that are not classroom learners send no `pid`.
 
 Presence rule on the dashboard: any event whose payload has a `sid` marks that session live as of the event time.
 A session is dropped on `ui.leave` or after 60 s without any event (pings every 20 s keep an idle visible tab alive).
@@ -194,7 +198,13 @@ not from this table.
 `telemetry_event` is public. Any connected identity can subscribe to it and call `emit_telemetry`.
 A teacher session on the classroom database does not grant or limit this stream, and the teaching
 console does not use the teacher token for it. The Live system tab says so in the page. The inspector
-drops token-like payload fields and session ids. Hiding the tab would not be an access control.
+drops token-like payload fields, session ids, and profile ids. Hiding the tab would not be an access control.
+
+With a learner selected, the Live system graph limits its perception cards (face mesh, equalizer, lip and audio
+frames, camera and microphone state) to tabs whose `sid` that learner's own `ui.join` / `ui.ping` mapped to the
+selected `pid`. The filter applies as events arrive, so frames sent before the announcement are skipped, not held
+back. Other tabs still count as traffic and presence, and every other card is the whole public stream. A tab can
+claim any `pid`, so this is attribution for display, not authentication. Demo replay is never filtered.
 
 Demo replay reads `telemetry-demo.json` in the browser. It does not call classroom reducers.
 

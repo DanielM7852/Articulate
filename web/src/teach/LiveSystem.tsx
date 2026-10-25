@@ -64,7 +64,7 @@ export default function LiveSystem({
           title={
             stream.conn === 'connecting'
               ? 'System stream connecting. A count of zero is not a connection.'
-              : 'Events do not name a learner. Demo replay is sample traffic and does not change lessons, learners, or acknowledgments.'
+              : `${location.learner && !demo ? 'The face and equalizer show only this learner’s tab once it has announced its profile. Other events are the whole public stream.' : 'Events do not name a learner.'} Demo replay is sample traffic and does not change lessons, learners, or acknowledgments.`
           }
         >
           {stream.conn === 'live' && `Connected · ${stream.count} events`}
@@ -100,6 +100,7 @@ export default function LiveSystem({
             hidden={hidden}
             paused={paused}
             demo={demo}
+            learner={location.learner}
           onEvent={(event) => {
             const commandId = commandOf(event.payload);
             setEvents((current) => [{ ...event, commandId, payload: publicPayload(event.payload) }, ...current].slice(0, 40));
@@ -125,7 +126,9 @@ export default function LiveSystem({
           </li>
         </ol>
         <p className="fine">
-          The graph is the public system stream. Events do not name a learner or an attempt, so lip mesh and the equalizer are not attributed to the selected learner.
+          {location.learner && !demo
+            ? 'The face and the equalizer show only the selected learner’s tab, once that tab has announced its classroom profile. Every other event on the graph is still the whole public system stream, and events do not name an attempt.'
+            : 'The graph is the public system stream. Events do not name a learner or an attempt, so lip mesh and the equalizer are not attributed to the selected learner.'}
           {location.attempt ? ' Attempt filtering is not available.' : ''}
           {' '}
           {scope === 'lesson'
