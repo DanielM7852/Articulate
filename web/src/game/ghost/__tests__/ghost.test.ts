@@ -95,7 +95,21 @@ test('validator catches broken models', () => {
 test('models: markers per consonant, only stops scored, path breaks at stops', () => {
   const track = ghostModel('track');
   expect(track.source).toBe('recorded');
-  expect(ghostModel('rent').source).toBe('synthetic');
+  for (const word of ['track', 'sheep', 'rent', 'brain']) expect(ghostModel(word).source, word).toBe('recorded');
+  // the timeline stores ms rounded to 0.1, so a fraction of the JSON comes back as round(round(f * D, 1) / D, 5)
+  const r5 = (f: number, D: number) => Math.round((Math.round(f * D * 10) / 10 / D) * 1e5) / 1e5;
+  const at = (word: string, zoneId: string) => ghostModel(word).markers.find((m) => m.zoneId === zoneId)!.t;
+  const edges = (word: string) => ghostModel(word).parts.map((p) => p.t0).slice(1);
+  expect(ghostModel('sheep').durationMs).toBe(405);
+  expect(at('sheep', 'p')).toBe(r5(0.9697, 405));
+  expect(at('sheep', 'sh')).toBe(r5(0.2136, 405));
+  expect(edges('sheep').join()).toBe([r5(0.3147, 405), r5(0.6802, 405)].join());
+  expect(ghostModel('rent').durationMs).toBe(410);
+  expect(at('rent', 't')).toBe(r5(0.913, 410));
+  expect(edges('rent').join()).toBe([r5(0.2381, 410), r5(0.4524, 410)].join());
+  expect(ghostModel('brain').durationMs).toBe(520);
+  expect(at('brain', 'n')).toBe(r5(0.814, 520));
+  expect(edges('brain').join()).toBe([r5(0.2593, 520), r5(0.5581, 520)].join());
   expect(track.factor).toBe(0);
   expect(track.markers.map((m) => `${m.zoneId}:${m.kind}:${m.scored}`).join()).toBe('t:stop:true,r:liquid:false,k:stop:true');
   const rent = ghostModel('rent');

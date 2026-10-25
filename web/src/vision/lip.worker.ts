@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
-import { computeLipFrame, meshPoints } from './lipTelemetry';
+import { computeLipFrame, meshPacked, meshPoints } from './lipTelemetry';
 
 // MediaPipe loads its wasm glue with importScripts(), which throws inside a module worker
 // (the Vite dev server). Fall back to a synchronous fetch + global eval in that case.
@@ -62,7 +62,8 @@ self.onmessage = async (ev: MessageEvent) => {
       );
       const face = res.faceLandmarks?.[0];
       const mesh = face ? (meshPoints(face) ?? undefined) : undefined;
-      postMessage({ type: 'frame', frame, mesh });
+      const meshPackedV3 = face ? (meshPacked(face) ?? undefined) : undefined;
+      postMessage({ type: 'frame', frame, mesh, meshPacked: meshPackedV3 });
     } catch (err) {
       postMessage({ type: 'error', detail: err instanceof Error ? err.message : String(err) });
     } finally {

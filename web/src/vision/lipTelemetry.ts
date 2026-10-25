@@ -55,20 +55,56 @@ const MESH_ORDER = [...OUTER_LIP, ...INNER_LIP, ...FACE_OVAL, 33, 133, 362, 263,
  */
 export function meshPoints(L: Point3D[] | { x: number; y: number }[]): number[] | null {
   for (const i of MESH_ORDER) if (!L[i]) return null;
-  const mid = (a: number, b: number) => ({ x: (L[a].x + L[b].x) / 2, y: (L[a].y + L[b].y) / 2 });
-  const le = mid(33, 133);
-  const re = mid(362, 263);
-  const iod = Math.hypot(le.x - re.x, le.y - re.y);
-  if (!(iod > 1e-6)) return null;
-  const half = 1.6 * iod;
-  const nose = L[1];
+  const f = meshFrame(L);
+  if (!f) return null;
   const out: number[] = [];
   for (const i of MESH_ORDER) {
-    const nx = (L[i].x - nose.x) / half; // -1..1
-    const ny = (L[i].y - nose.y) / half;
+    const nx = (L[i].x - f.cx) / f.half; // -1..1
+    const ny = (L[i].y - f.cy) / f.half;
     out.push(clamp(Math.round(((nx + 1) / 2) * 255), 0, 255), clamp(Math.round(((ny + 1) / 2) * 255), 0, 255));
   }
   return out;
+}
+
+/** Nose-centred square shared by every mesh encoding: centre = landmark 1, half-size 1.6 x inter-ocular. */
+function meshFrame(L: { x: number; y: number }[]): { cx: number; cy: number; half: number; iod: number } | null {
+  if (!L[1] || !L[33] || !L[133] || !L[362] || !L[263]) return null;
+  const le = { x: (L[33].x + L[133].x) / 2, y: (L[33].y + L[133].y) / 2 };
+  const re = { x: (L[362].x + L[263].x) / 2, y: (L[362].y + L[263].y) / 2 };
+  const iod = Math.hypot(le.x - re.x, le.y - re.y);
+  if (!(iod > 1e-6)) return null;
+  return { cx: L[1].x, cy: L[1].y, half: 1.6 * iod, iod };
+}
+
+function base64Bytes(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x2000) {
+    bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 0x2000)));
+  }
+  return btoa(bin);
+}
+
+/**
+ * lip.mesh v3: up to 478 landmarks, 3 bytes each (x uint8, y uint8, z uint8), base64. 478 points
+ * -> 1,434 bytes -> 1,912 chars, so the whole payload fits the live 2048-byte reducer cap.
+ * x,y span the nose-centred square over 0..255; z = landmark.z / inter-ocular mapped from
+ * [-0.6, 0.6] to 0..255 (0 = nearest the camera). Null when fewer than 468 landmarks.
+ * (v2, 5 bytes per point with uint16 x,y, is replay-only now: it overflowed the live cap.)
+ */
+export function meshPacked(L: Point3D[]): { v: 3; n: number; pts: string } | null {
+  if (!L || L.length < 468) return null;
+  const f = meshFrame(L);
+  if (!f) return null;
+  const n = L.length >= 478 ? 478 : 468;
+  const bytes = new Uint8Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const p = L[i];
+    const o = i * 3;
+    bytes[o] = clamp(Math.round((((p.x - f.cx) / f.half + 1) / 2) * 255), 0, 255);
+    bytes[o + 1] = clamp(Math.round((((p.y - f.cy) / f.half + 1) / 2) * 255), 0, 255);
+    bytes[o + 2] = clamp(Math.round(((p.z / f.iod + 0.6) / 1.2) * 255), 0, 255);
+  }
+  return { v: 3, n, pts: base64Bytes(bytes) };
 }
 
 const ORAL_BLENDSHAPES = new Set([

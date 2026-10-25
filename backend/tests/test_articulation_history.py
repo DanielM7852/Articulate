@@ -50,7 +50,7 @@ def test_local_no_features_unchanged(tmp_path):
     ctx = asyncio.run(go())
     assert set(ctx.attempts[0]) == {
         "attemptId", "sound", "audioVerdict", "f1Offset", "f2Offset", "inTargetFraction",
-        "videoVerdict", "cueId", "nextAction",
+        "videoVerdict", "cueId", "nextAction", "caption", "focusZoneId", "wordVerdict",
     }
 
 

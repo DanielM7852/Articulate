@@ -31,7 +31,7 @@ export function publicPayload(payload: Record<string, unknown>): Record<string, 
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(payload)) {
     if (SECRET.test(key)) continue;
-    if (key === 'sid') continue;
+    if (key === 'sid' || key === 'pid') continue;
     out[key] = typeof value === 'string' && value.length > 180 ? `${value.slice(0, 180)}…` : value;
   }
   return out;

@@ -3,7 +3,8 @@ import type { LipFrame } from './lipTelemetry';
 import { emit, throttledEmit } from '../telemetry/client';
 
 export type { LipFrame } from './lipTelemetry';
-export type LipTrackingStatus = 'off' | 'loading' | 'tracking' | 'no-face' | 'error';
+/** 'warming': the worker is ready but MediaPipe has not returned its first result yet (can take 6 to 16 s). */
+export type LipTrackingStatus = 'off' | 'loading' | 'warming' | 'tracking' | 'no-face' | 'error';
 
 export interface LipTracking {
   status: LipTrackingStatus;
@@ -18,6 +19,10 @@ const POLL_MS = 70; // ~14 Hz
 const STATE_MS = 200; // React state updates <= 5 Hz
 const WINDOW_CAP = 600;
 const BASE = import.meta.env.BASE_URL;
+/** The deployed emit_telemetry reducer caps payload_json at 2048 bytes; keep a margin. */
+const MAX_PAYLOAD_BYTES = 2000;
+const SID_BYTES = 20;
+let warnedMeshSize = false;
 
 export function useLipTracking(video: HTMLVideoElement | null, enabled: boolean): LipTracking {
   const [status, setStatus] = useState<LipTrackingStatus>('off');
@@ -56,11 +61,16 @@ export function useLipTracking(video: HTMLVideoElement | null, enabled: boolean)
       const d = ev.data;
       if (d.type === 'ready') {
         ready = true;
-        lastStatus = 'no-face';
-        setStatus('no-face');
+        lastStatus = 'warming';
+        setStatus('warming');
       } else if (d.type === 'error') {
         inFlight = false;
         if (!ready) fail(d.detail || 'Lip tracking failed to load');
+        else if (lastStatus === 'warming') {
+          // a failed detect is still the first result: leave the warm-up state
+          lastStatus = 'no-face';
+          setStatus('no-face');
+        }
       } else if (d.type === 'frame') {
         inFlight = false;
         const f: LipFrame = d.frame;
@@ -71,7 +81,24 @@ export function useLipTracking(video: HTMLVideoElement | null, enabled: boolean)
         }
         subs.current.forEach((fn) => fn(f));
         const mesh: number[] | undefined = d.mesh;
-        if (mesh) throttledEmit('lip.mesh', 100, 'mediapipe', 'db', 'lip.mesh', 'face mesh', { pts: mesh });
+        const packed: { v: 3; n: number; pts: string } | undefined = d.meshPacked;
+        const r1 = (n: number) => Math.round(n * 10) / 10;
+        const meshPayload: Record<string, unknown> | null = packed
+          ? { v: 3, n: packed.n, pts: packed.pts, yaw: r1(f.yawDeg), pitch: r1(f.pitchDeg), roll: r1(f.rollDeg) }
+          : mesh
+            ? { pts: mesh }
+            : null;
+        if (meshPayload) {
+          // emit() appends the session id (`,"sid":"xxxxxxxx"`, 17 bytes). The payload is ASCII, so length = bytes.
+          if (JSON.stringify(meshPayload).length + SID_BYTES > MAX_PAYLOAD_BYTES) {
+            if (!warnedMeshSize) {
+              warnedMeshSize = true;
+              console.debug('lip.mesh payload exceeds the telemetry cap; dropping');
+            }
+          } else {
+            throttledEmit('lip.mesh', 100, 'mediapipe', 'db', 'lip.mesh', 'face mesh', meshPayload);
+          }
+        }
         throttledEmit('lip.frame', 200, 'mediapipe', 'db', 'lip.frame', 'lip frame', {
           ok: f.ok,
           opening: f.lipOpening,

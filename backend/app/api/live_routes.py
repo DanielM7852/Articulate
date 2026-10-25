@@ -211,7 +211,8 @@ async def live_session_turn(body: SessionTurnRequest, request: Request) -> Sessi
 async def _find_attempt(history, profile_id: str, attempt_id: str, limit: int) -> tuple[list[dict], dict | None]:
     """Recent attempts (newest first) and the one for attempt_id; waits once for the coach record to persist."""
     for tries_left in (1, 0):
-        items = list((await history.load(profile_id, limit)).attempts)
+        context = await history.load(profile_id, limit)
+        items = [*context.attempts, *context.word_attempts]
         match = next((i for i in items if isinstance(i, dict) and i.get("attemptId") == attempt_id), None)
         if match is not None or not tries_left:
             return items, match

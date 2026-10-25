@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { connectPhoneStream, type Phone, type PhoneFrame, type PhoneStreamHandle, type StreamState } from './phoneStream';
+import { connectPhoneStream, type Phone, type PhoneFrame, type PhoneStreamHandle, type StreamReason, type StreamState } from './phoneStream';
 import { RESET_GUARD_MS, mergeHeard } from './phoneCursor';
 
 /** A recognizer frame with a client-side sequence number (monotonic for the hook's lifetime, never reset). */
@@ -12,6 +12,8 @@ const MAX_FRAMES = 60;
 /** What the ghost board needs to drive its cursor from the phone recognizer. */
 export interface PhoneCursorInput {
   state: StreamState;
+  /** Why the stream is not usable (set with 'closed'/'error' on connection problems); undefined otherwise. */
+  reason?: StreamReason;
   /** Committed + provisional phones in order, in stream time since the last reset. */
   phones: Phone[];
   /** The newest recognizer frames since the last reset, oldest first; empty when the server sends none. */
@@ -43,7 +45,7 @@ export function usePhoneCursor(stream: MediaStream | null, enabled: boolean, res
     let h: PhoneStreamHandle | null = null;
     try {
       h = connectPhoneStream(stream, {
-        onState: (s) => setOut((o) => ({ ...o, state: s, phones: s === 'ready' ? o.phones : [], frames: s === 'ready' ? o.frames : [] })),
+        onState: (s, info) => setOut((o) => ({ ...o, state: s, reason: s === 'closed' || s === 'error' ? info?.reason : undefined, phones: s === 'ready' ? o.phones : [], frames: s === 'ready' ? o.frames : [] })),
         onPhones: (u) => {
           if (performance.now() - resetAt.current < RESET_GUARD_MS) return;
           const fresh: SeqFrame[] = u.frames.map((f) => ({ ...f, n: ++frameN.current }));
@@ -55,7 +57,7 @@ export function usePhoneCursor(stream: MediaStream | null, enabled: boolean, res
         },
       });
     } catch {
-      setOut({ state: 'error', phones: [], frames: [], resetAt: 0 });
+      setOut({ state: 'error', reason: 'unreachable', phones: [], frames: [], resetAt: 0 });
     }
     handle.current = h;
     return () => {

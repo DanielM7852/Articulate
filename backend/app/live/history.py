@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LearnerContext:
-    attempts: list[dict[str, Any]] = field(default_factory=list)  # newest first, compact
+    attempts: list[dict[str, Any]] = field(default_factory=list)  # vowel turns, newest first, compact
+    word_attempts: list[dict[str, Any]] = field(default_factory=list)  # word turns, newest first, compact
+    timeline: list[dict[str, Any]] = field(default_factory=list)  # every turn, newest first, for the learner model
     notes: dict[str, Any] | None = None
 
 
@@ -34,6 +36,7 @@ class LearnerHistory(Protocol):
     async def same_pitch_cue_count(self, profile_id: str, attempt_id: str, word: str, cue: str) -> int: ...
 
 
+MODEL_LOOKBACK = 200  # turns the learner model is built from
 ARTIC_LOOKBACK = 3  # load limit * 3 attempts so older on_target anchors are available to annotate_attempts
 
 
@@ -53,6 +56,28 @@ def compact_attempt(summary: dict, decision: dict | None = None) -> dict[str, An
     audio = summary.get("audio") or {}
     video = summary.get("video") or {}
     decision = decision or {}
+    w = summary.get("word")
+    caption = summary.get("caption", decision.get("caption"))
+    if isinstance(w, dict):
+        zones = w.get("zones") or []
+        practice = w.get("practiceZoneIds")
+        return {
+            "kind": "word",
+            "attemptId": summary.get("attemptId"),
+            "word": w.get("word"),
+            "verdict": w.get("verdict"),
+            "quality": w.get("quality", "usable" if zones else None),
+            "zones": [
+                {"id": z.get("zoneId"), "phoneme": z.get("phoneme"), "kind": z.get("kind"),
+                 "verdict": z.get("verdict"), "advisory": bool(z.get("advisory")),
+                 "inScope": not practice or z.get("zoneId") in practice}
+                for z in zones if isinstance(z, dict)
+            ],
+            "focusZoneId": summary.get("focusZoneId", decision.get("focusZoneId")),
+            "cueId": summary.get("cueId", decision.get("cueId")),
+            "nextAction": summary.get("nextAction", decision.get("nextAction")),
+            "caption": caption,
+        }
     return {
         "attemptId": summary.get("attemptId"),
         "sound": summary.get("sound"),
@@ -63,9 +88,21 @@ def compact_attempt(summary: dict, decision: dict | None = None) -> dict[str, An
         "videoVerdict": video.get("verdict") if video else None,
         "cueId": summary.get("cueId", decision.get("cueId")),
         "nextAction": summary.get("nextAction", decision.get("nextAction")),
+        "caption": caption,
         "focusZoneId": summary.get("focusZoneId", decision.get("focusZoneId")),
         "wordVerdict": (summary.get("word") or {}).get("verdict") if isinstance(summary.get("word"), dict) else None,
     }
+
+
+def _split(compacts: list[dict[str, Any]], features: dict[str, dict], limit: int) -> LearnerContext:
+    """Newest-first compacts into vowel turns (annotated), word turns and the full timeline."""
+    vowels = [c for c in compacts if c.get("kind") != "word"]
+    words = [c for c in compacts if c.get("kind") == "word"]
+    return LearnerContext(
+        attempts=_annotate(vowels[: limit * ARTIC_LOOKBACK], features, limit),
+        word_attempts=words[:limit],
+        timeline=compacts[:MODEL_LOOKBACK],
+    )
 
 
 def _safe_name(profile_id: str) -> str:
@@ -101,17 +138,16 @@ class LocalHistory:
     async def load(self, profile_id: str, limit: int) -> LearnerContext:
         data = await asyncio.to_thread(self._read, profile_id)
         turns = [t for t in data.get("attempts", []) if isinstance(t, dict)]
-        recent = list(reversed(turns))[: limit * ARTIC_LOOKBACK]
+        recent = list(reversed(turns))[:MODEL_LOOKBACK]
         stored = data.get("articulation")
         features = {
             k: v["features"] for k, v in (stored.items() if isinstance(stored, dict) else [])
             if isinstance(v, dict) and isinstance(v.get("features"), dict)
         }
         compacts = [compact_attempt(t.get("summary") or {}, t.get("decision")) for t in recent]
-        return LearnerContext(
-            attempts=_annotate(compacts, features, limit),
-            notes=data.get("notes") if isinstance(data.get("notes"), dict) else None,
-        )
+        context = _split(compacts, features, limit)
+        context.notes = data.get("notes") if isinstance(data.get("notes"), dict) else None
+        return context
 
     async def record(self, profile_id: str, attempt_id: str, summary: dict, decision: dict) -> bool:
         def work() -> None:
@@ -218,7 +254,7 @@ class SpacetimeHistory:
             summary.setdefault("attemptId", unwrap(row.get("attempt_id")))
             summary.setdefault("sound", unwrap(row.get("sound")))
             attempts.append(compact_attempt(summary))
-            if len(attempts) >= limit * ARTIC_LOOKBACK:
+            if len(attempts) >= MODEL_LOOKBACK:
                 break
         features: dict[str, dict] = {}
         try:
@@ -228,7 +264,7 @@ class SpacetimeHistory:
                     features[unwrap(row.get("attempt_id"))] = stored
         except Exception as exc:  # noqa: BLE001
             logger.warning("learner articulation read failed: %s", type(exc).__name__)
-        attempts = _annotate(attempts, features, limit)
+        context = _split(attempts, features, limit)
         notes = None
         try:
             note_rows = await self._client.sql(f"SELECT * FROM learner_note WHERE profile_id = {lit}")
@@ -236,7 +272,8 @@ class SpacetimeHistory:
                 notes = _loads(note_rows[0].get("notes")) or None
         except Exception as exc:  # noqa: BLE001
             logger.warning("learner note read failed: %s", type(exc).__name__)
-        return LearnerContext(attempts=attempts, notes=notes)
+        context.notes = notes
+        return context
 
     async def record(self, profile_id: str, attempt_id: str, summary: dict, decision: dict) -> bool:
         try:

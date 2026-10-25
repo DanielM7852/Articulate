@@ -4,7 +4,7 @@ import { ghostAt } from '../follow';
 import { MAP_MARGIN, distanceToPolylines, foldPhone, formantsToMap, mapSymbols, mapToFormants, phoneMapModel, phonePlace } from '../phoneMap';
 import { validateGhostModel } from '../validate';
 import { GHOST_WORDS } from '../words';
-import { ZONE_PHONES } from '../../../live/phoneJudge';
+import { PHONE_JUDGED_WORDS, ZONE_PHONES } from '../../../live/phoneJudge';
 import phoneMapData from '../phone-map.json';
 
 const VOCAB = `a aɪ aɪ̃ aʊ b d dʒ e eɪ f h i ĩ j k kʰ l l̩ m m̩ n n̩ o oʊ oʊ̃ p pʰ r s sʰ t tʃ u v w x z æ æ̃ ð ŋ ŋ̍ ɑ ɑ̃ ɒ ɔ ɔɪ ə əʊ ə̃ ə̥ ɚ ɛ ɛ̃ ɜ ɝ ɡ ɣ ɦ ɨ ɪ ɹ ɾ ɾ̃ ʃ ʉ ʊ ʊ̃ ʌ ʒ ʔ β θ θʰ`.split(' ');
@@ -85,10 +85,13 @@ test('phone map: mapToFormants is monotonic, inside the plot, and inverts', () =
   expect(back.y).toBeCloseTo(0.7, 1e-9);
 });
 
-test('phoneMapModel(track): valid, recorded timing, passes through each target place', () => {
-  const model = phoneMapModel('track');
-  expect(validateGhostModel(model, GHOST_WORDS.track).length).toBe(0);
-  expect(model.durationMs).toBe(445);
+const DURATIONS: Record<string, number> = { track: 445, sheep: 405, rent: 410, brain: 520 };
+
+for (const word of PHONE_JUDGED_WORDS) {
+test(`phoneMapModel(${word}): valid, recorded timing, passes through each target place`, () => {
+  const model = phoneMapModel(word);
+  expect(validateGhostModel(model, GHOST_WORDS[word]).length).toBe(0);
+  expect(model.durationMs).toBe(DURATIONS[word]);
   expect(model.factor).toBe(0);
   expect(model.segments.length).toBe(1);
   expect(new Set(model.segments[0].spread).size).toBe(1);
@@ -98,15 +101,16 @@ test('phoneMapModel(track): valid, recorded timing, passes through each target p
     const part = model.parts.find((p) => p.zoneIds.includes(zoneId))!;
     return (part.t0 + part.t1) / 2;
   };
-  for (const [zone, sym] of Object.entries(ZONE_PHONES.track)) {
+  for (const [zone, sym] of Object.entries(ZONE_PHONES[word])) {
     const g = ghostAt(model, timeOf(zone));
     const got = formantsToMap(g.f1, g.f2);
     expect(got.x, `${sym}.x`).toBeCloseTo(P(sym).x, 0.003);
     expect(got.y, `${sym}.y`).toBeCloseTo(P(sym).y, 0.003);
   }
   // same for everyone: building twice gives the identical, unscaled model
-  expect(phoneMapModel('track')).toBe(model);
+  expect(phoneMapModel(word)).toBe(model);
 });
+}
 
 test('phoneMapModel: unknown word throws', () => {
   let threw = false;

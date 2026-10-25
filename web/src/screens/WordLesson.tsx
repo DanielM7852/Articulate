@@ -210,6 +210,7 @@ function micLabel(mic: MicStatus, voice: VoiceFrames['status']): string {
 const LIP_LABEL: Record<LipTrackingStatus, string> = {
   off: 'Camera off',
   loading: 'Loading lip tracking',
+  warming: 'Starting lip tracking',
   tracking: 'Lip tracking on',
   'no-face': 'Face not found',
   error: 'Lip tracking unavailable',
@@ -331,6 +332,7 @@ export default function WordLesson() {
   const [talking, setTalking] = useState(false);
   const [voiceFallback, setVoiceFallback] = useState(false); // a line fell back to the browser voice (sticky)
   const ava = useAvaRealtime({
+    profileId,
     getCoaching: async (id) => {
       const hit = coachCache.current.get(id === 'latest' ? (lastCoachId.current ?? '') : id);
       if (!hit) throw new Error('No coaching for that attempt.');

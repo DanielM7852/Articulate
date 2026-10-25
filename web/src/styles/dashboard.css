@@ -287,14 +287,14 @@
   color: var(--color-warn);
 }
 
-/* MediaPipe wireframe (drawn by the canvas engine; 200 x 200 design px inside a 226 px card) */
+/* MediaPipe face (drawn by the canvas engine; 280 x 280 design px inside a 306 px card) */
 .dash-card--mesh {
   padding: 10px 12px 9px;
 }
 .dash-wire {
   display: block;
-  width: 200px;
-  height: 200px;
+  width: 280px;
+  height: 280px;
   margin-bottom: 7px;
   /* own layer: redrawing it at 60 Hz must not repaint the whole stage */
   will-change: transform;
@@ -302,6 +302,7 @@
 .dash-card--mesh .dash-kv {
   padding-top: 6px;
   border-top: 1px solid var(--color-line);
+  grid-template-columns: repeat(4, 1fr);
 }
 .dash-card--mesh .dash-meta {
   margin-top: 4px;
@@ -329,27 +330,14 @@
   font-weight: 600;
 }
 
-/* audio envelope */
-.dash-spark {
+/* audio waveform: a dot band drawn by WaveCanvas (waveCloud.ts), which sizes the bitmap for the device */
+.dash-wave {
   display: block;
   width: 100%;
-  height: 30px;
+  height: 36px;
   margin-bottom: 3px;
+  /* own layer: redrawing it while the wave eases must not repaint the whole stage */
   will-change: transform;
-}
-.dash-spark__bar,
-.dash-spark__level {
-  fill: var(--color-navy);
-  opacity: 0.85;
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  transition: transform 110ms linear;
-}
-.dash-spark__level {
-  opacity: 1;
-}
-.dash-spark__track {
-  fill: var(--color-navy-soft);
 }
 .dash-unit--inline {
   margin-left: -6px;
@@ -512,9 +500,9 @@
 /* ---------- Legend ---------- */
 .dash-legend {
   position: absolute;
-  left: 52px;
-  top: 744px;
-  width: 224px;
+  left: 1376px;
+  top: 416px;
+  width: 184px;
   font-size: 11.5px;
   line-height: 17px;
   color: #8a9393;
@@ -608,8 +596,6 @@
   .dash-ticker li {
     animation: dash-tick-out 1ms linear 4600ms forwards;
   }
-  .dash-spark__bar,
-  .dash-spark__level,
   .dash-bars i::before {
     transition: none;
   }

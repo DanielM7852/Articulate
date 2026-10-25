@@ -59,3 +59,66 @@
   background: var(--color-navy-soft);
   color: var(--color-ink);
 }
+
+/* Teaching console sign-in (teach.html). Scoped to .console so the learner pages keep their look:
+   the card takes the live graph's card style, with tracked labels and pill fields. */
+.console .classroom-id {
+  position: relative;
+  width: min(380px, 100%);
+  margin: 0;
+  gap: 12px;
+  padding: 18px 20px 20px;
+  background: #fcfbf8;
+  border-color: rgba(218, 223, 217, 0.9);
+  box-shadow: var(--shadow-panel);
+}
+
+.console .classroom-id__label {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-line);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 21px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-navy);
+}
+
+.console .classroom-id input {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
+  font-size: 14px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-ink);
+  transition: border-color 120ms ease;
+}
+
+.console .classroom-id input:focus-visible {
+  border-color: var(--color-navy);
+}
+
+.console .classroom-id .btn--primary {
+  height: 40px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.console .classroom-id [role='alert'] {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-warn);
+}
+
+.console .classroom-id [role='alert']::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+}

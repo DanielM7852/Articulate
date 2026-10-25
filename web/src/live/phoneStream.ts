@@ -32,10 +32,34 @@ export interface PhoneState {
   provisional: Phone[];
 }
 export type StreamState = 'connecting' | 'ready' | 'closed' | 'error';
+/** Why the stream is not usable: the service refused this page's origin (close 1008), could not be reached, or dropped after being ready. */
+export type StreamReason = 'origin-rejected' | 'unreachable' | 'closed';
 export interface StreamInfo {
   engine?: string;
   model?: string;
   message?: string;
+  /** Set with 'closed'/'error' when the stream is not usable because of the connection. */
+  reason?: StreamReason;
+}
+
+/** Close code 1008 before any 'ready' = origin refused; other close before ready = unreachable; close after ready = closed. */
+export function classifyClose(code: number, wasReady: boolean): StreamReason {
+  if (wasReady) return 'closed';
+  return code === 1008 ? 'origin-rejected' : 'unreachable';
+}
+
+const warned = new Set<string>();
+/** console.warn once per (url, reason) per page load. */
+export function warnUnavailable(url: string, reason: StreamReason): void {
+  const key = `${url}|${reason}`;
+  if (warned.has(key)) return;
+  warned.add(key);
+  let msg = `[phones] live phone model unavailable (${reason}) at ${url}; the board is using the basic formant view.`;
+  if (reason === 'origin-rejected') {
+    const origin = typeof location !== 'undefined' ? location.origin : 'unknown';
+    msg += ` The phone service refused this page's origin (${origin}); allow it with PHONES_ALLOWED_ORIGINS.`;
+  }
+  console.warn(msg);
 }
 export interface PhoneUpdate extends PhoneState {
   inferMs?: number;
@@ -191,7 +215,8 @@ export function connectPhoneStream(stream: MediaStream, opts: PhoneStreamOptions
     try {
       sock = new WebSocket(url);
     } catch {
-      emit('error', { message: 'bad url' });
+      warnUnavailable(url, 'unreachable');
+      emit('error', { message: 'bad url', reason: 'unreachable' });
       schedule();
       return;
     }
@@ -219,11 +244,14 @@ export function connectPhoneStream(stream: MediaStream, opts: PhoneStreamOptions
     sock.onerror = () => {
       /* onclose follows */
     };
-    sock.onclose = () => {
+    sock.onclose = (e) => {
       if (ws === sock) ws = null;
+      const wasReady = ready;
       ready = false;
       if (closed) return;
-      emit('closed');
+      const reason = classifyClose(e?.code ?? 1006, wasReady);
+      warnUnavailable(url, reason);
+      emit('closed', { reason });
       schedule();
     };
   }

@@ -607,6 +607,7 @@ export function GhostBoard({
   const focusText = focusZone && !unit.zoneIds.includes(focusZone.id) ? ` Look at ${focusZone.label}: ${focusZone.hint}` : '';
   const heard = debug && phoneCursor?.state === 'ready' ? ` Heard: ${phoneCursor.phones.map((x) => x.p).join(' ') || 'nothing yet'}.` : '';
   const label = `Tongue board for “${spec.word}”, practising “${unit.label}”. ${modeText}. ${how}${resultText}${focusText}${heard}`;
+  const phoneOffline = (phoneCursor?.state === 'error' || phoneCursor?.state === 'closed') && isPhoneJudged(spec.word);
   const status = mode === 'watch' ? 'Watch the model' : mode === 'live' ? (scoring ? 'Scoring…' : view.done ? 'Done' : 'Your turn') : 'Ready';
 
   return (
@@ -744,6 +745,11 @@ export function GhostBoard({
         <span className="wb-status" aria-hidden="true">
           {status}
         </span>
+        {phoneOffline && (
+          <span className="gb-offline" title={`Phone model unavailable: ${phoneCursor?.reason ?? phoneCursor?.state}`}>
+            Phone model offline · basic view
+          </span>
+        )}
       </div>
       <p className="sr-only" aria-live="polite">
         {mode === 'live' && view.done ? `Attempt finished.${resultText}` : ''}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject, type CSSProperties } from 'react';
 import { subscribeTelemetry, type NodeId, type TelemetryEvent } from '../telemetry/client';
 import brandMark from '../assets/landing/brand-mark.svg';
+import { FACE_POINTS, canonicalFace, createDotFace, decodeFaceV2, decodeFaceV3 } from '../dashboard/dotFace';
+import { WAVE_SAMPLES, createWaveCloud, decodeWave, tonesFrom } from '../dashboard/waveCloud';
 import '../styles/dashboard.css';
 
 /**
@@ -11,7 +13,9 @@ import '../styles/dashboard.css';
  * a fixed 1600 x 900 design space that is scaled to fit the viewport (the canvas uses the same
  * transform). Animation state lives in refs; React only re-renders the cards, at most 10 times a second.
  * The perception streams (lip.mesh, audio.spectrum) are drawn by the same frame loop: the MediaPipe card's
- * wireframe canvas, and the Audio cluster as a radial equaliser on per-band springs.
+ * face canvas (a dot face over the full mesh for v3 and v2 frames, the 81-point wireframe for v1), and the Audio
+ * cluster as a radial equaliser on per-band springs. The Audio card's waveform band (waveCloud.ts) has its own
+ * small canvas and frame loop (WaveCanvas).
  *
  * Live events come from `subscribeTelemetry`. `?demo` (or `d`) replays /telemetry-demo.json through
  * the same path, and with no live event 15 s after connecting the replay starts on its own, tagged.
@@ -39,14 +43,14 @@ interface NodeDef {
 }
 
 const NODES: NodeDef[] = [
-  { id: 'camera', name: 'Camera', caption: 'webcam capture', loc: 'browser', x: 340, y: 112, r: 28, n: 150, ann: [384, 90, 170] },
-  { id: 'mediapipe', name: 'MediaPipe', caption: 'FaceLandmarker → LipFrame', loc: 'browser', x: 340, y: 252, r: 40, n: 230, ann: [52, 82, 226], align: 'right' },
-  { id: 'mic', name: 'Microphone', caption: 'microphone capture', loc: 'browser', x: 84, y: 500, r: 28, n: 150, ann: [52, 540, 170] },
-  { id: 'audio', name: 'Audio', caption: 'formant / loudness analysis (vowel-mapper worklet)', loc: 'browser', x: 300, y: 500, r: 40, n: 230, ann: [236, 584, 214] },
-  { id: 'stt', name: 'Ink', caption: 'Cartesia Ink speech to text', loc: 'Cartesia', x: 640, y: 176, r: 40, n: 220, ann: [636, 228, 214] },
+  { id: 'camera', name: 'Camera', caption: 'webcam capture', loc: 'browser', x: 404, y: 112, r: 28, n: 150, ann: [446, 92, 140] },
+  { id: 'mediapipe', name: 'MediaPipe', caption: 'FaceLandmarker → LipFrame', loc: 'browser', x: 404, y: 262, r: 40, n: 230, ann: [44, 76, 306], align: 'right' },
+  { id: 'mic', name: 'Microphone', caption: 'microphone capture', loc: 'browser', x: 84, y: 540, r: 28, n: 150, ann: [52, 580, 170] },
+  { id: 'audio', name: 'Audio', caption: 'formant / loudness analysis (vowel-mapper worklet)', loc: 'browser', x: 300, y: 568, r: 40, n: 230, ann: [96, 652, 214], align: 'right' },
+  { id: 'stt', name: 'Ink', caption: 'Cartesia Ink speech to text', loc: 'Cartesia', x: 664, y: 176, r: 40, n: 220, ann: [660, 228, 214] },
   { id: 'tts', name: 'Sonic', caption: 'Cartesia Sonic text to speech (Ava’s voice)', loc: 'Cartesia', x: 930, y: 176, r: 40, n: 220, ann: [930, 228, 196] },
   { id: 'backend', name: 'Backend', caption: 'FastAPI app', loc: 'server', x: 790, y: 488, r: 52, n: 320, ann: [566, 404, 160], align: 'right' },
-  { id: 'pitch', name: 'Pitch', caption: 'librosa F0 extraction', loc: 'server', x: 566, y: 762, r: 34, n: 190, ann: [322, 730, 198], align: 'right' },
+  { id: 'pitch', name: 'Pitch', caption: 'librosa F0 extraction', loc: 'server', x: 566, y: 762, r: 34, n: 190, ann: [322, 742, 198], align: 'right' },
   { id: 'sparc', name: 'SPARC', caption: 'articulatory model service', loc: 'server', x: 1010, y: 650, r: 38, n: 210, ann: [1058, 606, 184] },
   { id: 'db', name: 'SpacetimeDB', caption: 'live tables, subscriptions', loc: 'maincloud', x: 790, y: 768, r: 44, n: 260, ann: [846, 736, 170] },
   { id: 'claude', name: 'Model', caption: 'coach decisions, when a model is called', loc: 'Anthropic', x: 1212, y: 470, r: 112, n: 760, ann: [1262, 612, 312] },
@@ -58,7 +62,7 @@ const NODE = Object.fromEntries(NODES.map((n) => [n.id, n])) as Record<NodeId, N
 const EDGES: [NodeId, NodeId, number][] = [
   ['camera', 'mediapipe', 0.06],
   ['mic', 'audio', 0.06],
-  ['mic', 'stt', 0.16],
+  ['mic', 'stt', 0.28], // bowed clear of the MediaPipe card
   ['mediapipe', 'db', 0.12],
   ['audio', 'db', 0.06],
   ['stt', 'ui', -0.11],
@@ -78,6 +82,11 @@ const EDGES: [NodeId, NodeId, number][] = [
 
 /** Perception streams (10 Hz): they drive the wireframe and the audio equaliser in place, no packets. */
 const PERCEPT = new Set(['lip.mesh', 'audio.spectrum']);
+/**
+ * Kinds that feed the learner's own perception cards (camera, mic, MediaPipe, Audio). With a `learner` prop these
+ * are taken only from tabs whose sid announced that profile id; stt.transcript is gated for the mic state only.
+ */
+const SCOPED = new Set(['camera.on', 'camera.off', 'stt.open', 'stt.close', 'lip.frame', 'audio.frame', 'lip.mesh', 'audio.spectrum']);
 /** High-rate kinds: they animate but stay out of the ticker. */
 const QUIET = new Set(['lip.frame', 'audio.frame', 'lip.batch', 'audio.batch', ...PERCEPT]);
 
@@ -94,10 +103,13 @@ const FADE_MS = 500;
 const MAX_DOTS = 24;
 /** A perception stream with no frame for this long reads as gone (wireframe fades, equaliser relaxes). */
 const PERCEPT_MS = 1500;
-/** lip.mesh: 81 points as flat x, y pairs (docs/telemetry.md, "Perception streams"). */
+/** lip.mesh v1: 81 points as flat x, y pairs (docs/telemetry.md, "Perception streams"). */
 const MESH_LEN = 162;
 const MESH_LERP_MS = 80;
-/** Wireframe canvas, design px. */
+/** The face canvas, design px. */
+const FACE_BOX = 280;
+const FACE_PAD = 6;
+/** The v1 wireframe is drawn in a 200-unit square, scaled to the canvas. */
 const WIRE = 200;
 const SPEC_BINS = 32;
 /** Equaliser springs, per second: lively but not jittery (damping ratio ~0.64). */
@@ -126,10 +138,14 @@ interface Model {
   micOpen: boolean | null;
   lip: { ok: boolean; opening: number; width: number; rounding: number } | null;
   audio: { f1: number; f2: number; rms: number; env: number[] } | null;
-  /** latest lip.mesh, pts 0..255; `at` is performance.now() on arrival */
-  mesh: { pts: number[]; at: number; sid: string | null } | null;
-  /** latest audio.spectrum, bins 0..1 */
-  spectrum: { bins: number[]; rms: number; at: number; sid: string | null } | null;
+  /**
+   * latest lip.mesh; `at` is performance.now() on arrival. v1: `pts` 81 points 0..255. v2: `xyz` the full mesh,
+   * decoded once on arrival (dotFace.ts frame) from a wire v2 (replay) or v3 (live) payload; `n` is the point
+   * count the frame carried.
+   */
+  mesh: { v: 1; pts: number[]; n: number; at: number; sid: string | null } | { v: 2; xyz: Float32Array; n: number; at: number; sid: string | null } | null;
+  /** latest audio.spectrum, bins 0..1; `wave` the 128-sample waveform in -1..1 (null on payloads without one) */
+  spectrum: { bins: number[]; rms: number; wave: Float32Array | null; at: number; sid: string | null } | null;
   stt: { text: string; final: boolean } | null;
   tts: { chars: number; voice: string; ms: number | null } | null;
   pitch: { mean: number; min: number; max: number; voiced: number | null; latency: number | null } | null;
@@ -147,6 +163,8 @@ interface Model {
   lastAt: Record<string, number>;
   /** sid -> last seen (epoch ms); leftAt is set while the dot fades out */
   presence: Map<string, { seen: number; leftAt: number | null }>;
+  /** sid -> classroom profile id, from the `pid` a learner tab puts on ui.join / ui.ping */
+  pidBySid: Map<string, string>;
 }
 
 const freshModel = (): Model => ({
@@ -174,6 +192,7 @@ const freshModel = (): Model => ({
   ticker: [],
   lastAt: {},
   presence: new Map(),
+  pidBySid: new Map(),
 });
 
 interface Snap {
@@ -184,8 +203,10 @@ interface Snap {
   lip: Model['lip'];
   audio: Model['audio'];
   meshLive: boolean;
+  /** points in the latest mesh frame (81, 468 or 478) */
+  meshPoints: number;
   /** only while the stream is live */
-  spectrum: { bins: number[]; rms: number } | null;
+  spectrum: { bins: number[]; rms: number; wave: Float32Array | null } | null;
   stt: Model['stt'];
   tts: Model['tts'];
   pitch: Model['pitch'];
@@ -224,7 +245,8 @@ function snapshot(m: Model, now: number): Snap {
     lip: m.lip,
     audio: m.audio,
     meshLive: meshLive(m, now),
-    spectrum: m.spectrum && specLive(m, now) ? { bins: m.spectrum.bins, rms: m.spectrum.rms } : null,
+    meshPoints: m.mesh ? m.mesh.n : FACE_POINTS,
+    spectrum: m.spectrum && specLive(m, now) ? { bins: m.spectrum.bins, rms: m.spectrum.rms, wave: m.spectrum.wave } : null,
     stt: m.stt,
     tts: m.tts,
     pitch: m.pitch,
@@ -255,14 +277,18 @@ function prunePresence(m: Model): boolean {
       }
     } else if (wall - v.leftAt > FADE_MS) {
       m.presence.delete(sid);
+      m.pidBySid.delete(sid);
       changed = true;
     }
   }
   return changed;
 }
 
-/** Folds one event into the card model. Older events (backfill) never overwrite newer state of the same kind. */
-function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
+/**
+ * Folds one event into the card model. Older events (backfill) never overwrite newer state of the same kind.
+ * `learner` (a classroom profile id, '' for the whole stream) limits the perception cards to that learner's tabs.
+ */
+function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner = '') {
   m.count += 1;
   const psid = typeof e.payload?.sid === 'string' ? e.payload.sid : null;
   if (psid && Date.now() - e.at <= PRESENCE_MS) {
@@ -272,8 +298,17 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
     } else if (!cur || cur.leftAt === null || e.kind === 'ui.join') {
       m.presence.set(psid, { seen: Math.max(e.at, cur?.seen ?? 0), leftAt: null });
     }
+    if (e.kind === 'ui.join' || e.kind === 'ui.ping') {
+      const pid = e.payload?.pid;
+      if (typeof pid === 'string' && pid.length > 0 && pid.length <= 64) m.pidBySid.set(psid, pid);
+      else m.pidBySid.delete(psid);
+    }
   }
   if (live) m.stamps.push(now);
+  // Per-learner view: other tabs still count as traffic and presence (above), but never reach the perception cards.
+  // Filtered here, at apply time, so a tab is picked up as soon as its ui.join / ui.ping names the learner.
+  const mine = !learner || (psid !== null && m.pidBySid.get(psid) === learner);
+  if (!mine && SCOPED.has(e.kind)) return;
   const prev = m.lastAt[e.kind];
   if (prev !== undefined && e.at < prev) return;
   m.lastAt[e.kind] = e.at;
@@ -308,9 +343,18 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
     }
     case 'lip.mesh': {
       // Backfill is stale by definition; and one face at a time: a second tab waits until the first goes quiet.
-      if (!live || !Array.isArray(p.pts) || p.pts.length !== MESH_LEN) break;
+      if (!live) break;
       if (m.mesh && m.mesh.sid !== psid && now - m.mesh.at < PERCEPT_MS) break;
-      m.mesh = { pts: p.pts.map((v) => Math.min(255, Math.max(0, Number(v) || 0))), at: now, sid: psid };
+      if ((p.v === 2 || p.v === 3) && typeof p.pts === 'string') {
+        const n = num(p.n) ?? 0;
+        const xyz = p.v === 3 ? decodeFaceV3(p.pts, n) : decodeFaceV2(p.pts, n);
+        if (!xyz) break;
+        m.mesh = { v: 2, xyz, n, at: now, sid: psid };
+      } else if (Array.isArray(p.pts) && p.pts.length === MESH_LEN) {
+        // v1 stays valid; while full-mesh (v2/v3) frames from this tab are flowing they win
+        if (m.mesh && m.mesh.v === 2 && m.mesh.sid === psid && now - m.mesh.at < PERCEPT_MS) break;
+        m.mesh = { v: 1, pts: p.pts.map((v) => Math.min(255, Math.max(0, Number(v) || 0))), n: 81, at: now, sid: psid };
+      } else break;
       if (m.camera === null) m.camera = true;
       break;
     }
@@ -320,6 +364,7 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
       m.spectrum = {
         bins: p.bins.slice(0, SPEC_BINS).map((v) => clamp01((Number(v) || 0) / 255)),
         rms: clamp01(num(p.rms) ?? 0),
+        wave: decodeWave(p.wave),
         at: now,
         sid: psid,
       };
@@ -328,7 +373,7 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
     }
     case 'stt.transcript':
       m.stt = { text: (str(p.text) ?? '').slice(0, 80), final: p.final === true };
-      if (m.micOpen === null) m.micOpen = true;
+      if (mine && m.micOpen === null) m.micOpen = true;
       break;
     case 'tts.speak':
       m.tts = { chars: num(p.chars) ?? 0, voice: str(p.voice) ?? '—', ms: m.tts?.ms ?? null };
@@ -777,10 +822,16 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
   const byId = Object.fromEntries(clusters.map((c) => [c.def.id, c])) as Record<NodeId, Cluster>;
   const eq = buildEqualiser(byId.audio);
   const scratch = new Float32Array(SPEC_BINS);
-  // Wireframe: positions ease from where they are toward each new frame over MESH_LERP_MS.
+  // Face canvas: positions ease from where they are toward each new frame over MESH_LERP_MS. v2 frames drive the
+  // dot face (the canonical face until the first one), v1 frames the wireframe; the newest version decides.
   const wFrom = restingMesh();
   const wTo = wFrom.slice();
   const wCur = wFrom.slice();
+  const dotFace = createDotFace(FACE_BOX, FACE_PAD);
+  const fFrom = canonicalFace();
+  const fTo = fFrom.slice();
+  const fCur = fFrom.slice();
+  let wMode: 1 | 2 = 2;
   let wT0 = -1e9;
   let wSeen: unknown = null;
   let wEl: HTMLCanvasElement | null = null;
@@ -941,7 +992,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
     }
   };
 
-  /** Eases the wireframe toward the newest lip.mesh and redraws its canvas only when something moved. */
+  /** Eases the face toward the newest lip.mesh and redraws its canvas only when something moved. */
   const stepWire = (now: number, dtMs: number) => {
     const el = io.wire();
     if (el !== wEl) {
@@ -950,7 +1001,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
       wDirty = true;
     }
     if (!wEl || !wCtx) return;
-    const px = Math.max(1, Math.round(WIRE * scale * dpr));
+    const px = Math.max(1, Math.round(FACE_BOX * scale * dpr));
     if (wEl.width !== px || wEl.height !== px) {
       wEl.width = px;
       wEl.height = px;
@@ -959,8 +1010,14 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
     const mesh = io.model().mesh;
     if (mesh && mesh !== wSeen) {
       wSeen = mesh;
-      wFrom.set(wCur);
-      for (let i = 0; i < MESH_LEN; i++) wTo[i] = mesh.pts[i];
+      if (mesh.v === 2) {
+        fFrom.set(fCur);
+        fTo.set(mesh.xyz);
+      } else {
+        wFrom.set(wCur);
+        for (let i = 0; i < MESH_LEN; i++) wTo[i] = mesh.pts[i];
+      }
+      wMode = mesh.v;
       wT0 = now;
       wDirty = true;
     }
@@ -973,8 +1030,13 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
     }
     const k = reduce ? 1 : Math.min(1, Math.max(0, (now - wT0) / MESH_LERP_MS));
     if (!wDirty && k === wDrawnK && wAlpha === wDrawnAlpha) return;
-    for (let i = 0; i < MESH_LEN; i++) wCur[i] = wFrom[i] + (wTo[i] - wFrom[i]) * k;
-    drawWire(wCtx, px, wCur, wAlpha);
+    if (wMode === 2) {
+      for (let i = 0; i < fCur.length; i++) fCur[i] = fFrom[i] + (fTo[i] - fFrom[i]) * k;
+      dotFace.draw(wCtx, px, fCur, wAlpha);
+    } else {
+      for (let i = 0; i < MESH_LEN; i++) wCur[i] = wFrom[i] + (wTo[i] - wFrom[i]) * k;
+      drawWire(wCtx, px, wCur, wAlpha);
+    }
     wDrawnK = k;
     wDrawnAlpha = wAlpha;
     wDirty = false;
@@ -1225,40 +1287,117 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
 const hz = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v)}`);
 const fmt = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString('en-US'));
 
-/** 32 bars (the live spectrum, or the rms-ring envelope) and an rms level meter at the right. */
-function Spark({ bars, level }: { bars: number[]; level: number | null }) {
-  const list = bars.length ? bars : Array.from({ length: SPEC_BINS }, () => 0);
-  return (
-    <svg className="dash-spark" viewBox="0 0 140 30" preserveAspectRatio="none" aria-hidden="true">
-      {list.map((v, i) => (
-        <rect
-          key={i}
-          className="dash-spark__bar"
-          x={i * 4 + 0.5}
-          y={2}
-          width={2.6}
-          height={28}
-          rx={1}
-          style={{ transform: `scaleY(${Math.max(1 / 28, clamp01(v)).toFixed(3)})` }}
-        />
-      ))}
-      <rect className="dash-spark__track" x={133} y={2} width={6} height={28} rx={1.5} />
-      <rect
-        className="dash-spark__level"
-        x={133}
-        y={2}
-        width={6}
-        height={28}
-        rx={1.5}
-        style={{ transform: `scaleY(${clamp01(level ?? 0).toFixed(3)})` }}
-      />
-    </svg>
-  );
+/**
+ * The Audio card's waveform (waveCloud.ts) and its rms meter, on a canvas with its own frame loop: it reads the live
+ * model each frame (so no 10 Hz frame is missed between card renders), redraws only while something moves, and stops
+ * while the graph is hidden or paused or the document is hidden. Sized from its CSS box: the card's width x 36 design
+ * px, times the stage scale and devicePixelRatio.
+ */
+function WaveCanvas({ model, idle }: { model: RefObject<Model>; idle: boolean }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const idleRef = useRef(idle);
+  idleRef.current = idle;
+  const startRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    const el = ref.current;
+    const ctx = el?.getContext('2d');
+    if (!el || !ctx) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const css = getComputedStyle(el);
+    const cloud = createWaveCloud({
+      reduce,
+      rmsFull: RMS_FULL,
+      tones: tonesFrom(css.getPropertyValue('--color-navy'), css.getPropertyValue('--color-navy-mist')),
+    });
+    let raf = 0;
+    let prev = 0;
+    let seen: unknown = null;
+    let measuredAt = -1e9;
+    let w = 0;
+    let h = 0;
+    let k = 1;
+    let resized = true;
+
+    const measure = (now: number) => {
+      measuredAt = now;
+      w = el.offsetWidth;
+      h = el.offsetHeight;
+      if (!w || !h) return;
+      // offset* are design px (the stage transform does not change layout); the rect is on screen
+      const scale = el.getBoundingClientRect().width / w || 1;
+      k = scale * (window.devicePixelRatio || 1);
+      const pw = Math.max(1, Math.round(w * k));
+      const ph = Math.max(1, Math.round(h * k));
+      if (el.width !== pw || el.height !== ph) {
+        el.width = pw;
+        el.height = ph;
+        resized = true;
+      }
+    };
+
+    const frame = (now: number) => {
+      raf = 0;
+      if (idleRef.current || document.hidden) return;
+      raf = requestAnimationFrame(frame);
+      const dtMs = Math.min(100, Math.max(0, now - prev));
+      prev = now;
+      const m = model.current;
+      if (!m) return;
+      const sp = m.spectrum;
+      if (sp && sp !== seen) cloud.push(sp.wave, sp.rms, sp.at);
+      seen = sp;
+      const live = sp !== null && now - sp.at < PERCEPT_MS;
+      const rms = live ? sp.rms : m.audio ? m.audio.rms : 0;
+      cloud.meter(rms / RMS_FULL);
+      if (now - measuredAt > 500) measure(now);
+      const moved = cloud.step(now, dtMs, live);
+      if ((moved || resized) && w && h) {
+        cloud.draw(ctx, w, h, k);
+        resized = false;
+      }
+    };
+    const start = () => {
+      if (raf || idleRef.current || document.hidden) return;
+      prev = performance.now();
+      measuredAt = -1e9;
+      raf = requestAnimationFrame(frame);
+    };
+    startRef.current = start;
+    document.addEventListener('visibilitychange', start);
+    start();
+    return () => {
+      cancelAnimationFrame(raf);
+      raf = 0;
+      startRef.current = () => {};
+      document.removeEventListener('visibilitychange', start);
+    };
+  }, [model]);
+
+  useEffect(() => {
+    if (!idle) startRef.current();
+  }, [idle]);
+
+  return <canvas ref={ref} className="dash-wave" aria-hidden="true" />;
 }
 
 const SPARC_LABELS = ['tongue height', 'tongue front', 'jaw open', 'lip forward', 'lip aperture'];
 
-function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HTMLCanvasElement> }): ReactNode {
+function Detail({
+  id,
+  s,
+  wireRef,
+  model,
+  idle,
+  scoped,
+}: {
+  id: NodeId;
+  s: Snap;
+  wireRef: RefObject<HTMLCanvasElement>;
+  model: RefObject<Model>;
+  idle: boolean;
+  scoped: boolean;
+}): ReactNode {
   switch (id) {
     case 'camera':
       return <p className="dash-status" data-on={s.camera === true || undefined}>{s.camera === null ? 'waiting' : s.camera ? 'on' : 'off'}</p>;
@@ -1267,7 +1406,7 @@ function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HT
     case 'mediapipe':
       return (
         <div className="dash-card dash-card--mesh">
-          {/* drawn by the canvas engine from lip.mesh; sized for the device in stepWire */}
+          {/* drawn by the canvas engine from lip.mesh (dot face, or the v1 wireframe); sized for the device in stepWire */}
           <canvas ref={wireRef} className="dash-wire" data-live={s.meshLive || undefined} aria-hidden="true" />
           <dl className="dash-kv">
             <div><dt>open</dt><dd>{s.lip ? s.lip.opening.toFixed(2) : '—'}</dd></div>
@@ -1275,19 +1414,29 @@ function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HT
             <div><dt>round</dt><dd>{s.lip ? s.lip.rounding.toFixed(2) : '—'}</dd></div>
             <div><dt>face</dt><dd data-warn={s.lip && !s.lip.ok ? 'true' : undefined}>{s.lip ? (s.lip.ok ? 'ok' : 'lost') : '—'}</dd></div>
           </dl>
-          <p className="dash-meta">{s.meshLive ? 'face mesh · 81 points' : 'no face'}</p>
+          <p className="dash-meta">{s.meshLive ? `face mesh · ${s.meshPoints} points` : scoped ? 'waiting for this learner’s camera' : 'no face'}</p>
         </div>
       );
     case 'audio': {
       const rms = s.spectrum ? s.spectrum.rms : s.audio ? s.audio.rms : null;
       return (
         <div className="dash-card">
-          <Spark bars={s.spectrum ? s.spectrum.bins : s.audio?.env ?? []} level={rms == null ? null : rms / RMS_FULL} />
+          {/* drawn by its own frame loop from the live model (waveCloud.ts) */}
+          <WaveCanvas model={model} idle={idle} />
           <p className="dash-readout">
             <span>F1 <b>{hz(s.audio?.f1)}</b></span>
             <span>F2 <b>{hz(s.audio?.f2)}</b></span>
             <span className="dash-unit dash-unit--inline">Hz</span>
             <span className="dash-rms">rms <b>{rms == null ? '—' : rms.toFixed(2)}</b></span>
+          </p>
+          <p className="dash-meta">
+            {s.spectrum
+              ? s.spectrum.wave
+                ? `waveform · ${WAVE_SAMPLES} samples`
+                : 'level only · no waveform'
+              : scoped
+                ? 'waiting for this learner’s microphone'
+                : 'no audio'}
           </p>
         </div>
       );
@@ -1453,6 +1602,11 @@ export type LiveGraphProps = {
   demo?: boolean;
   onEvent?: (event: TelemetryEvent) => void;
   onStream?: (state: { conn: 'connecting' | 'live' | 'offline'; count: number; lastAt: number | null }) => void;
+  /**
+   * A classroom profile id: the face, equaliser and other perception cards show only tabs that announced it
+   * (ui.join / ui.ping `pid`). Empty or undefined, and in demo replay, the whole stream as before.
+   */
+  learner?: string;
 };
 
 export default function Dashboard({
@@ -1462,6 +1616,7 @@ export default function Dashboard({
   demo: demoProp = false,
   onEvent,
   onStream,
+  learner = '',
 }: LiveGraphProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -1485,6 +1640,10 @@ export default function Dashboard({
   const demo = embedded ? demoProp : forced === true;
   const demoRef = useRef(demo);
   demoRef.current = demo;
+  /** the learner the perception cards are limited to; never in demo replay */
+  const scope = demo ? '' : learner;
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   const liveSeen = useRef(false);
   const tickSeq = useRef(0);
   const lastStamp = useRef<number | null>(null);
@@ -1492,7 +1651,7 @@ export default function Dashboard({
   const ingest = useCallback((e: TelemetryEvent, animate: boolean) => {
     const now = performance.now();
     const m = model.current;
-    apply(m, e, now, animate);
+    apply(m, e, now, animate, scopeRef.current);
     if (animate) {
       engine.current?.fire(e);
       if (e.kind === 'claude.response' && m.claudeLine) engine.current?.setLine(m.claudeLine);
@@ -1564,10 +1723,24 @@ export default function Dashboard({
 
   // A switch between live and replay starts from clean cards.
   useEffect(() => {
-    model.current = freshModel();
+    // keep the sid -> profile map: a learner tab only re-announces itself on its next ping
+    model.current = { ...freshModel(), pidBySid: model.current.pidBySid };
     engine.current?.reset();
     dirty.current = true;
   }, [demo]);
+
+  // A different learner (or none) starts the perception cards empty, so no other tab's face lingers.
+  useEffect(() => {
+    const m = model.current;
+    m.camera = null;
+    m.micOpen = null;
+    m.lip = null;
+    m.audio = null;
+    m.mesh = null;
+    m.spectrum = null;
+    for (const k of SCOPED) delete m.lastAt[k];
+    dirty.current = true;
+  }, [scope]);
 
   // Live stream: always subscribed, so a live event can end an automatic replay.
   useEffect(() => {
@@ -1703,7 +1876,7 @@ export default function Dashboard({
                 <span className="dash-node__loc">{titled?.loc ?? n.loc}</span>
               </h2>
               <p className="dash-node__cap">{n.caption}</p>
-              {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} />}
+              {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} model={model} idle={hidden || paused} scoped={scope !== ''} />}
               {n.id === 'ui' && <Presence dots={snap.dots} />}
             </section>
           );
@@ -1714,7 +1887,9 @@ export default function Dashboard({
           <p>
             Each cluster is one part of the system. A packet runs along the path that event actually took.
             A lesson change can stop at the database. It does not have to pass through a model.
-            The lip wireframe and the equalizer are the live perception streams, not a named learner.
+            {scope
+              ? 'The face and the equalizer show only the selected learner’s tab, once it has announced its profile.'
+              : 'The lip wireframe and the equalizer are the live perception streams, not a named learner.'}
           </p>
         </aside>
 

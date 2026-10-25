@@ -274,10 +274,10 @@ export function Dashboard({
     <main className="teach">
       <section className="teach-summary" aria-label="Classroom summary">
         <h1 className="title-serif">{session.classroomId}</h1>
-        <p>{rows.length} {rows.length === 1 ? 'learner' : 'learners'}</p>
-        <p>{rows.filter((row) => row.presence === 'recording').length} recording</p>
-        <p>{rows.filter((row) => row.presence === 'analyzing').length} analyzing</p>
-        <p>{rows.filter((row) => row.helpRequested).length} asked for help</p>
+        <p><b>{rows.length}</b> {rows.length === 1 ? 'learner' : 'learners'}</p>
+        <p><b>{rows.filter((row) => row.presence === 'recording').length}</b> recording</p>
+        <p><b>{rows.filter((row) => row.presence === 'analyzing').length}</b> analyzing</p>
+        <p><b>{rows.filter((row) => row.helpRequested).length}</b> asked for help</p>
         <p className="small">{connectionCopy(status, ready)}</p>
         {status === 'Disconnected' && (
           <button type="button" className="btn btn--sm" onClick={() => { setReady(false); setAttempt((value) => value + 1); }}>
@@ -287,7 +287,7 @@ export function Dashboard({
       </section>
       <div className="teach-layout">
         <section className="teach-board" aria-label="Learners">
-          <button type="button" className={!selected ? 'is-selected' : ''} aria-pressed={!selected} onClick={() => onSelectLearner('')}>
+          <button type="button" className={!selected ? 'is-selected' : ''} data-presence="class" aria-pressed={!selected} onClick={() => onSelectLearner('')}>
             <span className="teach-row__name">Whole class</span>
             <span className="teach-row__meta">A class lesson reaches {reach.affected} of {rows.length}. {reach.own} already have their own lesson.</span>
           </button>
@@ -348,6 +348,7 @@ export function Dashboard({
               key={row.profileId}
               type="button"
               className={row.profileId === selected ? 'is-selected' : ''}
+              data-presence={row.presence || 'unknown'}
               aria-pressed={row.profileId === selected}
               onClick={() => choose(row)}
             >
@@ -664,7 +665,7 @@ function Editor({ draft, setDraft }: { draft: LessonSettings; setDraft: (next: L
       </label>
       <label className="teach-check">Reference
         <input type="checkbox" checked={draft.referenceReplay} onChange={(event) => setDraft({ ...draft, referenceReplay: event.target.checked })} />
-        Sonic reference, compared with the learner
+        <span className="teach-check__text">Sonic reference, compared with the learner</span>
       </label>
       <label>Repetitions
         <input type="number" min={1} max={8} value={draft.repetitions} onChange={(event) => setDraft({ ...draft, repetitions: Number(event.target.value) })} />

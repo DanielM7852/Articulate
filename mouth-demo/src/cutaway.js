@@ -1,4 +1,4 @@
-export const POSES = ["neutral", "oo", "ee", "ah", "tongueTip", "velar", "r"];
+export const POSES = ["neutral", "oo", "ee", "ah", "tongueTip", "velar", "r", "lipsClosed", "sh", "eh"];
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NAVY = "#203E68";
@@ -20,6 +20,12 @@ const PATHS = {
     velar: "M 104 232 C 140 226 182 210 216 180 C 240 150 262 150 274 224 C 290 244 280 274 248 280 C 190 284 134 280 110 258 C 102 248 100 240 104 232 Z",
     // r: bunched / retroflex. Body raised mid-mouth, tip lifted and drawn back, well clear of the ridge
     r: "M 140 200 C 160 186 190 172 215 176 C 245 182 268 214 282 250 C 284 268 270 280 245 282 C 190 286 130 280 114 250 C 108 236 122 216 140 200 Z",
+    // p b m: the tongue rests while the lips close
+    lipsClosed: "M 100 226 C 130 214 170 212 205 218 C 240 224 268 232 282 248 C 284 266 270 278 245 280 C 190 284 130 278 108 254 C 100 244 98 234 100 226 Z",
+    // sh: blade raised just behind the ridge, close to the roof but not touching; body high and fairly front
+    sh: "M 110 172 C 117 162 150 156 185 162 C 225 168 260 198 278 234 C 284 260 272 279 245 281 C 200 286 165 282 148 266 C 130 248 120 190 110 172 Z",
+    // eh: between ee and ah (ee toward ah by 0.45)
+    eh: "M 110.8 248 C 133.5 232.8 168 219.1 200.8 217.3 C 231.3 216.4 258.1 222 278.5 238 C 284.7 261.7 276.3 280.3 256.3 286.3 C 203.5 292.1 145.8 295.3 116.8 283 C 109.9 273.5 107.9 260.2 110.8 248 Z",
   },
   upperLip: {
     neutral: "M 64 130 C 50 142 44 170 50 190 C 53 200 66 203 76 199 C 70 188 66 170 74 150 C 70 142 68 136 64 130 Z",
@@ -29,6 +35,11 @@ const PATHS = {
     tongueTip: "M 64 130 C 50 142 44 170 50 190 C 53 200 66 203 76 199 C 70 188 66 170 74 150 C 70 142 68 136 64 130 Z",
     velar: "M 64 130 C 50 142 44 170 50 190 C 53 200 66 203 76 199 C 70 188 66 170 74 150 C 70 142 68 136 64 130 Z",
     r: "M 62.2 130 C 44.6 141.1 30.5 168.2 35.6 188.2 C 39 198.2 56.1 200.8 69.7 195.8 C 61.9 186.2 58.8 169.1 66.8 150 C 63.7 142 63.5 136 62.2 130 Z",
+    // lips pressed: the upper lip comes down a little to meet the lower lip
+    lipsClosed: "M 64 130 C 50 144 44 172 49 193 C 52 203 66 205 77 201 C 70 190 66 172 74 151 C 70 143 68 136 64 130 Z",
+    // neutral toward oo by 0.5: slightly forward and round
+    sh: "M 62 130 C 44 141 29 168 34 188 C 37.5 198 55 200.5 69 195.5 C 61 186 58 169 66 150 C 63 142 63 136 62 130 Z",
+    eh: "M 64 130 C 57.3 142.2 55.3 163.3 59.3 179.3 C 61.3 187.3 70.2 189.3 79.1 186.8 C 73.1 179.3 71.1 166.2 75.1 151.1 C 71.1 143.1 68 136 64 130 Z",
   },
   lowerLipJaw: {
     neutral: "M 272 284 C 220 282 150 282 112 268 C 100 262 96 252 96 240 L 94 208 L 76 205 C 62 206 54 214 56 228 C 58 240 50 252 52 268 C 54 292 74 318 104 324 C 154 332 222 330 262 306 C 278 296 286 280 292 258",
@@ -39,11 +50,16 @@ const PATHS = {
     tongueTip: "M 274 285 C 222 286 153 290 115 278 C 102 273 98 263 97 251 L 93 220 L 75 218 C 61 220 54 228 57 242 C 59 254 52 266 55 282 C 59 305 80 330 110 334 C 160 339 227 333 266 307 C 281 296 288 280 292 258",
     velar: "M 275 285 C 223 287 154 292 115 281 C 103 276 98 266 98 254 L 93 223 L 75 221 C 61 223 54 232 57 245 C 60 257 53 270 56 285 C 60 309 81 333 112 337 C 162 341 229 334 267 308 C 282 296 288 280 292 258",
     r: "M 273 284.5 C 221 284 151.5 286 113.5 273 C 101 267.5 97 257.5 96.5 245.5 L 93.5 214.9 L 73.7 211.9 C 54.3 212.1 42.3 221 45.7 235.9 C 48.6 248.8 50.1 259.9 53.5 275 C 56.5 298.5 77 324 107 329 C 157 335.5 224.5 331.5 264 306.5 C 279.5 296 287 280 292 258",
+    // jaw closed and the lower lip raised to press against the upper lip
+    lipsClosed: "M 272 284 C 220 282 150 281 112 266 C 100 260 96 250 96 238 L 94 204 L 77 201 C 62 200 53 206 54 220 C 56 234 50 250 52 266 C 54 290 74 316 104 322 C 154 330 222 329 262 305 C 278 296 286 280 292 258",
+    // neutral toward oo by 0.4 (lip forward) and toward tongueTip by 0.25 (jaw barely open)
+    sh: "M 272.5 284.3 C 220.5 283 150.8 284 112.8 270.5 C 100.5 264.8 96.5 254.8 96.3 242.8 L 93.8 211.8 L 74.2 208.7 C 55.4 208.7 43.6 217.5 46.6 232.3 C 49.5 245.1 49.7 256.3 52.8 271.5 C 55.3 295.3 75.5 321 105.5 326.5 C 155.5 333.8 223.3 330.8 263 306.3 C 278.8 296 286.5 280 292 258",
+    eh: "M 276.9 285.8 C 225.4 290.6 156.8 300 117.8 290.9 C 105.4 286.8 100 277.6 98.7 265.6 L 92.2 234.6 L 76.4 234.3 C 64 237.1 58.4 244.8 61.1 257.9 C 63.4 270.6 57.1 283.5 60.3 299.1 C 64.3 322.1 87 345 117.5 346.9 C 167.5 348.2 233.7 337.2 270.1 308.7 C 284.3 296.4 290.1 280 292.9 257.6",
   },
 };
 
 // Weighted blend (setBlend): weight name -> pose. The result is neutral + sum of w * (pose - neutral).
-export const BLEND_POSES = { ah: "ah", oo: "oo", ee: "ee", tongue: "tongueTip", velar: "velar", r: "r" };
+export const BLEND_POSES = { ah: "ah", oo: "oo", ee: "ee", tongue: "tongueTip", velar: "velar", r: "r", lips: "lipsClosed", sh: "sh", eh: "eh" };
 const BLEND_KEYS = Object.keys(BLEND_POSES);
 
 // Parse every element once: the neutral path split around its numbers, plus each blend pose's offsets from neutral.
@@ -156,8 +172,8 @@ export function createCutaway(parentEl) {
   const lowerLipJaw = svgEl("path", { d: PATHS.lowerLipJaw.neutral }, anim);
   const els = { tongue, upperLip, lowerLipJaw };
 
-  // Contact marker: a dot with a soft halo on the palate line. Hidden until setMarker.
-  const MARKERS = { ridge: [98, 161], velum: [250, 162] };
+  // Contact marker: a dot with a soft halo on the palate line (or where the lips meet). Hidden until setMarker.
+  const MARKERS = { ridge: [98, 161], velum: [250, 162], lips: [70, 202] };
   const marker = svgEl("g", { class: "md-cutaway__marker", opacity: 0 }, svg);
   const markerHalo = svgEl("circle", { class: "md-cutaway__halo", r: 15, fill: MARKER, "fill-opacity": 0.3 }, marker);
   const markerDot = svgEl("circle", { r: 6, fill: MARKER, stroke: WHITE, "stroke-width": 2 }, marker);
@@ -184,7 +200,7 @@ export function createCutaway(parentEl) {
     }
   }
 
-  // where: "ridge" | "velum" | null; strength 0..1 sets opacity and size.
+  // where: "ridge" | "velum" | "lips" | null; strength 0..1 sets opacity and size.
   function setMarker(where, strength = 1) {
     const pos = MARKERS[where];
     const m = pos ? Math.min(1, Math.max(0, strength)) : 0;
@@ -218,7 +234,7 @@ export function createCutaway(parentEl) {
     blendValid = false;
   }
 
-  // Lip-sync drive: { ah, oo, ee, tongue, velar } weights in [0, 1]; all zero is neutral.
+  // Lip-sync drive: { ah, oo, ee, tongue, velar, r, lips, sh, eh } weights in [0, 1]; all zero is neutral.
   // Skips the DOM write when the weights have not changed since the last blend.
   function setBlend(weights) {
     normalizeBlend(weights, blendW);

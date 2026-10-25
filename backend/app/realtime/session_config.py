@@ -12,12 +12,12 @@ def turn_detection(eagerness: str = "medium") -> dict:
     return {"type": "semantic_vad", "eagerness": eagerness, "create_response": True, "interrupt_response": True}
 
 
-def session_config(settings: RealtimeSettings) -> dict:
+def session_config(settings: RealtimeSettings, memory: str | None = None) -> dict:
     return {
         "type": "realtime",
         "model": settings.realtime_model,
         "output_modalities": ["text"],
-        "instructions": instructions(settings.realtime_therapist_name),
+        "instructions": instructions(settings.realtime_therapist_name) + (f"\n\n{memory}" if memory else ""),
         "audio": {
             "input": {
                 "transcription": {"model": settings.realtime_transcription_model, "language": "en"},
@@ -29,8 +29,8 @@ def session_config(settings: RealtimeSettings) -> dict:
     }
 
 
-def client_secret_request(settings: RealtimeSettings) -> dict:
+def client_secret_request(settings: RealtimeSettings, memory: str | None = None) -> dict:
     return {
         "expires_after": {"anchor": "created_at", "seconds": settings.realtime_secret_ttl_s},
-        "session": session_config(settings),
+        "session": session_config(settings, memory),
     }
