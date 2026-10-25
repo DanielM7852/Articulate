@@ -32,3 +32,8 @@ web/public/mediapipe/wasm
 vowel-mapper/research
 vowel-mapper/eval-results
 vowel-mapper/e2e
+
+# Phone service: weights/engines live in the /workspace volume, never in the build context (gated, AGPL).
+services/phones/.venv
+services/phones/models
+services/phones/engines

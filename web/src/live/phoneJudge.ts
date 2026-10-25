@@ -1,6 +1,7 @@
 import type { AttemptAudio } from '../audio/attemptAudio';
 import type { WordAttemptResult, ZoneResult, ZoneVerdict } from '../game/types';
 import type { GhostUnit } from '../game/ghost/types';
+import { phonesHttpBase } from './phonesUrl';
 
 /**
  * Phone-recognizer judging for the ghost board. The formant judge still finds the try, its quality and the live cursor;
@@ -195,10 +196,6 @@ export function applyPhoneJudgement(
   return { ...result, zones: out };
 }
 
-export function phonesHttpBase(): string {
-  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_PHONES_HTTP;
-  return (env && env.trim()) || 'http://127.0.0.1:8020';
-}
 
 let informed = false;
 function inform(why: string) {

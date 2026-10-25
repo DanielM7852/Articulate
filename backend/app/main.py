@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.live_routes import health_router, router as live_router
+from app.api.phones_proxy import router as phones_proxy_router
 from app.api.routes import router
 from app.realtime.routes import router as realtime_router
 from app.config import Settings, get_settings
@@ -98,13 +99,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(live_router)
     app.include_router(health_router)
     app.include_router(realtime_router)
+    app.include_router(phones_proxy_router)
     if frontend is not None:
         _mount_frontend(app, frontend)
     return app
 
 
 # Paths the frontend fallback never answers, so API 404s stay JSON and are never shadowed by index.html.
-_API_PREFIXES = ("/v1/", "/health", "/docs", "/redoc", "/openapi.json")
+_API_PREFIXES = ("/v1/", "/health", "/docs", "/redoc", "/openapi.json", "/phones/")
 
 
 def _frontend_dir(settings: Settings) -> Path | None:
@@ -134,7 +136,7 @@ def _mount_frontend(app: FastAPI, directory: Path) -> None:
 
     async def not_found(request: Request, exc: StarletteHTTPException):
         path = request.url.path
-        if request.method not in ("GET", "HEAD") or path == "/v1" or path.startswith(_API_PREFIXES):
+        if request.method not in ("GET", "HEAD") or path in ("/v1", "/phones") or path.startswith(_API_PREFIXES):
             return await http_exception_handler(request, exc)
         try:
             candidate = (directory / path.lstrip("/")).resolve()

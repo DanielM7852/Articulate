@@ -5,6 +5,8 @@
  * 'error'/'closed' and never throws into the caller.
  */
 
+import { phonesWsUrl } from './phonesUrl';
+
 export interface Phone {
   p: string;
   startMs: number;
@@ -94,7 +96,6 @@ export const TARGET_RATE = 16000;
  */
 export const CHUNK_SAMPLES = 800;
 const MAX_BUFFERED = 256 * 1024;
-const DEFAULT_URL = 'ws://127.0.0.1:8020/ws/phones';
 
 /** r and ɹ are the same target, and an aspirated stop (KoelLabs emits kʰ, pʰ) counts as the plain one. */
 export function normPhone(p: string): string {
@@ -184,8 +185,7 @@ export interface PhoneStreamHandle {
 }
 
 export function connectPhoneStream(stream: MediaStream, opts: PhoneStreamOptions): PhoneStreamHandle {
-  const envUrl = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_PHONES_WS;
-  const url = opts.url ?? envUrl ?? DEFAULT_URL;
+  const url = opts.url ?? phonesWsUrl();
   let closed = false;
   let ws: WebSocket | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;

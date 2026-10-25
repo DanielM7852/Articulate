@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
     # Built web/dist to serve at / (single-container hosting). Blank or a missing directory keeps the API-only app.
     static_dir: str = ""
+    # Base URL of the local phone-recognition service (e.g. http://127.0.0.1:8020); blank disables the /phones relay.
+    phones_url: str = ""
+    # Extra browser Origin pattern (fullmatch) allowed on the /phones/ws relay, beyond same-host and CORS origins.
+    phones_proxy_origin_regex: str = ""
 
     # Engineering comparison thresholds. See docs/backend-contract.md.
     ending_direction_st: float = 1.5
