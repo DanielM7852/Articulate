@@ -18,6 +18,8 @@ const POLL_MS = 70; // ~14 Hz
 const STATE_MS = 200; // React state updates <= 5 Hz
 const WINDOW_CAP = 600;
 const BASE = import.meta.env.BASE_URL;
+const MAX_PAYLOAD_BYTES = 4096;
+let warnedMeshSize = false;
 
 export function useLipTracking(video: HTMLVideoElement | null, enabled: boolean): LipTracking {
   const [status, setStatus] = useState<LipTrackingStatus>('off');
@@ -71,7 +73,24 @@ export function useLipTracking(video: HTMLVideoElement | null, enabled: boolean)
         }
         subs.current.forEach((fn) => fn(f));
         const mesh: number[] | undefined = d.mesh;
-        if (mesh) throttledEmit('lip.mesh', 100, 'mediapipe', 'db', 'lip.mesh', 'face mesh', { pts: mesh });
+        const meshV2: { pts: string; n: number } | undefined = d.meshV2;
+        const r1 = (n: number) => Math.round(n * 10) / 10;
+        const meshPayload: Record<string, unknown> | null = meshV2
+          ? { v: 2, n: meshV2.n, pts: meshV2.pts, yaw: r1(f.yawDeg), pitch: r1(f.pitchDeg), roll: r1(f.rollDeg) }
+          : mesh
+            ? { pts: mesh }
+            : null;
+        if (meshPayload) {
+          // emit() appends the session id (~40 bytes); keep a margin under the 4096-byte reducer cap.
+          if (JSON.stringify(meshPayload).length + 64 > MAX_PAYLOAD_BYTES) {
+            if (!warnedMeshSize) {
+              warnedMeshSize = true;
+              console.debug('lip.mesh payload exceeds the telemetry cap; dropping');
+            }
+          } else {
+            throttledEmit('lip.mesh', 100, 'mediapipe', 'db', 'lip.mesh', 'face mesh', meshPayload);
+          }
+        }
         throttledEmit('lip.frame', 200, 'mediapipe', 'db', 'lip.frame', 'lip frame', {
           ok: f.ok,
           opening: f.lipOpening,

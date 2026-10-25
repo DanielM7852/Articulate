@@ -29,7 +29,7 @@ import {
 } from "./classroom";
 
 // No public tables except telemetry_event: a capped (400 rows) stream of derived numbers
-// and short labels for the backend dashboard, with no identities, media or transcripts.
+// and short labels (payloads up to 4 KB) for the backend dashboard, with no identities, media or transcripts.
 // Browsers otherwise call owned metric reducers or the authenticated Python gateway.
 const backend = table(
   { name: "backend", public: false },
@@ -508,7 +508,7 @@ export const emit_telemetry = db.reducer(
     if (!telemetryNodes.includes(target)) throw new Error("unknown target node");
     if (!telemetryKindRe.test(kind)) throw new Error("invalid kind");
     if (label.length > 120) throw new Error("label too long (max 120)");
-    if (byteLength(payload_json) > 2048) throw new Error("payload too large");
+    if (byteLength(payload_json) > 4096) throw new Error("payload too large");
     parseJsonObject(payload_json, "payload_json");
     ctx.db.telemetryEvent.insert({
       id: 0n,

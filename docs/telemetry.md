@@ -159,3 +159,20 @@ drops token-like payload fields and session ids. Hiding the tab would not be an 
 
 Demo replay reads `telemetry-demo.json` in the browser. It does not call classroom reducers.
 
+## Full face mesh (lip.mesh v2)
+
+`lip.mesh` payload version 2 carries all 478 FaceLandmarker points (468 + 10 iris) so the dashboard can
+render the learner's face as a barycentric dot cloud over the canonical tesselation, like Ava's head.
+
+| field | meaning |
+|-------|---------|
+| v     | 2 |
+| n     | 478 |
+| pts   | base64 of n records of 5 bytes: x uint16 LE, y uint16 LE, z uint8 |
+| yaw, pitch, roll | head pose in degrees from the LipFrame (optional) |
+
+Normalisation: same nose-centred square as v1 (centre = landmark 1, half-size = 1.6 x inter-ocular),
+x and y quantised to 0..65535 across the square and clamped; z = landmark z divided by inter-ocular,
+mapped from [-0.6, 0.6] to 0..255 (0 = nearest the camera). The reducer payload cap is 4096 bytes to
+make room (a v2 payload is about 3.3 KB). v1 (81 points, `pts` as an int array) remains valid; the
+dashboard accepts both and prefers v2. Rate stays 10 Hz per tab.
