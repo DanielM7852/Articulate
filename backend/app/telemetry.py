@@ -8,6 +8,9 @@ import asyncio
 import json
 import logging
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +33,24 @@ _lock = threading.Lock()
 _tasks: set[asyncio.Task] = set()
 _startup: asyncio.Task | None = None
 _generation = 0
+
+# The learner attempt the current request or job is handling; `emit` adds it to the payload as `attemptId`.
+# Tasks created and `asyncio.to_thread` calls made inside the scope copy the context, so their events
+# carry it too. Starlette background tasks run after the handler returns, so they open their own scope.
+current_attempt: ContextVar[str | None] = ContextVar("telemetry_attempt", default=None)
+
+
+@contextmanager
+def attempt_scope(attempt_id: str | None) -> Iterator[None]:
+    """Tag every event emitted inside the block with `attemptId`. A missing id keeps the current scope."""
+    if not attempt_id:
+        yield
+        return
+    token = current_attempt.set(str(attempt_id))
+    try:
+        yield
+    finally:
+        current_attempt.reset(token)
 
 
 def configure(settings: Settings | None = None, transport=None, client: Any = None, announce: bool = False) -> bool:
@@ -266,6 +287,9 @@ def emit(source: str, target: str, kind: str, label: str, payload: dict | None =
     try:
         if _client is None:
             return
+        attempt = current_attempt.get()
+        if attempt and (payload is None or "attemptId" not in payload):
+            payload = {**(payload or {}), "attemptId": attempt}
         args = [source, target, kind, _clip(label, LABEL_MAX), _payload_json(payload)]
         with _lock:
             if _inflight >= MAX_IN_FLIGHT:

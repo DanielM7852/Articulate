@@ -4,7 +4,8 @@ Every subsystem reports small, non-sensitive events to one public SpacetimeDB ta
 The teaching console subscribes to that table from `teach.html#/live`. `/#/dashboard` opens the same section.
 No media (audio, video, images) and no profile ids are written here. Some short text is public: `stt.transcript`
 carries up to 80 chars of what the learner said, and `coach.decision` labels and `claude.response` lines carry up
-to 120 chars of the coach's caption or output. A lesson event may add a command id and a revision.
+to 120 chars of the coach's caption or output. A lesson event may add a command id and a revision. Events
+produced while handling one learner attempt may add that attempt's random id (`attemptId`, see "Attempt id").
 
 ## Table `telemetry_event` (public)
 
@@ -64,15 +65,15 @@ The dashboard also derives extra nodes from event kinds and payload fields; see 
 |--------------------|---------------------|------------------------------------------------------------------------|
 | camera.on / camera.off | camera -> mediapipe | `{}`                                                                |
 | lip.frame          | mediapipe -> db     | `{ok, opening, width, rounding, spread, jaw, yaw}` numbers 0..1 / deg  |
-| lip.batch          | mediapipe -> db     | `{frames, seq}`                                                        |
+| lip.batch          | mediapipe -> db     | `{frames, seq, attemptId}`                                             |
 | audio.frame        | audio -> db         | `{f1, f2, rms, env}` env = 32 floats 0..1 downsampled envelope         |
-| audio.batch        | audio -> db         | `{frames, seq}`                                                        |
+| audio.batch        | audio -> db         | `{frames, seq, attemptId}`                                             |
 | stt.open / stt.close | mic -> stt        | `{provider, model?}` provider `openai` (Realtime, word lesson; `model` from the session secret) or `cartesia` (Ink) |
 | stt.transcript     | stt -> ui           | `{text, final, provider, model?}` text truncated to 80 chars; OpenAI sends one per completed transcription (`final: true`) |
 | tts.token          | backend -> tts      | `{}`                                                                   |
 | tts.speak          | ui -> tts           | `{chars, voice}`                                                       |
 | tts.audio          | tts -> ui           | `{ms}` duration of audio received                                      |
-| coach.request      | ui -> backend       | `{sound, mode}`                                                        |
+| coach.request      | ui -> backend       | `{sound, mode, attemptId}`                                             |
 | coach.decision     | backend -> ui       | `{verdict, cue}`                                                       |
 | claude.request     | backend -> claude   | `{model, purpose}` purpose in decide, word, notes, insight, session, ask, recap (session recap), grade (offline coach checker) |
 | claude.response    | claude -> backend   | `{model, purpose, latencyMs, inputTokens, outputTokens, line}` line <= 120 chars |
@@ -95,7 +96,7 @@ The dashboard also derives extra nodes from event kinds and payload fields; see 
 | phones.open        | ui -> db            | `{provider: "koellabs", transport: "ws", host}` host = host:port of the phone service URL only |
 | phones.close       | ui -> db            | `{reason}` `client`, `closed`, `unreachable` or `origin-rejected`; a service that never opens reports at most every 30 s |
 | phones.frame       | ui -> db            | `{n}` phones messages received on this socket so far; at most every 500 ms |
-| phones.score       | ui -> db            | `{word, ms, ok}` after each POST /v1/phones/score; word falls back to the target phones when the caller gives none |
+| phones.score       | ui -> db            | `{word, ms, ok, attemptId?}` after each POST /v1/phones/score; word falls back to the target phones when the caller gives none; attemptId when the word lesson judges an attempt |
 | classroom.session  | backend -> db       | `{role}` teacher or learner, when a development classroom session is opened |
 | classroom.summary  | backend -> db       | `{verified}` after `commit_verified_summary` stores a row (false for synthetic fixtures) |
 | classroom.scale    | backend -> db       | `{rooms}` when the scale school is opened                              |
@@ -128,6 +129,29 @@ kind and field and draws each of these components as its own node.
   its Claude call is `claude.*` with purpose `recap`.
 - Checker: `checker.*`, `backend -> db`. The offline coach checker script (`scripts/grade_coach.py`), not the running
   app; its grading calls are `claude.*` with purpose `grade`.
+
+## Attempt id
+
+`attemptId` is an optional payload field on the events produced while one learner attempt is handled, so the
+teaching console can filter the live graph to the attempt a teacher selected. It is the id the browser mints for the
+take (`crypto.randomUUID()`), the same string sent to `/v1/live/coach`, `/v1/live/articulation` and, for practice
+attempts, stored in the classroom's `learner_attempt_cards.attempt_id`. For `/v1/word-match` the browser may send
+`attemptId`; otherwise the backend mints it, uses it for the stored pitch table and the classroom card, and returns it.
+It is random and names no person; profile ids still never appear.
+
+On the backend it is set by request scope: the handlers that receive an attempt id (`POST /v1/live/coach`,
+`/v1/live/session/turn` for `attempt_feedback` and `analysis_ready` events, `POST` and the shared-coordination
+`GET /v1/live/articulation`, `/v1/coach`, `/v1/word-match`, `/v1/comparisons`) open
+`telemetry.attempt_scope(attempt_id)`, a context variable that `emit` copies into every payload that has no
+`attemptId` of its own; tasks and `asyncio.to_thread` calls started inside the scope inherit it, and the background
+articulation job, the scheduled coach persist and the shared-coordination worker open their own scope from the job's
+attempt id. Events outside any attempt (startup, recap, checker, consonant coach, word questions) carry none. Kinds
+that can carry it: `claude.*`, `pitch.*`, `sparc.*`, `azure.*`, `db.read`, `db.write`, `coach.request`,
+`coach.decision`, `video.score`, `classroom.summary`.
+
+In the browser it is explicit: `coach.request`, `lip.batch`, `audio.batch` and `phones.score` (word lesson) add the
+attempt in hand. The 10 Hz streams (`lip.frame`, `lip.mesh`, `audio.frame`, `audio.spectrum`) and `phones.frame` /
+`phones.open` stay per-`sid` and carry no attempt id.
 
 ## Session id and presence
 

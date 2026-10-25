@@ -80,7 +80,11 @@ export function profileIdFor(name: string | null | undefined): string {
 }
 
 export function requestLiveCoach(req: LiveCoachRequest, signal?: AbortSignal): Promise<LiveCoachResponse> {
-  emit('ui', 'backend', 'coach.request', 'coach request', { sound: req.sound, mode: req.word ? 'word' : 'sound' });
+  emit('ui', 'backend', 'coach.request', 'coach request', {
+    sound: req.sound,
+    mode: req.word ? 'word' : 'sound',
+    attemptId: req.attemptId,
+  });
   return livePost<LiveCoachResponse>('/v1/live/coach', req, signal).then((r) => {
     if (!r || typeof r.caption !== 'string' || typeof r.observation !== 'string') throw new Error('Malformed coach response');
     return r;

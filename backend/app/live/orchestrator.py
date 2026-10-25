@@ -626,7 +626,9 @@ async def coach_attempt(
 
     async def persist() -> None:
         try:
-            ok = await history.record(body.profileId, body.attemptId, summary, decision_json)
+            # A scheduled persist runs after the response, outside the route's attempt scope.
+            with telemetry.attempt_scope(body.attemptId):
+                ok = await history.record(body.profileId, body.attemptId, summary, decision_json)
             if not ok:
                 logger.warning("persist reported failure attempt=%s", body.attemptId)
         except Exception as exc:  # noqa: BLE001

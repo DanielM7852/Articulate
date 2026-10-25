@@ -165,10 +165,13 @@ ACCEPTED = {202: {"description": "Durable job accepted; poll the returned status
 
 @router.post("/coach", response_model=LiveCoachResponse, responses=ACCEPTED)
 async def live_coach(body: LiveCoachRequest, request: Request, background: BackgroundTasks) -> LiveCoachResponse:
-    if _shared(request, body.profileId):
-        # Attempt audio is used for one model call on the local path only; it never enters a job row.
-        return await _coordination(request).submit("attempt.coach", body.model_dump(exclude={"attemptAudio"}))
-    return await coach_attempt(_deps(request), body, background.add_task)
+    with telemetry.attempt_scope(body.attemptId):
+        if _shared(request, body.profileId):
+            # Attempt audio is used for one model call on the local path only; it never enters a job row.
+            return await _coordination(request).submit(
+                "attempt.coach", body.model_dump(exclude={"attemptAudio"})
+            )
+        return await coach_attempt(_deps(request), body, background.add_task)
 
 
 @router.post("/word/ask", response_model=WordAskResponse)
@@ -203,10 +206,13 @@ async def live_session_start(body: SessionStartRequest, request: Request) -> Ses
 
 @router.post("/session/turn", response_model=SessionTurn, responses=ACCEPTED)
 async def live_session_turn(body: SessionTurnRequest, request: Request) -> SessionTurn:
-    if _shared(request, body.profileId):
-        return await _coordination(request).submit("session.turn", body.model_dump(), request.headers.get("Idempotency-Key"))
-    deps = _deps(request)
-    return await take_turn(deps, get_store(deps, request.app), body, get_runtime(request.app))
+    with telemetry.attempt_scope(getattr(body.event, "attemptId", None)):
+        if _shared(request, body.profileId):
+            return await _coordination(request).submit(
+                "session.turn", body.model_dump(), request.headers.get("Idempotency-Key")
+            )
+        deps = _deps(request)
+        return await take_turn(deps, get_store(deps, request.app), body, get_runtime(request.app))
 
 
 async def _find_attempt(history, profile_id: str, attempt_id: str, limit: int) -> tuple[list[dict], dict | None]:
@@ -258,6 +264,14 @@ async def _insight_lane(runtime, sink, history, settings, client, profile_id: st
 async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profile_id: str, sound: str,
                             clock: tuple[float | None, float | None], reference: bool = False,
                             word: str | None = None) -> None:
+    """Background task: runs after the response, outside the handler's attempt scope, so it opens its own."""
+    with telemetry.attempt_scope(attempt_id):
+        await _articulation_work(request, wav, attempt_id, profile_id, sound, clock, reference, word)
+
+
+async def _articulation_work(request: Request, wav: bytes, attempt_id: str, profile_id: str, sound: str,
+                             clock: tuple[float | None, float | None], reference: bool,
+                             word: str | None) -> None:
     """Collector -> features -> history -> insight line. Never raises."""
     runtime = get_runtime(request.app)
     try:
@@ -356,7 +370,8 @@ async def live_articulation_status(attemptId: str, profileId: str, request: Requ
     authorize_profile(request, profileId)
     if _is_shared(request):
         try:
-            entry = await _sink(request).shared.get(attemptId, profileId)
+            with telemetry.attempt_scope(attemptId):
+                entry = await _sink(request).shared.get(attemptId, profileId)
         except SpacetimeError as exc:
             raise HTTPException(503, "coordination_unavailable") from exc
     else:
@@ -394,6 +409,16 @@ async def live_articulation(
     if size < ARTICULATION_MIN_BYTES:
         raise HTTPException(422, "WAV body too small")
     authorize_profile(request, profileId)
+    with telemetry.attempt_scope(attemptId):
+        return await _accept_articulation(
+            request, background, b"".join(chunks), attemptId, profileId, sound,
+            (captureStartMonotonicMs, timeOriginUnixMs), reference, word,
+        )
+
+
+async def _accept_articulation(request: Request, background: BackgroundTasks, wav: bytes, attemptId: str,
+                               profileId: str, sound: SoundId, clock: tuple[float | None, float | None],
+                               reference: bool, word: str | None) -> JSONResponse:
     state = request.app.state
     runtime = get_runtime(request.app)
     collector = state.settings.articulation_configured or getattr(state, "live_articulation", None) is not None
@@ -416,8 +441,8 @@ async def live_articulation(
     else:
         runtime.set_insight(attemptId, profileId, sound, "pending")
     background.add_task(
-        _articulation_job, request, b"".join(chunks), attemptId, profileId, sound,
-        (captureStartMonotonicMs, timeOriginUnixMs), reference, word if reference else None,
+        _articulation_job, request, wav, attemptId, profileId, sound, clock, reference,
+        word if reference else None,
     )
     return JSONResponse({"accepted": True}, status_code=202, background=background)
 

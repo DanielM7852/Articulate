@@ -129,11 +129,12 @@ export class AttemptRecorder {
   private flush(): void {
     const useSink = this.sink.connected && this.sinkReady;
     if (this.sink.connected && !useSink && (this.pendingAudio.length || this.pendingVideo.length)) this.sinkMissed = true;
+    const attempt = this.attemptId ? { attemptId: this.attemptId } : {};
     if (this.pendingAudio.length) {
       if (useSink) {
         const seq = this.seq.audio++;
         this.sink.push('audio', seq, this.pendingAudio);
-        emit('audio', 'db', 'audio.batch', `audio batch ${seq}`, { frames: this.pendingAudio.length, seq });
+        emit('audio', 'db', 'audio.batch', `audio batch ${seq}`, { frames: this.pendingAudio.length, seq, ...attempt });
       }
       this.pendingAudio = [];
     }
@@ -141,7 +142,7 @@ export class AttemptRecorder {
       if (useSink) {
         const seq = this.seq.video++;
         this.sink.push('video', seq, this.pendingVideo);
-        emit('mediapipe', 'db', 'lip.batch', `lip batch ${seq}`, { frames: this.pendingVideo.length, seq });
+        emit('mediapipe', 'db', 'lip.batch', `lip batch ${seq}`, { frames: this.pendingVideo.length, seq, ...attempt });
       }
       this.pendingVideo = [];
     }

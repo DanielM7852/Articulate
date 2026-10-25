@@ -1121,7 +1121,7 @@ export default function WordLesson() {
       const want = result.durationMs + CLIP_TAIL_MS + CLIP_PREROLL_MS;
       const clip = attemptTap.current?.clip(judgedAt.current.at, Math.min(MAX_CLIP_MS, canPhoneRescue(result) ? Math.max(want, RESCUE_MIN_CLIP_MS) : want)) ?? null;
       if (!clip) return result;
-      const resp = await scorePhones(clip, zones.map((z) => z.phone), { word: word.word });
+      const resp = await scorePhones(clip, zones.map((z) => z.phone), { word: word.word, attemptId: result.attemptId });
       if (!resp) return result;
       return applyPhoneJudgement(result, step.unit, resp, clipOffsetMs(clip.durationMs, result, ASSUMED_END_LAG_MS));
     } catch {
