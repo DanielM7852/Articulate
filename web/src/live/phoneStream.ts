@@ -1,7 +1,7 @@
 /**
  * Client for the local phone-recognition service (ws://127.0.0.1:8020/ws/phones).
  * Taps a MediaStream with a private AudioContext + AudioWorklet (inline blob, same approach as attemptAudio.ts),
- * downsamples to 16 kHz mono Int16 and sends ~160 ms binary chunks. Fails soft: any problem reports state
+ * downsamples to 16 kHz mono Int16 and sends ~50 ms binary chunks. Fails soft: any problem reports state
  * 'error'/'closed' and never throws into the caller.
  */
 
@@ -11,12 +11,20 @@ export interface Phone {
   endMs: number;
   conf: number;
 }
+/** One recognizer frame: stream time, non-blank probability mass (1 - blank) and the top (symbol, probability) pairs. */
+export interface PhoneFrame {
+  t: number;
+  mass: number;
+  top: [string, number][];
+}
 export interface PhonesMessage {
   type: 'phones';
   seq?: number;
   windowEndMs?: number;
   committed?: Phone[];
   provisional?: Phone[];
+  /** Newest frames only (~5 per message); absent on older servers. */
+  frames?: unknown;
   inferMs?: number;
 }
 export interface PhoneState {
@@ -31,13 +39,44 @@ export interface StreamInfo {
 }
 export interface PhoneUpdate extends PhoneState {
   inferMs?: number;
+  /** The frames carried by this message (not accumulated); [] when the server sends none. */
+  frames: PhoneFrame[];
+}
+
+/** Validate the optional `frames` field of a phones message; malformed entries are dropped, absent -> []. */
+export function parseFrames(raw: unknown): PhoneFrame[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PhoneFrame[] = [];
+  for (const f of raw) {
+    if (!f || typeof f !== 'object') continue;
+    const o = f as { t?: unknown; mass?: unknown; top?: unknown };
+    if (typeof o.t !== 'number' || !Number.isFinite(o.t) || typeof o.mass !== 'number' || !Number.isFinite(o.mass)) continue;
+    const top: [string, number][] = [];
+    if (Array.isArray(o.top)) {
+      for (const e of o.top) {
+        if (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number' && Number.isFinite(e[1]) && e[1] > 0) top.push([e[0], e[1]]);
+      }
+    }
+    out.push({ t: o.t, mass: o.mass, top });
+  }
+  return out;
 }
 
 export const MAX_COMMITTED = 60;
 export const TARGET_RATE = 16000;
-export const CHUNK_SAMPLES = 2560; // 160 ms at 16 kHz
+/**
+ * 50 ms at 16 kHz. The service only runs inference when a chunk arrives and its hop has elapsed (stream.py), so the chunk
+ * must be no longer than the hop: 50 ms chunks give an inference every 100 ms at PHONES_HOP_MS=100 (80 ms chunks would give 160 ms).
+ */
+export const CHUNK_SAMPLES = 800;
 const MAX_BUFFERED = 256 * 1024;
 const DEFAULT_URL = 'ws://127.0.0.1:8020/ws/phones';
+
+/** r and ɹ are the same target, and an aspirated stop (KoelLabs emits kʰ, pʰ) counts as the plain one. */
+export function normPhone(p: string): string {
+  const q = p.endsWith('ʰ') ? p.slice(0, -1) : p;
+  return q === 'r' ? 'ɹ' : q;
+}
 
 export const EMPTY_PHONES: PhoneState = { committed: [], provisional: [] };
 
@@ -169,7 +208,7 @@ export function connectPhoneStream(stream: MediaStream, opts: PhoneStreamOptions
           emit('ready', { engine: m.engine, model: m.model });
         } else if (m.type === 'phones') {
           state = mergePhones(state, m);
-          if (!closed) opts.onPhones({ ...state, inferMs: m.inferMs });
+          if (!closed) opts.onPhones({ ...state, inferMs: m.inferMs, frames: parseFrames(m.frames) });
         } else if (m.type === 'error') {
           emit('error', { message: String(m.message ?? 'error') });
         }

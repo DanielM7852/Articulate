@@ -3,6 +3,7 @@ import type { GhostMarker, GhostPart, GhostPathModel, GhostPoint, GhostSegment }
 import { GHOST_WORDS, type GhostWordSpec } from './words';
 import { validateGhostModel } from './validate';
 import { pullToward } from '../../vowel/pull';
+import recordedTiming from './models/recorded-timing.json';
 
 /**
  * Model pronunciations ("ghost paths"). Every word ships a 'synthetic' model built from reference
@@ -120,6 +121,8 @@ interface WordTimeline {
   /** Part boundaries in ms, one fewer than parts. */
   boundaries: number[];
   provenance: string;
+  /** Where the timing comes from; the F1/F2 path is the synthetic vowel trajectory either way. Default 'synthetic'. */
+  source?: GhostPathModel['source'];
 }
 
 const round = (n: number, digits: number) => Math.round(n * 10 ** digits) / 10 ** digits;
@@ -158,7 +161,7 @@ function buildSynthetic(
   return {
     version: 1,
     word: spec.word,
-    source: 'synthetic',
+    source: line.source ?? 'synthetic',
     factor: 0,
     durationMs,
     segments,
@@ -173,15 +176,38 @@ const PROVENANCE =
   'rescaled so Hillenbrand iy lands on REFERENCE_V1 iy; spread from REFERENCE_V1 / EH_RADIUS_V1; ' +
   '70 ms smooth log-Hz blends; timings are typical natural durations, not measured.';
 
+/**
+ * "track" timed from human recordings (median of 10 speakers, CTC forced alignment): phone spans and peaks are
+ * fractions of the word. Peaks are CTC spikes (stop peaks are about the burst); spans are spike midpoints, so
+ * the part edges are approximate. The F1/F2 path stays the synthetic r -> ae trajectory, only retimed.
+ */
+function recordedTrack(): WordTimeline {
+  const rec = recordedTiming.words.track;
+  const D = rec.durationMs;
+  const ph = (p: string) => {
+    const hit = rec.phones.find((x) => x.p === p);
+    if (!hit) throw new Error(`recorded-timing.json: track has no phone ${p}`);
+    return hit;
+  };
+  const [t, r, a, k] = [ph('t'), ph('ɹ'), ph('æ'), ph('k')];
+  const ms = (f: number) => round(f * D, 1);
+  // The r span (spike midpoints) is only ~60 ms; the voiced r really starts a little earlier, and the "tr" unit needs a
+  // voiced stretch of at least FOLLOW.minVoicedSpanMs (80 ms) to be followable at all, so start r early enough for 90.
+  // glideMs 40: r peaks only ~17 ms before the vowel starts, so the r -> ae blend is shorter than the 70 ms default.
+  const rFrom = Math.max(0, Math.min(ms(r.t0), ms(a.t0) - 90));
+  return {
+    durationMs: D,
+    stretches: [[{ target: 'r', from: rFrom, to: ms(r.t1), glideMs: 40 }, { target: 'ae', from: ms(a.t0), to: ms(a.t1) }]],
+    markers: [{ zoneId: 't', ms: ms(t.peak) }, { zoneId: 'r', ms: ms(r.peak) }, { zoneId: 'k', ms: ms(k.peak) }],
+    boundaries: [ms(a.t0), ms(k.t0)],
+    provenance: `Recorded timing (${recordedTiming.provenance}; model ${recordedTiming.model}) on the synthetic vowel path: ${PROVENANCE}`,
+    source: 'recorded',
+  };
+}
+
 const TIMELINES: Record<string, WordTimeline> = {
-  // t burst, aspiration, r -> ae, k closure and burst.
-  track: {
-    durationMs: 550,
-    stretches: [[{ target: 'r', from: 110, to: 190 }, { target: 'ae', from: 190, to: 450 }]],
-    markers: [{ zoneId: 't', ms: 60 }, { zoneId: 'r', ms: 150 }, { zoneId: 'k', ms: 510 }],
-    boundaries: [190, 450],
-    provenance: PROVENANCE,
-  },
+  // t burst, aspiration, r -> ae, k closure and burst. Recorded timing (see recordedTrack).
+  track: recordedTrack(),
   // sh hiss (unvoiced, no path), long ee, p burst.
   sheep: {
     durationMs: 480,

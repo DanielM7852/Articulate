@@ -17,7 +17,8 @@ from fastapi import HTTPException
 
 from app.live import llm
 from app.live import talk_prompts as tp
-from app.live.decision import _SHAMING, _sentences
+from app.live.decision import _OBSERVED, _SHAMING, _sentences
+from app.live.decision import body_claim as _body_claim
 from app.live.history import LearnerContext
 from app.live.notes import miss_counts
 from app.live.orchestrator import LiveDeps
@@ -46,33 +47,6 @@ DEFAULT_ORDER = ["i", "u", "a"]
 
 _DIGIT = re.compile(r"\d")
 _JUNK = re.compile(r"https?:|www\.|[<>{}\[\]`]", re.IGNORECASE)
-# Observation claims only: "I saw/noticed/watched/(could|can) see" followed in the clause by a body or attempt word.
-# Conversational "I see, good question" / "I see why you're asking" / "I see what you mean" do not match.
-_OBSERVED = re.compile(
-    r"\bI\s+(?:saw|see|noticed|watched|could\s+see|can\s+see)\b[^.!?]*?"
-    r"\b(?:lips?|jaw|mouth|tongue|face|you(?:r)?\s+(?:were|did|made|said|tried|moved|opened|\w+ed))\b",
-    re.IGNORECASE,
-)
-_BODY_PAST = re.compile(
-    r"\byour\s+(?:lips?|jaw|mouth)\s+(?:(?!(?:is|are)\b)\w+\s+)?(?:was|were|looked|moved|stayed|did|opened|rounded|spread)\b",
-    re.IGNORECASE,
-)
-_BODY_PRESENT = re.compile(r"\byour\s+(?:lips?|jaw|mouth)\s+(?:\w+\s+)?(?:is|are)\b", re.IGNORECASE)
-_BODY_JUDGED = re.compile(
-    r"\byour\s+(?:lips?|jaw|mouth)\s+(?:is|are)\s+(?:too|not|still|a\s+bit|slightly|very|quite|tight|tense|closed|wrong)\b",
-    re.IGNORECASE,
-)
-_TARGET_FRAME = re.compile(r"\b(?:for\s+(?:ee|oo|ah)|when\s+you\s+(?:say|make))\b", re.IGNORECASE)
-
-
-def _body_claim(say: str) -> bool:
-    # Past/observational forms always claim; present is/are claims only without "for <sound>"/"when you say|make"
-    # framing, or when followed by a judgement word ("too", "not", "tight", ...).
-    if _BODY_PAST.search(say) or _OBSERVED.search(say) or _BODY_JUDGED.search(say):
-        return True
-    return bool(_BODY_PRESENT.search(say)) and not _TARGET_FRAME.search(say)
-
-
 # Tongue rule. Any mention is rejected unless the turn shows the demo (demonstrate / next_sound), where
 # instructional or present-tense descriptions of the target are allowed ("the tongue rises high at the front",
 # "keep your tongue low"). Claims about what the learner's tongue did are rejected in every action:

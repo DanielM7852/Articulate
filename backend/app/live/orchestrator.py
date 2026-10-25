@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from app import telemetry
+from app.audio import azure_pronunciation
 from app.audio.word_acoustics import measure_word
 from app.config import Settings
 from app.integrations.spacetime import SpacetimeClient, unwrap, uuid_literal
@@ -21,6 +22,7 @@ from app.live.decision import (
     ease_repeated_instruction,
     evidence_candidates,
     fallback_decision,
+    normalize_word_cue,
     show_side_view,
     validate_decision,
     validate_word_decision,
@@ -161,6 +163,7 @@ def _word_user_message(
     candidates: dict[str, float | str],
     context: LearnerContext,
     acoustics: dict[str, Any] | None = None,
+    azure: dict[str, Any] | None = None,
 ) -> str:
     word = body.word
     assert word is not None
@@ -212,6 +215,8 @@ def _word_user_message(
     }
     if acoustics is not None:
         payload["acoustics"] = acoustics
+    if azure is not None:
+        payload["azure"] = azure
     return json.dumps(payload, separators=(",", ":"))
 
 
@@ -233,6 +238,93 @@ async def _measure_acoustics(settings: Settings, body: LiveCoachRequest, wav: by
             _acoustics_warned.add(name)
             logger.warning("word acoustics skipped: %s", name)
         return None
+
+
+# Word-coach Azure evidence. Whole-word attempts only: the reference text is the real word, so a part-only
+# utterance ("tr", "ck") would be scored as missing phonemes.
+_azure_warned: set[str] = set()
+_AZURE_TIMEOUT_S = 1.5  # upper bound; the configured azure_pronunciation_timeout_s applies when smaller
+
+# Zone phoneme (ARPAbet-like, from words.py) -> the IPA symbols Azure may return for it.
+_ZONE_IPA: dict[str, set[str]] = {
+    "t": {"t"}, "k": {"k"}, "p": {"p"}, "b": {"b"}, "n": {"n"},
+    "r": {"r", "ɹ", "ɻ", "ɾ", "ʀ", "ʁ"}, "sh": {"ʃ"}, "ae": {"æ"}, "iy": {"i", "iː"},
+    "eh": {"ɛ", "e"}, "ey": {"eɪ", "e"},
+}
+
+
+def _is_whole_word(body: LiveCoachRequest) -> bool:
+    """True when the practised zones cover every zone of the word (no practice list, or a list naming them all)."""
+    word = body.word
+    if word is None or not word.zones:
+        return False
+    practice = _practice_ids(body)
+    return practice is None or {z.zoneId for z in word.zones} <= set(practice)
+
+
+def _azure_wanted(settings: Settings, body: LiveCoachRequest, wav: bytes | None) -> bool:
+    word = body.word
+    return (
+        wav is not None
+        and word is not None
+        and word.quality == "usable"
+        and _is_whole_word(body)
+        and azure_pronunciation.configured(settings)
+    )
+
+
+def _azure_zone_scores(word: Any, phonemes: list[dict[str, Any]]) -> dict[str, float]:
+    """Map Azure phonemes to zone ids: in order when the counts match, else by IPA symbol (each phoneme used once)."""
+    zones = list(word.zones)
+    if len(phonemes) == len(zones):
+        pairs = list(zip(zones, phonemes))
+    else:
+        pairs, used = [], set()
+        for z in zones:
+            wanted = _ZONE_IPA.get(z.phoneme, {z.phoneme})
+            idx = next((i for i, p in enumerate(phonemes) if i not in used and p["phoneme"] in wanted), None)
+            if idx is not None:
+                used.add(idx)
+                pairs.append((z, phonemes[idx]))
+    return {z.zoneId: float(p["accuracy"]) for z, p in pairs if isinstance(p.get("accuracy"), (int, float))}
+
+
+def _azure_block(assessment: "azure_pronunciation.AzureAssessment", word: Any, pass_score: float) -> dict[str, Any]:
+    return {
+        "accuracy": assessment.accuracy,
+        "fluency": assessment.fluency,
+        "completeness": assessment.completeness,
+        "pron": assessment.pron,
+        "phonemes": [
+            {"phoneme": p["phoneme"], "accuracy": p["accuracy"], "nbest": p["nbest"]} for p in assessment.phonemes
+        ],
+        "zoneAccuracy": _azure_zone_scores(word, assessment.phonemes),
+        "passScore": pass_score,
+    }
+
+
+async def _assess_azure(
+    settings: Settings, body: LiveCoachRequest, wav: bytes | None
+) -> tuple[dict[str, Any] | None, int | None]:
+    """(Azure evidence block or None, elapsed ms when a call was attempted). Never raises."""
+    if not _azure_wanted(settings, body, wav):
+        return None, None
+    assert body.word is not None and wav is not None
+    t0 = time.perf_counter()
+    block = None
+    try:
+        assessment = await asyncio.wait_for(
+            azure_pronunciation.assess(wav, body.word.word, settings),
+            min(settings.azure_pronunciation_timeout_s, _AZURE_TIMEOUT_S),
+        )
+        if assessment is not None:
+            block = _azure_block(assessment, body.word, settings.consonant_azure_pass)
+    except Exception as exc:  # noqa: BLE001 - Azure is optional evidence
+        name = type(exc).__name__
+        if name not in _azure_warned:
+            _azure_warned.add(name)
+            logger.warning("word azure skipped: %s", name)
+    return block, _ms(t0, time.perf_counter())
 
 
 def decode_attempt_audio(body: LiveCoachRequest) -> bytes | None:
@@ -325,6 +417,7 @@ async def _decide_word(
     timings: dict[str, int],
     wav: bytes | None = None,
     acoustics: dict[str, Any] | None = None,
+    azure: dict[str, Any] | None = None,
 ):
     word = body.word
     assert word is not None
@@ -339,7 +432,7 @@ async def _decide_word(
                 deps.settings,
                 deps.llm_client,
                 llm.WORD_COACH_SYSTEM + (f"\n{llm.WORD_COACH_AUDIO_NOTE}" if wav else ""),
-                _word_user_message(body, score, candidates, context, acoustics),
+                _word_user_message(body, score, candidates, context, acoustics, azure),
                 CoachDecision,
                 deps.settings.live_coach_effort,
                 deps.settings.live_coach_timeout_s,
@@ -351,6 +444,7 @@ async def _decide_word(
             )
             t1 = time.perf_counter()
             timings["llm"] = _ms(t0, t1)
+            decision = normalize_word_cue(decision)
             evidence = validate_word_decision(decision, word, score, candidates, practice)
             timings["validate"] = _ms(t1, time.perf_counter())
             return "agent", decision, evidence
@@ -390,11 +484,28 @@ async def coach_attempt(
     context.attempts = [a for a in context.attempts if a.get("attemptId") != body.attemptId]
 
     word_score = score_word(body.word, _practice_ids(body)) if body.word is not None else None
-    if word_score is not None:
+    if word_score is not None and word_score.verdict == "on_target":
+        # The local judge already passed every counted zone: no Praat, Azure or model call; GPT is only for errors.
+        logger.info("live word coach: local pass, cloud skipped")
+        wav = None
+        timings["llm"] = 0
+        t_v = time.perf_counter()
+        candidates = word_evidence_candidates(body.word, word_score)
+        decision, evidence = word_fallback_decision(body.word, word_score, candidates, _practice_ids(body))
+        timings["validate"] = _ms(t_v, time.perf_counter())
+        source = "fallback"
+        focus = decision.focusZoneId
+        side = word_show_side_view(focus, decision.nextAction)
+    elif word_score is not None:
         decoded = decode_attempt_audio(body)
         wav = decoded if llm.is_openai(deps.settings) else None
         t_ac = time.perf_counter()
-        acoustics = await _measure_acoustics(deps.settings, body, decoded)
+        # Praat and Azure are independent: run them concurrently so Azure adds no latency beyond the slower of the two.
+        acoustics, (azure, azure_ms) = await asyncio.gather(
+            _measure_acoustics(deps.settings, body, decoded), _assess_azure(deps.settings, body, decoded)
+        )
+        if azure_ms is not None:
+            timings["azure"] = azure_ms
         if acoustics is not None:
             timings["acoustics"] = _ms(t_ac, time.perf_counter())
         if acoustics is not None and not acoustics["speech"]["clear"] and body.word.quality == "usable":
@@ -409,7 +520,7 @@ async def coach_attempt(
             source = "fallback"
         else:
             source, decision, evidence = await _decide_word(
-                deps, body, word_score, context, timings, wav, acoustics
+                deps, body, word_score, context, timings, wav, acoustics, azure
             )
         focus = decision.focusZoneId
         side = word_show_side_view(focus, decision.nextAction)
@@ -473,7 +584,7 @@ async def coach_attempt(
 
     timings["total"] = _ms(started, time.perf_counter())
     response.timingsMs = {
-        k: timings[k] for k in ("frames", "history", "scoring", "acoustics", "llm", "validate", "total") if k in timings
+        k: timings[k] for k in ("frames", "history", "scoring", "acoustics", "azure", "llm", "validate", "total") if k in timings
     }
     logger.info(
         "live coach timings ms %s source=%s metrics=%s",

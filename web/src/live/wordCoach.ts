@@ -1,5 +1,5 @@
 import type { WordAttemptResult, ZoneResult } from '../game/types';
-import { requestLiveCoach, type LiveCoachRequest, type LiveCoachResponse, type WordScore } from './liveCoach';
+import type { LiveCoachRequest, LiveCoachResponse, WordScore } from './liveCoach';
 import { livePost } from './transport';
 
 /**
@@ -103,6 +103,22 @@ export interface FallbackSpec {
   zones: { id: string; label: string }[];
 }
 
+/** Joined labels of the practised zones when they are a strict part of the word (the backend's _practice_label), else null. */
+function partLabel(spec: FallbackSpec, practice?: string[] | null): string | null {
+  if (!practice || practice.length === 0) return null;
+  const part = spec.zones.filter((z) => practice.includes(z.id));
+  if (part.length === 0 || part.length >= spec.zones.length) return null;
+  return part.map((z) => z.label).join('') || null;
+}
+
+/** What the learner is asked to say: the practised part ("the tr in track") or the whole word. */
+function spokenName(spec: FallbackSpec, word: string, practice?: string[] | null): string {
+  if (!practice || practice.length === 0) return word;
+  const part = spec.zones.filter((z) => practice.includes(z.id));
+  if (part.length === 0 || part.length >= spec.zones.length) return word;
+  return `the ${part.map((z) => z.label).join('')} in ${word}`;
+}
+
 /** The caption the backend's deterministic fallback would produce, and the zone it coaches. */
 export function wordFallbackLine(
   spec: FallbackSpec,
@@ -112,17 +128,19 @@ export function wordFallbackLine(
   const word = result.word;
   const score = scoreWord(result, practice);
   if (score.verdict === 'insufficient') {
+    const name = spokenName(spec, word, practice);
     const caption =
       result.qualityReason === 'clipped'
-        ? `That was a bit loud for me. Say ${word} once more, a little softer.`
+        ? `That was a bit loud for me. Say ${name} once more, a little softer.`
         : result.qualityReason === 'too-short'
-          ? `That went by quickly. Say ${word} once more, at an easy pace.`
-          : `I couldn't catch ${word} that time. Say it once more, clear and steady.`;
+          ? `That went by quickly. Say ${name} once more, at an easy pace.`
+          : `I couldn't catch ${name} that time. Say it once more, clear and steady.`;
     return { caption, focusZoneId: null };
   }
   const id = score.weakestZoneId;
   if (!id) {
-    return { caption: practice ? `That part of ${word} landed. Nice work.` : `Every part of ${word} landed. Nice work.`, focusZoneId: null };
+    const part = partLabel(spec, practice);
+    return { caption: part ? `The ${part} in ${word} landed. Nice work.` : practice ? `That part of ${word} landed. Nice work.` : `Every part of ${word} landed. Nice work.`, focusZoneId: null };
   }
   const zone = result.zones.find((z) => z.zoneId === id)!;
   const label = spec.zones.find((z) => z.id === id)?.label ?? zone.phoneme;
@@ -167,7 +185,8 @@ export function requestWordCoach({ result, profileId, practiceZoneIds, audio }: 
     ...(practiceZoneIds ? { practiceZoneIds } : {}),
     ...(audio ? { attemptAudio: audio } : {}),
   };
-  return requestLiveCoach(request, signal);
+  // Loaded on demand: liveCoach pulls in telemetry (import.meta.env), which the pure helpers here must not need in tests.
+  return import('./liveCoach').then((m) => m.requestLiveCoach(request, signal));
 }
 
 export interface WordAskInput {

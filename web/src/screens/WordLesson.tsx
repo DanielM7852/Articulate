@@ -16,12 +16,14 @@ import { useVoiceFrames, type VoiceFrames } from '../audio/useVoiceFrames';
 import { useLipTracking, type LipTrackingStatus } from '../vision/useLipTracking';
 import { CUE_MIN_MS, useCoachSequence, type SequenceLine } from '../live/useCoachSequence';
 import type { CueId } from '../live/liveCoach';
+import { usePhoneCursor } from '../live/usePhoneCursor';
+import { ASSUMED_END_LAG_MS, RESCUE_MIN_CLIP_MS, applyPhoneJudgement, canPhoneRescue, clipOffsetMs, isPhoneJudged, scorePhones, unitPhoneZones } from '../live/phoneJudge';
 import { isScored, requestWordAsk, requestWordCoach, scoreWord, wordFallbackLine } from '../live/wordCoach';
 import { isClose, unitDurationMs } from '../game/ghost/follow';
 import { ghostModel } from '../game/ghost/models';
 import { MAX_TRIES, lessonPlan, nextStep, skipStep, startProgress, stepLabel, type LessonStep, type ProgressResult, type ProgressState } from '../game/ghost/plan';
 import { DEFAULT_FACTOR } from '../game/ghost/voice';
-import { GHOST_WORDS, type GhostWordSpec } from '../game/ghost/words';
+import { GHOST_WORDS, partPrompt, type GhostWordSpec } from '../game/ghost/words';
 import type { WordAttemptResult } from '../game/types';
 import { useAppState } from '../state/AppState';
 import { learnerProfileId } from '../state/learnerId';
@@ -34,7 +36,7 @@ import '../styles/word-lesson.css';
  * Word lesson (ghost paths): the learner picks one of four words, does a short voice check once, and Ava coaches
  * the word one part at a time. The ghost board is the live visual; Ava, the 3D model and cues are the advice.
  *
- *   plan  = lessonPlan(word): each part, then the chain back to the whole word, then the whole word twice
+ *   plan  = lessonPlan(word): each part on its own, then the whole word twice
  *   step  = intro line -> board watches the ghost -> (if practisable) live attempt -> coach -> progression
  *
  * Phases:
@@ -104,7 +106,6 @@ function introLine(spec: GhostWordSpec, step: LessonStep): { text: string; side:
     const cueId = zoneIds.length === 1 ? (ZONE_CUE[zoneIds[0]] ?? null) : null;
     return { text: `Let's work on the ${label} in ${spec.word}. Watch the path.`, side: true, cueId };
   }
-  if (step.kind === 'chain') return { text: `Now join them: ${label}.`, side: false, cueId: null };
   return {
     text: step.speedWatch < 1 ? `Now the whole word, slowly: ${spec.word}.` : `And at normal speed: ${spec.word}.`,
     side: false,
@@ -119,7 +120,7 @@ const START_PRACTICE_IDLE_MS = 10_000;
 /** Talk window: how far back a board result still counts for learner_attempt, how long that call waits for one
  *  (the board ends an attempt 600 ms after the voice stops), how many results are kept, and the quiet after Ava speaks. */
 const ATTEMPT_LOOKBACK_MS = 6000;
-const ATTEMPT_WAIT_MS = 1500;
+const ATTEMPT_WAIT_MS = 3000; // also covers the phone judge (<= 1.5 s) after the board's own end
 const MAX_HELD = 4;
 const ECHO_SETTLE_MS = 700;
 const TALK_POLL_MS = 120;
@@ -132,10 +133,11 @@ const lessonContext = (word: string) =>
   `[app] Lesson context: the practice word is "${word}". The lesson goes one part of the word at a time, then joins the parts back into the whole word. ` +
   'The app runs the lesson and the ghost board measures every try. ' +
   'Stay silent until the app sends you a coaching result or the learner speaks to you between tries.';
-const stepMessage = (word: string, step: LessonStep) =>
-  step.kind === 'word'
-    ? `[app] Now practising the whole word "${word}".`
-    : `[app] Now practising the "${step.unit.label}" part of "${word}".`;
+const stepMessage = (spec: GhostWordSpec, step: LessonStep) => {
+  if (step.kind === 'word') return `[app] Now practising the whole word "${spec.word}".`;
+  const ask = partPrompt(spec, step.unit);
+  return `[app] Now practising the "${ask.label}" part of "${spec.word}".` + (ask.tail ? ` Ask for it like this: "${ask.spoken}" Never say just the letter name.` : '');
+};
 const wordDoneMessage = (word: string, next: string | null) =>
   `[app] The word "${word}" is complete and the board is off. ` +
   (next ? `The learner can press the button for "${next}" or Finish. ` : 'The learner can press Finish. ') +
@@ -224,6 +226,8 @@ export default function WordLesson() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const attemptTap = useAttemptAudio(mic.stream);
+  /** When the board produced the result being judged (Date.now() clock), so the coach clip ends there, not after scoring. */
+  const judgedAt = useRef<{ attemptId: string; at: number } | null>(null);
   const voice = useVoiceFrames(mic.stream);
   const { camera, setCamera, narration: voiceOn, captions, completeOnboarding } = useAppState();
   const profileId = useMemo(() => learnerProfileId(), []);
@@ -516,7 +520,7 @@ export default function WordLesson() {
     const { spec: word, plan: steps } = cur.current;
     a.sendAppMessage(lessonContext(word.word), false);
     const step = steps[shownStep.current];
-    if (step && phaseRef.current !== 'setup' && phaseRef.current !== 'voice' && phaseRef.current !== 'done') a.sendAppMessage(stepMessage(word.word, step), false);
+    if (step && phaseRef.current !== 'setup' && phaseRef.current !== 'voice' && phaseRef.current !== 'done') a.sendAppMessage(stepMessage(word, step), false);
   }, []);
 
   /** Wait for the board's watch to end (onWatchEnd), or give up a little after its own length. */
@@ -598,7 +602,7 @@ export default function WordLesson() {
       takeFloor(true);
       setPhase('intro');
       if (!(await gateAva(my))) return;
-      if (realtimeActive()) avaRef.current.sendAppMessage(stepMessage(word.word, step), false);
+      if (realtimeActive()) avaRef.current.sendAppMessage(stepMessage(word, step), false);
       const intro = introLine(word, step);
       if (!(await line(intro.text, intro.side, intro.cueId))) return;
       newAttempt();
@@ -981,9 +985,32 @@ export default function WordLesson() {
     [avaOpen, beginTurn, endWindow, line, newAttempt, quietAva, runStep, wordDone],
   );
 
+  /**
+   * The board's second opinion: for a phone-judged word, cut the attempt's clip, score the unit's phones and replace
+   * the unit's zone verdicts. Any problem (no tap, offline service, timeout) returns the formant result unchanged.
+   */
+  const judgeAttempt = useCallback(async (result: WordAttemptResult): Promise<WordAttemptResult> => {
+    judgedAt.current = { attemptId: result.attemptId, at: Date.now() };
+    try {
+      const { spec: word, plan } = cur.current;
+      const step = plan[shownStep.current];
+      if (!step || result.word !== word.word || (result.quality !== 'usable' && !canPhoneRescue(result))) return result;
+      const zones = unitPhoneZones(word.word, step.unit);
+      if (zones.length === 0) return result;
+      const want = result.durationMs + CLIP_TAIL_MS + CLIP_PREROLL_MS;
+      const clip = attemptTap.current?.clip(judgedAt.current.at, Math.min(MAX_CLIP_MS, canPhoneRescue(result) ? Math.max(want, RESCUE_MIN_CLIP_MS) : want)) ?? null;
+      if (!clip) return result;
+      const resp = await scorePhones(clip, zones.map((z) => z.phone));
+      if (!resp) return result;
+      return applyPhoneJudgement(result, step.unit, resp, clipOffsetMs(clip.durationMs, result, ASSUMED_END_LAG_MS));
+    } catch {
+      return result;
+    }
+  }, []);
+
   /** One finished attempt: coach it (filler, backend coach, then Ava relays or the script speaks) and progress. */
   const runAttempt = useCallback(
-    async (result: WordAttemptResult) => {
+    async (result: WordAttemptResult, endedAt: number = Date.now()) => {
       const { spec: word, plan: steps } = cur.current;
       const step = steps[shownStep.current];
       if (!step || !step.practisable) return;
@@ -997,7 +1024,7 @@ export default function WordLesson() {
         const session = avaRef.current.session();
         if (realtimeActive() && session && !session.practiceMode) gate = avaRef.current.setPracticeMode(true);
         void seq.say(LINES.filler, { narration: voiceOnRef.current });
-      });
+      }, endedAt);
       if (!coached) return;
       const { prog, finalStep, caption, focus, cueId, side, verdict } = coached;
       setPhase('coaching');
@@ -1111,15 +1138,17 @@ export default function WordLesson() {
   /** Board result: a normal attempt end while live, or a measurement the talk window holds until Ava decides. */
   const onAttemptEnd = (result: WordAttemptResult) => {
     if (result.attemptId !== attemptIdRef.current) return;
+    // A judged result arrives after scoring; the coach clip must still end where the attempt ended.
+    const endedAt = judgedAt.current?.attemptId === result.attemptId ? judgedAt.current.at : Date.now();
     if (phaseRef.current === 'live') {
-      void runAttempt(result).catch(() => undefined);
+      void runAttempt(result, endedAt).catch(() => undefined);
       return;
     }
     const w = win.current;
     // Not gated on windowLiveRef: a result can land just after the board went idle (Ava's acknowledgement started);
     // the attempt id check above already drops stale ones.
     if (!w.active || w.deciding || w.pending || runId.current !== w.run) return;
-    w.results = [...w.results, { result, at: Date.now() }].slice(-MAX_HELD);
+    w.results = [...w.results, { result, at: endedAt }].slice(-MAX_HELD);
     newAttempt(); // the board keeps listening for the next utterance
   };
 
@@ -1220,6 +1249,8 @@ export default function WordLesson() {
   const step = plan[Math.min(stepIdx, plan.length - 1)];
   const nextWord = WORD_KEYS[WORD_KEYS.indexOf(spec.word) + 1] ?? null;
   const boardMode = phase === 'watch' ? 'watch' : phase === 'live' || (phase === 'coaching' && talking && windowLive) ? 'live' : 'idle';
+  // Phone-judged words: the live cursor follows the phone recognizer (reset per live attempt); falls back to F1/F2 when offline.
+  const phoneCursor = usePhoneCursor(mic.stream, isPhoneJudged(spec.word) && micReady && phase !== 'setup', boardMode === 'live' ? attemptId : null);
   const lipFrame = camera && lip.status === 'tracking' ? lip.latest : null;
   const micWarning =
     mic.status === 'denied' ? 'Microphone blocked · allow it in site settings' : mic.status === 'unsupported' ? 'Microphone unsupported in this browser' : null;
@@ -1233,11 +1264,12 @@ export default function WordLesson() {
   const canReplay = hasSide && ((phase === 'live' && !spoke) || phase === 'done' || (phase === 'coaching' && talking) || (phase === 'cue' && !step.practisable));
 
   const where = stepLabel(plan, stepIdx);
+  const ask = step.kind === 'part' ? partPrompt(spec, step.unit) : { label: spec.word, lead: '', tail: null, spoken: `Say ${spec.word}.` };
   const statusText =
     phase === 'voice'
       ? 'Voice check'
       : phase === 'coaching' && talking
-        ? `Say “${step.unit.label}”, or ask Ava a question`
+        ? `Say ${ask.lead}“${step.unit.label}”${ask.tail ?? ''}, or ask Ava a question`
         : phase === 'live'
           ? `Your turn · ${where}`
           : phase === 'done'
@@ -1348,7 +1380,9 @@ export default function WordLesson() {
         <StepHeading
           title={
             <>
-              Say <span className="navy">“{spec.word}”</span>
+              Say {ask.lead}
+              <span className="navy">“{step.kind === 'part' ? step.unit.label : spec.word}”</span>
+              {ask.tail}
             </>
           }
         />
@@ -1428,6 +1462,8 @@ export default function WordLesson() {
               attemptId={attemptId}
               onWatchEnd={() => watchDone.current?.()}
               onAttemptEnd={onAttemptEnd}
+              judge={isPhoneJudged(spec.word) ? judgeAttempt : undefined}
+              phoneCursor={isPhoneJudged(spec.word) ? phoneCursor : undefined}
               focusZoneId={focusZoneId}
             />
           )}

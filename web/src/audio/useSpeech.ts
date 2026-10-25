@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppState } from '../state/AppState';
+import { bakedEntryReady } from './bakedVoice';
 
 /**
  * Spoken narration and reference playback.
@@ -27,19 +28,30 @@ async function playCartesia(
   onEnd?: (reason: SpeechEnd) => void,
 ): Promise<boolean> {
   try {
-    const res = await fetch(SPEECH_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, rate: rate ?? null }),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok || !isCurrent()) return false;
-    const blob = await res.blob();
-    if (!blob.size || !isCurrent()) return false;
-    const url = URL.createObjectURL(blob);
+    // Fixed scripted lines are prebaked: play the static file instead of spending TTS credits.
+    let baked: string | null = null;
+    try { baked = (await bakedEntryReady(text, rate))?.file ?? null; } catch { baked = null; }
+    if (!isCurrent()) return false;
+    let url: string;
+    let revoke = false;
+    if (baked) {
+      url = baked;
+    } else {
+      const res = await fetch(SPEECH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, rate: rate ?? null }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok || !isCurrent()) return false;
+      const blob = await res.blob();
+      if (!blob.size || !isCurrent()) return false;
+      url = URL.createObjectURL(blob);
+      revoke = true;
+    }
     const el = new Audio(url);
     const release = () => {
-      URL.revokeObjectURL(url);
+      if (revoke) URL.revokeObjectURL(url);
       if (clipRef.current === el) clipRef.current = null;
     };
     el.onended = () => {

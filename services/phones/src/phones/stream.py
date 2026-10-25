@@ -24,6 +24,7 @@ class StreamSession:
         self.last_committed_end = -1.0
         self.last_phone = None
         self.seq = 0
+        self.last_frames_end = float("-inf")
 
     @property
     def stream_ms(self) -> float:
@@ -44,7 +45,7 @@ class StreamSession:
         end_ms = self.stream_ms
         return self.buf, end_ms - len(self.buf) * 1000.0 / self.sr, end_ms
 
-    def finish(self, phones: list[Phone], end_ms: float, infer_ms: float) -> dict:
+    def finish(self, phones: list[Phone], end_ms: float, infer_ms: float, frames: list[dict] | None = None) -> dict:
         """Apply commit logic to a window's phones and build the 'phones' message."""
         committed, provisional, self.last_committed_end = split_commit(
             phones, end_ms, self.s.commit_lag_ms, self.last_committed_end, self.last_phone
@@ -52,6 +53,9 @@ class StreamSession:
         if committed:
             self.last_phone = committed[-1]
         self.seq += 1
+        # frames: only those with centre in (previous windowEndMs, this windowEndMs]; no repeats across messages
+        new_frames = [f for f in (frames or []) if self.last_frames_end < f["t"] <= end_ms]
+        self.last_frames_end = max(self.last_frames_end, end_ms)
         return {
             "type": "phones",
             "seq": self.seq,
@@ -59,6 +63,7 @@ class StreamSession:
             "committed": [p.as_dict() for p in committed],
             "provisional": [p.as_dict() for p in provisional],
             "inferMs": round(infer_ms, 2),
+            "frames": new_frames,
         }
 
     def step(self, recognize: Callable[[np.ndarray, float], list[Phone]]) -> dict | None:

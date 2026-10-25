@@ -40,7 +40,7 @@ test('floatToInt16 clamps and scales', () => {
   expect(floatToInt16(-5)).toBe(-32768);
 });
 
-test('PcmChunker downsamples 48k to 16k in 2560-sample chunks', () => {
+test('PcmChunker downsamples 48k to 16k in 800-sample chunks', () => {
   const c = new PcmChunker(48000);
   let total = 0;
   const first: Int16Array[] = [];
@@ -54,10 +54,10 @@ test('PcmChunker downsamples 48k to 16k in 2560-sample chunks', () => {
     }
     fed += n;
   }
-  expect(first.length).toBe(6); // 16000/2560 = 6.25
-  expect(total).toBe(6 * CHUNK_SAMPLES);
+  expect(first.length).toBe(20); // 16000/800 = 20
+  expect(total).toBe(20 * CHUNK_SAMPLES);
   expect(first[0].length).toBe(CHUNK_SAMPLES);
-  expect(first[3][100]).toBe(Math.round(0.5 * 32767));
+  expect(first[7][100]).toBe(Math.round(0.5 * 32767));
 });
 
 test('PcmChunker preserves a ramp across push boundaries (same output as one push)', () => {

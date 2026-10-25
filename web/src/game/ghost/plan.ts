@@ -3,8 +3,7 @@ import type { GhostWordSpec } from './words';
 import { chainUnits, partUnits, unitIsPractisable } from './units';
 
 /**
- * The ghost-path lesson for one word: each part on its own, then the chain back to the whole word,
- * then the whole word twice (slowly, then at natural speed). Pure: the screen walks it.
+ * The ghost-path lesson for one word: each part on its own, then the whole word twice (slowly, then at natural speed). Pure: the screen walks it.
  */
 export interface LessonStep {
   kind: 'part' | 'chain' | 'word';
@@ -19,7 +18,6 @@ export interface LessonStep {
 
 export const WORD_SLOW_SPEED = 0.6;
 const PART_SPEED = 0.8;
-const CHAIN_SPEED = 0.9;
 
 
 export function lessonPlan(spec: GhostWordSpec): LessonStep[] {
@@ -33,11 +31,6 @@ export function lessonPlan(spec: GhostWordSpec): LessonStep[] {
   }));
   const chains = chainUnits(spec);
   const whole = chains[chains.length - 1];
-  for (const unit of chains.slice(0, -1)) {
-    // Already practised inside a single part (track "ck", rent "t" within "nt").
-    if (parts.some((part) => unit.zoneIds.every((id) => part.zoneIds.includes(id)))) continue;
-    steps.push({ kind: 'chain', unit, speedWatch: CHAIN_SPEED, speedLive: 1, practisable: unitIsPractisable(spec, unit) });
-  }
   const practisable = unitIsPractisable(spec, whole);
   steps.push({ kind: 'word', unit: whole, speedWatch: WORD_SLOW_SPEED, speedLive: WORD_SLOW_SPEED, practisable });
   steps.push({ kind: 'word', unit: whole, speedWatch: 1, speedLive: 1, practisable });

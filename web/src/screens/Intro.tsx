@@ -3,6 +3,7 @@ import { Camera, CameraOff, MousePointer2 } from 'lucide-react';
 import { CaptionBar, readingTime, useNarration, type Narration } from '../components/Narration';
 import { MouthReference, type MouthReferenceHandle } from '../components/MouthReference';
 import { OnboardingFrame, useStepNav } from '../components/Onboarding';
+import { GREETING, WELCOME_BACK } from '../audio/bakedLines';
 import { prepareTeacher, speakTeacher, unlockTeacherAudio, type TeacherSpeech } from '../audio/teacher';
 import type { SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
 import { useAppState } from '../state/AppState';
@@ -25,12 +26,6 @@ import '../styles/intro.css';
 /** forming: Begin was tapped and the guide's dots are taking the ribbon picture's place. */
 type Phase = 'idle' | 'forming' | 'assembling' | 'talking' | 'leaving';
 type GuideState = 'loading' | 'ready' | 'error';
-
-const GREETING = [
-  'Hi, I’m Ava. I’ll show you each sound with my mouth, and you’ll see your own voice on the board.',
-  'First, a quick survey so I know what to focus on.',
-];
-const WELCOME_BACK = ['Welcome back. Let’s pick up where we left off.'];
 
 const ASSEMBLE_MS = 1600;
 const DISPERSE_MS = 1100;
