@@ -1,6 +1,10 @@
 import { expect, test } from '../../game/__tests__/harness';
 import type { WordAttemptResult, ZoneResult } from '../../game/types';
 import type { GhostUnit } from '../../game/ghost/types';
+import { isClose } from '../../game/ghost/follow';
+import { chainUnits, partUnits } from '../../game/ghost/units';
+import { GHOST_WORDS } from '../../game/ghost/words';
+import { wordFallbackLine } from '../wordCoach';
 import {
   PHONE_HIT_POST,
   PHONE_PARTIAL_POST,
@@ -114,11 +118,11 @@ test('consonant parts keep the strict rule', () => {
   expect(at(0.5, 0)).toBe('hit');
 });
 
-test('only the unit zones change and advisory/kind are kept', () => {
+test('only the unit zones change and kind is kept, advisory dropped for replaced zones', () => {
   const r = applyPhoneJudgement(result(), unit('tr', ['t', 'r']), resp([tgt('t', 0.05, 300, 380, -5), tgt('ɹ', 0.9)]), 0);
   expect(verdictOf(r, 't')).toBe('miss');
   expect(verdictOf(r, 'r')).toBe('hit');
-  expect(r.zones.find((z) => z.zoneId === 'r')!.advisory).toBe(true);
+  expect('advisory' in r.zones.find((z) => z.zoneId === 'r')!).toBe(false);
   expect(r.zones.find((z) => z.zoneId === 'r')!.kind).toBe('liquid');
   expect(JSON.stringify(r.zones.find((z) => z.zoneId === 'a'))).toBe(JSON.stringify(result().zones[2]));
   expect(JSON.stringify(r.zones.find((z) => z.zoneId === 'k'))).toBe(JSON.stringify(result().zones[3]));
@@ -244,4 +248,48 @@ test('scorePhones returns null on failure/timeout and parses a good response', (
   expect(net.junk).toBe(null);
   expect(net.hang).toBe(null);
   expect(net.good?.targets[0].post).toBe(0.8);
+});
+
+// Phone-judged liquids/fricatives count toward isClose; formant-only advisory zones do not.
+const realUnit = (word: string, id: string) => [...partUnits(GHOST_WORDS[word]), ...chainUnits(GHOST_WORDS[word])].find((u) => u.id === id || u.label === id)!;
+const trUnit = unit('tr', ['t', 'r']);
+const sheepResult = (): WordAttemptResult => result({ word: 'sheep', zones: [zone('sh', 'sh', 'fricative', { advisory: true }), zone('p', 'p', 'stop')] });
+
+test('phone-judged r counts: tack misses, track hits', () => {
+  const tack = applyPhoneJudgement(result(), trUnit, resp([tgt('t', 0.96, 300, 380, 3.3), tgt('ɹ', 0, 380, 460, -2)]), 0);
+  expect(isClose(tack, trUnit)).toBe(false);
+  expect(tack.zones.find((z) => z.zoneId === 'r')!.advisory).toBe(undefined);
+  expect('advisory' in tack.zones.find((z) => z.zoneId === 'r')!).toBe(false);
+  expect(tack.zones.find((z) => z.zoneId === 'r')!.evidence?.judgedByPhones).toBe(1);
+  const trk = applyPhoneJudgement(result(), trUnit, resp([tgt('t', 0.96, 300, 380, 3.3), tgt('ɹ', 1, 380, 460, 9.3)]), 0);
+  expect(isClose(trk, trUnit)).toBe(true);
+});
+
+test('phone-judged sh counts: peep misses, sheep hits', () => {
+  const shUnit = unit('sh', ['sh']);
+  expect(isClose(applyPhoneJudgement(sheepResult(), shUnit, resp([tgt('ʃ', 0, 300, 380, 0)]), 0), shUnit)).toBe(false);
+  expect(isClose(applyPhoneJudgement(sheepResult(), shUnit, resp([tgt('ʃ', 0.9, 300, 380, 2)]), 0), shUnit)).toBe(true);
+});
+
+test('whole track word with tack scores is not close; real part units agree', () => {
+  const tack = applyPhoneJudgement(result(), full, resp([tgt('t', 0.96, 300, 380, 3.3), tgt('ɹ', 0, 380, 440, -2), tgt('æ', 0.96, 440, 520, 3.2), tgt('k', 1, 520, 600, 10.2)]), 0);
+  expect(isClose(tack, full)).toBe(false);
+  expect(isClose(tack, realUnit('track', 'track'))).toBe(false);
+});
+
+test('formant-only advisory r still passes isClose when t is a hit', () => {
+  expect(isClose(result(), trUnit)).toBe(true);
+});
+
+test('wordFallbackLine: phone-judged missed r says it did not come through; formant r stays unscored', () => {
+  const spec = { zones: [{ id: 't', label: 't' }, { id: 'r', label: 'r' }, { id: 'a', label: 'a' }, { id: 'ck', label: 'ck' }] };
+  const judged = applyPhoneJudgement(result(), trUnit, resp([tgt('t', 0.96, 300, 380, 3.3), tgt('ɹ', 0, 380, 460, -2)]), 0);
+  const line = wordFallbackLine(spec, judged, ['t', 'r']);
+  expect(line.focusZoneId).toBe('r');
+  expect(line.caption.startsWith("The r after the t didn't come through. ")).toBe(true);
+  expect(line.caption.startsWith("Let's work on")).toBe(false);
+  const faint = applyPhoneJudgement(result(), trUnit, resp([tgt('t', 0.96, 300, 380, 3.3), tgt('ɹ', PHONE_PARTIAL_POST, 380, 460, 1)]), 0);
+  expect(wordFallbackLine(spec, faint, ['t', 'r']).caption.includes('was faint.')).toBe(true);
+  const formant = wordFallbackLine(spec, result({ zones: [zone('t', 't', 'stop'), zone('r', 'r', 'liquid', { advisory: true, verdict: 'miss' })] }), ['t', 'r']);
+  expect(formant.focusZoneId).toBe(null); // advisory-only parts are never coached or scored
 });

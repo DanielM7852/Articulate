@@ -148,7 +148,7 @@ const phoneEvidence = (t: PhoneTarget): Record<string, number> => ({
 /**
  * Replace the verdicts of the unit's phone-mapped zones with the recognizer's. `response.targets` are in the order of
  * unitPhoneZones(word, unit); `offsetMs` is the clip start relative to the attempt start (times are shifted by it).
- * Unclear results, other zones, `kind`, `advisory` and quality are untouched. Returns the same object when nothing applies.
+ * Unclear results, other zones, `kind` and quality are untouched. Replaced zones drop `advisory` (a phone-judged zone counts toward the score, whatever its kind). Returns the same object when nothing applies.
  */
 export function applyPhoneJudgement(
   result: WordAttemptResult,
@@ -184,7 +184,8 @@ export function applyPhoneJudgement(
       if (Object.keys(evidence).length <= MAX_EVIDENCE_KEYS) break;
       if (!(k in mine)) delete evidence[k];
     }
-    return { ...z, verdict: lone && z.kind === 'vowel' ? loneVowelVerdict(t.post, t.gop) : verdictFromScore(t.post, t.gop, z.kind), startMs, endMs, dwellMs: Math.max(0, endMs - startMs), evidence };
+    const { advisory: _advisory, ...rest } = z;
+    return { ...rest, verdict: lone && z.kind === 'vowel' ? loneVowelVerdict(t.post, t.gop) : verdictFromScore(t.post, t.gop, z.kind), startMs, endMs, dwellMs: Math.max(0, endMs - startMs), evidence };
   });
   if (rescue) {
     // The tracker's duration is too short here; the aligned phones span the word, so the coach clip covers all of it.

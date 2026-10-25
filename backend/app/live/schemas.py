@@ -111,7 +111,12 @@ class WordZoneResult(BaseModel):
 
     @property
     def is_advisory(self) -> bool:
-        return self.advisory or self.kind in ADVISORY_KINDS
+        return self.advisory or (self.kind in ADVISORY_KINDS and not self.phone_judged)
+
+    @property
+    def phone_judged(self) -> bool:
+        """True when the browser's phone model scored this zone (evidence judgedByPhones == 1)."""
+        return (self.evidence or {}).get("judgedByPhones") == 1
 
     @field_validator("zoneId")
     @classmethod

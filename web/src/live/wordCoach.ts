@@ -71,8 +71,11 @@ const ZONE_LINES: Record<string, Record<string, ZoneLines>> = {
 
 const MISSING: ZoneResult['verdict'][] = ['miss', 'skipped'];
 
-/** Advisory zones (liquid, fricative, nasal) are guidance only: they never count toward a score. */
-const isAdvisory = (z: ZoneResult) => z.advisory === true || z.kind === 'liquid' || z.kind === 'fricative' || z.kind === 'nasal';
+const isPhoneJudged = (z: ZoneResult) => z.evidence?.judgedByPhones === 1;
+
+/** Advisory zones (liquid, fricative, nasal) are guidance only and never count toward a score, unless the phone model judged them. */
+const isAdvisory = (z: ZoneResult) =>
+  !isPhoneJudged(z) && (z.advisory === true || z.kind === 'liquid' || z.kind === 'fricative' || z.kind === 'nasal');
 
 /**
  * Mirrors score_word. With `practice` the roll-up covers only the listed zones. When no counted zone is left
@@ -149,7 +152,9 @@ export function wordFallbackLine(
   const hint = firstSentence((result.lipUsable ? lines?.hint : lines?.noCamera) || 'Watch the side view, then try once more.');
   if (isAdvisory(zone)) return { caption: `Let's work on the ${label}${where}. ${hint}`, focusZoneId: id };
   let lead: string;
-  if (zone.verdict === 'partial') lead = zone.kind === 'stop' ? `The ${label}${where} was faint.` : `The ${label}${where} was nearly there.`;
+  if (isPhoneJudged(zone) && (zone.kind === 'liquid' || zone.kind === 'fricative' || zone.kind === 'nasal')) {
+    lead = zone.verdict === 'partial' ? `The ${label}${where} was faint.` : `The ${label}${where} didn't come through.`;
+  } else if (zone.verdict === 'partial') lead = zone.kind === 'stop' ? `The ${label}${where} was faint.` : `The ${label}${where} was nearly there.`;
   else lead = zone.kind === 'stop' || zone.verdict === 'skipped' ? `The ${label}${where} went missing.` : `The ${label}${where} didn't reach its target yet.`;
   return { caption: `${lead} ${hint}`, focusZoneId: id };
 }
