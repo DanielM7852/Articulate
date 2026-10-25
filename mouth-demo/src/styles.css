@@ -50,6 +50,26 @@
   touch-action: none;
 }
 
+/* Simple tier (quality.js): no 3D. A still picture holds the head's place and the cutaway stays on stage. */
+.md-poster {
+  position: absolute;
+  inset: 0;
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.md-root[data-quality="simple"] .md-poster {
+  display: block;
+}
+
+.md-root[data-quality="simple"] .md-canvas-host canvas {
+  display: none;
+}
+
 .md-cutaway {
   position: relative;
   flex: 0 0 0;
@@ -62,6 +82,10 @@
 
 .md-root[data-view="side"] .md-cutaway {
   flex-basis: 40%;
+}
+
+.md-root[data-quality="simple"] .md-cutaway {
+  flex-basis: 50%;
 }
 
 .md-cutaway__svg {
@@ -98,6 +122,17 @@
   .md-root[data-view="side"] .md-cutaway {
     flex-basis: auto;
     transform: translateX(0);
+  }
+
+  .md-root[data-quality="simple"] .md-cutaway {
+    flex-basis: auto;
+    width: 62%;
+    transform: translateX(0);
+  }
+
+  /* the picture sits above the inset diagram */
+  .md-root[data-quality="simple"] .md-poster {
+    height: 52%;
   }
 }
 
