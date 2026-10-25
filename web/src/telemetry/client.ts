@@ -168,6 +168,7 @@ function startPresence(): void {
   try {
     if (/^#\/?dashboard/.test(window.location.hash)) return;
     if (/teach\.html$/i.test(window.location.pathname)) return;
+    if (/live\.html$/i.test(window.location.pathname)) return; // the wall display is not a learner either
   } catch {
     /* ignore */
   }
