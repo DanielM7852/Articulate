@@ -21,5 +21,5 @@ async def test_mints_ephemeral_secret_with_text_only_session():
     assert td["type"] == "semantic_vad"
     assert td["create_response"] is True and td["interrupt_response"] is True
     assert [t["name"] for t in session["tools"]] == [
-        "get_coaching", "start_practice", "end_practice", "learner_attempt", "stay_quiet", "ask_coach",
+        "review_attempt", "start_practice", "end_practice", "learner_attempt", "stay_quiet", "think_it_through", "show_demo", "lesson_control",
     ]

@@ -151,6 +151,22 @@ export function alignCaptionWords(display: readonly string[], timed: readonly st
   return out;
 }
 
+/**
+ * The timed words that belong to the display text when that is only a prefix of the spoken text (a streamed reply
+ * whose later sentences are not revealed yet): words are kept until their letters cover the display letters.
+ */
+export function wordsWithinDisplay<T extends { text: string }>(words: readonly T[], display: string): T[] {
+  const total = captionKey(display).length;
+  const out: T[] = [];
+  let sum = 0;
+  for (const w of words) {
+    if (sum >= total) break;
+    out.push(w);
+    sum += captionKey(w.text).length;
+  }
+  return out;
+}
+
 // Shows the spoken line with the current word highlighted. Re-renders on 'word' events only.
 export function TeacherCaptions(props: { speech: TeacherSpeech | null; text: string; className?: string }) {
   const { speech, text, className } = props;
@@ -167,7 +183,10 @@ export function TeacherCaptions(props: { speech: TeacherSpeech | null; text: str
     };
   }, [speech]);
 
-  const words = speech && speech.text === text ? speech.words : [];
+  // Exact match for a single line; a prefix of the speech text for a streamed reply that is revealed sentence by sentence.
+  const exact = !!speech && speech.text === text;
+  const prefix = !exact && !!speech && !!text && speech.text.startsWith(text);
+  const words = exact ? speech!.words : prefix ? wordsWithinDisplay(speech!.words, text) : [];
   const timed = words.length > 0 && current >= 0;
   const wordCount = words.length; // speech.words grows in place as timestamps stream in
 
@@ -175,7 +194,7 @@ export function TeacherCaptions(props: { speech: TeacherSpeech | null; text: str
   const spans = useMemo(
     () => (wordCount ? alignCaptionWords(pieces.filter((p) => !/^\s*$/.test(p)), words.map((w) => w.text)) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pieces, speech, wordCount],
+    [pieces, speech, wordCount, prefix],
   );
 
   // Align timed words to the display text; the live-region copy below carries the full line once.

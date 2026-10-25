@@ -167,7 +167,7 @@ async def live_coach(body: LiveCoachRequest, request: Request, background: Backg
 
 @router.post("/word/ask", response_model=WordAskResponse)
 async def live_word_ask(body: WordAskRequest, request: Request) -> WordAskResponse:
-    """A learner's question from Ava's ask_coach tool. Always 200 with a validated line (model or fallback)."""
+    """A learner's question from Ava's think_it_through tool. Always 200 with a validated line (model or fallback)."""
     authorize_profile(request, body.profileId)
     return await answer_word_question(_deps(request), body)
 

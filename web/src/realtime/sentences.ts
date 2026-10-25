@@ -47,3 +47,31 @@ export function wordOverlap(a: string, b: string): number {
   if (!wb.length) return 0;
   return wb.filter((w) => pool.has(w)).length / wb.length;
 }
+
+function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * The part of a streamed reply whose audio has started: segment k (one pushed sentence) is revealed once the word
+ * at the index of its first word has started. Word indices count whitespace tokens cumulatively across segments;
+ * Cartesia may tokenise slightly differently, so an index past the end simply reveals everything. -1 reveals nothing.
+ */
+export function revealedText(segments: readonly { text: string }[], wordIndex: number): string {
+  if (wordIndex < 0) return '';
+  const out: string[] = [];
+  let first = 0;
+  for (const seg of segments) {
+    if (first > wordIndex) break;
+    out.push(seg.text);
+    first += wordCount(seg.text);
+  }
+  return out.join(' ');
+}
+
+/** The first heardWordCount whitespace tokens of text with the original spelling, punctuation and single spaces. */
+export function heardPrefix(text: string, heardWordCount: number): string {
+  const tokens = text.split(/\s+/).filter(Boolean);
+  if (heardWordCount <= 0) return '';
+  return tokens.slice(0, heardWordCount).join(' ');
+}
