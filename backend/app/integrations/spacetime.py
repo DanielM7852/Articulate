@@ -13,11 +13,13 @@ from typing import Any
 
 import httpx
 
+from app import telemetry
 from app.config import Settings
 
 logger = logging.getLogger(__name__)
 
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_FROM = re.compile(r"\bfrom\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
 _PROFILE = re.compile(r"^[A-Za-z0-9_.:@-]{1,64}$")
 
 
@@ -133,9 +135,13 @@ class SpacetimeClient:
         if response.status_code >= 300:
             raise SpacetimeError(f"sql failed: HTTP {response.status_code}")
         try:
-            return rows_as_dicts(response.json())
+            rows = rows_as_dicts(response.json())
         except ValueError as exc:
             raise SpacetimeError("sql returned invalid JSON") from exc
+        match = _FROM.search(query)
+        table = match.group(1) if match else "unknown"
+        telemetry.emit("backend", "db", "db.read", f"read {table}", {"table": table, "rows": len(rows)})
+        return rows
 
     async def call(self, reducer: str, args: list[Any]) -> None:
         url, content, headers = f"{self._base}/call/{reducer}?confirmed=true", json.dumps(args), {"Content-Type": "application/json"}
@@ -150,3 +156,5 @@ class SpacetimeClient:
                      "idempotency conflict", "attempt already exists", "stale lease", "session busy", "job already leased")
             code = next((value for value in known if value in response.text.lower()), None)
             raise SpacetimeError(f"reducer {reducer} failed: HTTP {response.status_code}", code)
+        if reducer != telemetry.REDUCER:  # never report the telemetry reducer itself (would loop)
+            telemetry.emit("backend", "db", "db.write", f"write {reducer}", {"table": reducer, "rows": 1})

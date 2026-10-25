@@ -42,6 +42,7 @@ import CleanupLiveStateReducer from "./cleanup_live_state_reducer";
 import ClearHelpReducer from "./clear_help_reducer";
 import CommitEventReducer from "./commit_event_reducer";
 import CommitVerifiedSummaryReducer from "./commit_verified_summary_reducer";
+import EmitTelemetryReducer from "./emit_telemetry_reducer";
 import EndAttemptReducer from "./end_attempt_reducer";
 import EnqueueLiveJobReducer from "./enqueue_live_job_reducer";
 import FailLiveJobReducer from "./fail_live_job_reducer";
@@ -68,6 +69,7 @@ import ClassroomBoardRow from "./classroom_board_table";
 import LearnerAttemptCardsRow from "./learner_attempt_cards_table";
 import MyAttemptCardsRow from "./my_attempt_cards_table";
 import MyClassroomLessonRow from "./my_classroom_lesson_table";
+import TelemetryEventRow from "./telemetry_event_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -101,6 +103,17 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, MyClassroomLessonRow),
+  telemetryEvent: __table({
+    name: 'telemetry_event',
+    indexes: [
+      { accessor: 'id', name: 'telemetry_event_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'telemetry_event_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, TelemetryEventRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
@@ -113,6 +126,7 @@ const reducersSchema = __reducers(
   __reducerSchema("clear_help", ClearHelpReducer),
   __reducerSchema("commit_event", CommitEventReducer),
   __reducerSchema("commit_verified_summary", CommitVerifiedSummaryReducer),
+  __reducerSchema("emit_telemetry", EmitTelemetryReducer),
   __reducerSchema("end_attempt", EndAttemptReducer),
   __reducerSchema("enqueue_live_job", EnqueueLiveJobReducer),
   __reducerSchema("fail_live_job", FailLiveJobReducer),
@@ -147,6 +161,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "my_attempt_cards": Omit<typeof tablesSchema.schemaType.tables["myAttemptCards"], "accessorName"> & { readonly accessorName: "my_attempt_cards" };
     /** @deprecated Use `myClassroomLesson` instead. This alias will be removed in the next major version. */
     readonly "my_classroom_lesson": Omit<typeof tablesSchema.schemaType.tables["myClassroomLesson"], "accessorName"> & { readonly accessorName: "my_classroom_lesson" };
+    /** @deprecated Use `telemetryEvent` instead. This alias will be removed in the next major version. */
+    readonly "telemetry_event": Omit<typeof tablesSchema.schemaType.tables["telemetryEvent"], "accessorName"> & { readonly accessorName: "telemetry_event" };
   };
 };
 
@@ -170,6 +186,7 @@ const tableAccessorAliases = {
   "learner_attempt_cards": "learnerAttemptCards",
   "my_attempt_cards": "myAttemptCards",
   "my_classroom_lesson": "myClassroomLesson",
+  "telemetry_event": "telemetryEvent",
 } as const;
 
 function __withTableAccessorAliases<T extends object>(target: T, freeze = false): T {
@@ -198,6 +215,8 @@ export type DbView = __DbViewBase & {
   readonly "my_attempt_cards": __DbViewBase["myAttemptCards"];
   /** @deprecated Use `myClassroomLesson` instead. This alias will be removed in the next major version. */
   readonly "my_classroom_lesson": __DbViewBase["myClassroomLesson"];
+  /** @deprecated Use `telemetryEvent` instead. This alias will be removed in the next major version. */
+  readonly "telemetry_event": __DbViewBase["telemetryEvent"];
 };
 
 type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
@@ -210,6 +229,8 @@ export type Tables = __TablesBase & {
   readonly "my_attempt_cards": __TablesBase["myAttemptCards"];
   /** @deprecated Use `myClassroomLesson` instead. This alias will be removed in the next major version. */
   readonly "my_classroom_lesson": __TablesBase["myClassroomLesson"];
+  /** @deprecated Use `telemetryEvent` instead. This alias will be removed in the next major version. */
+  readonly "telemetry_event": __TablesBase["telemetryEvent"];
 };
 
 /** The tables available in this remote SpacetimeDB module. Each table reference doubles as a query builder. */

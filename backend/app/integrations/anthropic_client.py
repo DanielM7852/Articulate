@@ -7,6 +7,7 @@ transient API failures, up to the configured bound.
 
 import asyncio
 
+from app import telemetry
 from app.config import Settings
 from app.errors import CoachValidationError, ProviderNotConfigured
 from app.reasoning.prompts import SYSTEM_PROMPT, render_user_message
@@ -72,13 +73,13 @@ class ClaudeCoach:
         return self._client
 
     def _parse(self, client, message: str):
-        return client.messages.parse(
+        return telemetry.claude_call(self._settings.anthropic_model, "coach", lambda: client.messages.parse(
             model=self._settings.anthropic_model,
             max_tokens=800,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": message}],
             output_format=CoachOutput,
-        )
+        ))
 
 
 def _retryable(exc: Exception) -> bool:

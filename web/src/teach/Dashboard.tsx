@@ -197,6 +197,7 @@ export function Dashboard() {
         <h1 className="title-serif">Practice together</h1>
         <p className="lede">{personName(session.name)} is teaching this classroom. A development name is not an account.</p>
         <p className="small">{connectionCopy(status, ready)}</p>
+        <p className="small">This list is the SpacetimeDB view classroom_board on {session.database}. It updates when that view changes. The database returns rows only for this teacher.</p>
         {status === 'Disconnected' && (
           <button type="button" className="btn btn--sm" onClick={() => { setReady(false); setAttempt((value) => value + 1); }}>
             Try connecting again
@@ -236,6 +237,7 @@ export function Dashboard() {
               <p className="body ink">Current exercise: {exerciseName(learner.exercise)}</p>
               <p className="small">{activityName(learner.presence)}. {deliveryLabel(learner)}.</p>
               {learner.visible && learner.lessonRevision > 0 && <p className="small">Last change: {plainChange(learner.visible)}</p>}
+              <SpacetimePath learner={learner} database={session.database} connected={status === 'Connected'} />
               <h3 className="teach-h">Recent practice</h3>
               {attempts.length === 0 && <p className="small">No attempts yet.</p>}
               <ul className="teach-attempts">
@@ -311,6 +313,68 @@ export function Dashboard() {
       </div>
     </main>
   );
+}
+
+function SpacetimePath({ learner, database, connected }: { learner: BoardRow; database: string; connected: boolean }) {
+  const steps = spacetimeSteps(learner);
+  return (
+    <section className="teach-path" aria-labelledby="spacetime-path">
+      <h3 id="spacetime-path" className="teach-h">Through SpacetimeDB</h3>
+      <p className="small">
+        {connected
+          ? `Connected to ${database}. Send lesson calls the save_lesson reducer. ${personName(learner.displayName)}'s screen is subscribed to my_classroom_lesson and answers with ack_lesson. This panel is the classroom_board row that comes back.`
+          : `Disconnected from ${database}. This is the last classroom_board row this screen received.`}
+      </p>
+      <ol className="teach-steps">
+        {steps.map((step) => (
+          <li key={step.title} className={`teach-step teach-step--${step.state}`}>
+            <span className="teach-step__title">{step.title}</span>
+            <span>{step.text}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function spacetimeSteps(row: BoardRow): { title: string; text: string; state: 'done' | 'now' | 'waiting' }[] {
+  const name = personName(row.displayName);
+  const saved = row.lessonRevision > 0;
+  const received = row.ackPhase === 'received' || row.ackPhase === 'applied';
+  const applied = row.ackPhase === 'applied';
+  const failed = row.ackPhase === 'failed';
+  const duringTake = row.presence === 'recording' || row.presence === 'analyzing';
+  return [
+    {
+      title: 'Lesson saved',
+      state: saved ? 'done' : 'waiting',
+      text: saved
+        ? `save_lesson stored revision ${row.lessonRevision} for ${name} in ${row.lessonSource === 'classroom' ? 'the class assignment' : 'this learner’s lesson'}.`
+        : `No save_lesson is stored for ${name} yet.`,
+    },
+    {
+      title: 'Received on learner’s device',
+      state: received ? 'done' : saved ? 'now' : 'waiting',
+      text: received
+        ? `${name}’s subscription to my_classroom_lesson received revision ${row.lessonRevision}.`
+        : saved
+          ? `Revision ${row.lessonRevision} is stored. This screen is still waiting for ${name}’s device to receive it.`
+          : 'Nothing is waiting to be received.',
+    },
+    {
+      title: applied ? 'Learner is practicing the updated lesson' : duringTake && received ? 'Will start after this recording' : failed ? 'The lesson could not be applied' : 'Acknowledgment',
+      state: applied ? 'done' : failed ? 'now' : received ? 'now' : 'waiting',
+      text: applied
+        ? `ack_lesson reported applied for revision ${row.lessonRevision}. That acknowledgment updated this classroom_board row.`
+        : failed
+          ? `${name}’s device reported that revision ${row.lessonRevision} could not be applied.`
+          : duringTake && received
+            ? `${name} is ${row.presence === 'recording' ? 'recording' : 'checking a take'}. The lesson stays queued until that ends, then ack_lesson can report applied.`
+            : received
+              ? `The device has revision ${row.lessonRevision}. ack_lesson has not reported applied.`
+              : 'Applied appears here only after ack_lesson says so.',
+    },
+  ];
 }
 
 function Outcome({ row }: { row: BoardRow }) {

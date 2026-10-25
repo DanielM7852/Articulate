@@ -34,10 +34,10 @@ export function LessonSync() {
   });
   const [pending, setPending] = useState<string | null>(null);
   const [link, setLink] = useState<string | null>(null);
-  const [onQuiz, setOnQuiz] = useState(() => window.location.hash.startsWith('#/quiz'));
+  const [onQuiz, setOnQuiz] = useState(() => window.location.hash.startsWith('#/quiz') || window.location.hash.startsWith('#/dashboard'));
 
   useEffect(() => {
-    const read = () => setOnQuiz(window.location.hash.startsWith('#/quiz'));
+    const read = () => setOnQuiz(window.location.hash.startsWith('#/quiz') || window.location.hash.startsWith('#/dashboard'));
     window.addEventListener('hashchange', read);
     return () => window.removeEventListener('hashchange', read);
   }, []);

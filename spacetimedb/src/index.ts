@@ -163,6 +163,18 @@ const liveInsight = table(
     created_at: t.u32(), expires_at: t.u32().index(),
   },
 );
+const telemetryEvent = table(
+  { name: "telemetry_event", public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    at: t.timestamp(),
+    source: t.string(),
+    target: t.string(),
+    kind: t.string(),
+    label: t.string(),
+    payload: t.string(),
+  },
+);
 const db = schema({
   backend,
   sessions,
@@ -182,6 +194,7 @@ const db = schema({
   liveQueue,
   liveQuota,
   liveInsight,
+  telemetryEvent,
   classInvite,
   classIdentity,
   classRoom,
@@ -386,6 +399,46 @@ export const begin_attempt = db.reducer(
       ended_at: undefined,
       summary: "",
     });
+  },
+);
+
+const telemetryNodes = [
+  "camera", "mediapipe", "mic", "audio", "stt", "tts",
+  "backend", "pitch", "sparc", "db", "claude", "ui",
+];
+const telemetryKindRe = /^[a-z]+(\.[a-z_]+)+$/;
+const TELEMETRY_KEEP = 400;
+
+export const emit_telemetry = db.reducer(
+  {
+    source: t.string(),
+    target: t.string(),
+    kind: t.string(),
+    label: t.string(),
+    payload_json: t.string(),
+  },
+  (ctx, { source, target, kind, label, payload_json }) => {
+    if (!telemetryNodes.includes(source)) throw new Error("unknown source node");
+    if (!telemetryNodes.includes(target)) throw new Error("unknown target node");
+    if (!telemetryKindRe.test(kind)) throw new Error("invalid kind");
+    if (label.length > 120) throw new Error("label too long (max 120)");
+    if (byteLength(payload_json) > 2048) throw new Error("payload too large");
+    parseJsonObject(payload_json, "payload_json");
+    ctx.db.telemetryEvent.insert({
+      id: 0n,
+      at: ctx.timestamp,
+      source,
+      target,
+      kind,
+      label,
+      payload: payload_json,
+    });
+    const excess = Number(ctx.db.telemetryEvent.count()) - TELEMETRY_KEEP;
+    if (excess <= 0) return;
+    const ids: bigint[] = [];
+    for (const row of ctx.db.telemetryEvent.iter()) ids.push(row.id);
+    ids.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const id of ids.slice(0, excess)) ctx.db.telemetryEvent.id.delete(id);
   },
 );
 

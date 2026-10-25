@@ -12,6 +12,7 @@ from pathlib import Path
 
 import httpx
 
+from app import telemetry
 from app.config import Settings
 from app.errors import ArticulateError
 from app.schemas import CartesiaHandoff
@@ -204,6 +205,7 @@ def mint_tts_token(
     if not isinstance(token, str) or not token:
         raise failure
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    telemetry.emit("backend", "tts", "tts.token", "speech token minted", {})
     return {
         "token": token,
         "expires_at": expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"),

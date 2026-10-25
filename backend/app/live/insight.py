@@ -169,6 +169,7 @@ async def compose_line(settings: Settings, client, sound: str, claim: dict, rece
             settings.live_insight_timeout_s,
             INSIGHT_MAX_TOKENS,
             model=settings.live_insight_model,
+            purpose="insight",
         )
         say = draft.say.strip()
         validate_insight(say, sound, claim)
