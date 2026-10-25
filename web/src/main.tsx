@@ -13,7 +13,8 @@ import WordLesson from './screens/WordLesson';
 import MatchWord from './screens/MatchWord';
 import ConsonantCoach from './screens/ConsonantCoach';
 import { LessonSync } from './classroom/LessonSync';
-import { loadSession } from './classroom/session';
+import { classroomFlow } from './classroom/session';
+import { startVirtualLearner } from './classroom/autoJoin';
 import { OpenLiveConsole } from './teach/OpenLiveConsole';
 import RecapScreen from './screens/RecapScreen';
 
@@ -24,11 +25,15 @@ import RecapScreen from './screens/RecapScreen';
  */
 function Guard({ need, children }: { need: 'quiz' | 'tutorial'; children: ReactNode }) {
   const { quizDone, onboarded } = useAppState();
-  const classroomLearner = loadSession()?.role === 'learner';
+  // A silently provisioned learner keeps the usual flow until a teacher assigns a lesson (classroomFlow).
+  const classroomLearner = classroomFlow();
   if (!quizDone && !classroomLearner) return <Navigate to="/" replace />;
   if (need === 'tutorial' && !onboarded && !classroomLearner) return <Navigate to="/tutorial" replace />;
   return children;
 }
+
+// Every learner gets a virtual classroom learner without logging in (classroom/autoJoin.ts); never blocks.
+startVirtualLearner();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

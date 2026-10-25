@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { DbConnection } from '../module_bindings';
 import { parseSettings, type LessonSettings } from '@lesson-rules';
 import { decideLesson, type LessonSnap } from './applyLesson';
 import { isCaptureBusy, subscribeCaptureBusy } from './captureGate';
-import { IdentityForm } from './IdentityForm';
 import { clockLabel, cueName, exerciseName, plainChange, supportName } from './labels';
 import {
   loadAppliedRevision,
@@ -11,6 +10,7 @@ import {
   loadSession,
   storeAppliedRevision,
   storeNoticedRevision,
+  storeTeacherLesson,
   wsUri,
   type DevSession,
 } from './session';
@@ -154,6 +154,8 @@ export function LessonSync() {
           conn = connection;
           const take = (row: Parameters<typeof rowToSnap>[0] & LessonMeta) => {
             setMeta(rowMeta(row));
+            // A teacher-assigned lesson (override or classroom) moves a silent learner into the classroom flow.
+            storeTeacherLesson(session.profileId, row.revision > 0 && row.source !== 'default');
             consider(rowToSnap(row), isCaptureBusy());
           };
           connection.db.myClassroomLesson.onInsert((_ctx, row) => take(row));
@@ -212,16 +214,19 @@ export function LessonSync() {
     };
   }, [session, applyTeacherLesson]);
 
-  // 2026-10-24: the landing page places Join beside Begin, so this banner stays off that screen.
+  // The landing page has its own Begin and provisions a virtual learner silently, so this banner stays off that screen.
   if (onQuiz || onLanding) return null;
 
-  if (!session || session.role !== 'learner') {
-    return (
-      <aside className="classroom-banner">
-        <IdentityForm role="learner" onReady={setSession} />
-      </aside>
-    );
-  }
+  // 2026-10-25: learners no longer join anything by hand. Without a session (backend down, or the virtual
+  // learner still being minted) the banner stays off instead of showing a join form.
+  // if (!session || session.role !== 'learner') {
+  //   return (
+  //     <aside className="classroom-banner">
+  //       <IdentityForm role="learner" onReady={setSession} />
+  //     </aside>
+  //   );
+  // }
+  if (!session || session.role !== 'learner') return null;
 
   const practice = exerciseName(lessonTarget ?? plan.sound);
   return (
@@ -232,7 +237,7 @@ export function LessonSync() {
       {meta && meta.receivedAt !== 0n && <p className="small">Received {clockLabel(meta.receivedAt)}</p>}
       {meta && meta.appliedAt !== 0n && <p className="small">Applied {clockLabel(meta.appliedAt)}</p>}
       {lessonRevision > 0 && (
-        <p className="small">Your practice: {practice}. {supportName(plan.assistance)} · {cueName(lessonCue ?? '')} · {lessonRepetitions} {lessonRepetitions === 1 ? 'repetition' : 'repetitions'}</p>
+        <p className="small">Your practice: {practice}. {supportName(plan.assistance)} Â· {cueName(lessonCue ?? '')} Â· {lessonRepetitions} {lessonRepetitions === 1 ? 'repetition' : 'repetitions'}</p>
       )}
       {pending && <p className="classroom-banner__pending">{pending}</p>}
       {notice && <p className="classroom-banner__notice">{notice}</p>}

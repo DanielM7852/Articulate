@@ -7,7 +7,7 @@ import { GREETING, WELCOME_BACK } from '../audio/bakedLines';
 import { prepareTeacher, speakTeacher, unlockTeacherAudio, type TeacherSpeech } from '../audio/teacher';
 import type { SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
 import { IdentityForm } from '../classroom/IdentityForm';
-import { loadSession } from '../classroom/session';
+import { classroomFlow, loadSession } from '../classroom/session';
 import { useAppState } from '../state/AppState';
 import { useFaceTracking, usePointerLook } from '../vision/useLook';
 import brandMark from '../assets/landing/brand-mark.svg';
@@ -163,7 +163,11 @@ function useGuideVoice(guide: RefObject<MouthReferenceHandle | null>, narration:
 export default function Intro() {
   const go = useStepNav();
   const { onboarded, audio, skipClassroomSurvey } = useAppState();
-  const [classroomLearner, setClassroomLearner] = useState(() => loadSession()?.role === 'learner');
+  // An explicit class join already has its identity; everyone else gets the optional name and a silent virtual learner.
+  const [joined] = useState(() => {
+    const session = loadSession();
+    return session?.role === 'learner' && !session.auto;
+  });
   const [phase, setPhase] = useState<Phase>('idle');
   const face = useFaceTracking(phase !== 'idle');
   const pointer = usePointerLook(face.status !== 'tracking');
@@ -234,7 +238,7 @@ export default function Intro() {
       if (!current) return;
       guide.current?.clearStartShape(); // the ribbon has become her head; later dissolves are the usual ones
       setPhase('talking');
-      if (loadSession()?.role === 'learner') {
+      if (classroomFlow()) {
         play(CLASSROOM_GREETING, () => {
           skipClassroomSurvey();
           go('/practice');
@@ -245,7 +249,7 @@ export default function Intro() {
     return () => {
       current = false;
     };
-  }, [phase, guideState, onboarded, classroomLearner, play, go, skipClassroomSurvey]);
+  }, [phase, guideState, onboarded, play, go, skipClassroomSurvey]);
 
   // The head dissolves, then the survey.
   useEffect(() => {
@@ -254,7 +258,7 @@ export default function Intro() {
     const gone = guideState === 'ready' && guide.current ? guide.current.disperse({ durationMs: DISPERSE_MS }) : Promise.resolve(true);
     void gone.then(() => {
       if (!current) return;
-      if (loadSession()?.role === 'learner') {
+      if (classroomFlow()) {
         skipClassroomSurvey();
         go('/practice');
         return;
@@ -328,8 +332,8 @@ export default function Intro() {
           <div className="intro-landing__invite">
             <p>See your voice and explore speech at your own pace.</p>
             <div className="intro-landing__actions">
-              {!classroomLearner ? (
-                <IdentityForm compact role="learner" onReady={() => setClassroomLearner(true)} onBegin={begin} />
+              {!joined ? (
+                <IdentityForm compact role="learner" onBegin={begin} />
               ) : (
                 <button type="button" className="intro-landing__begin" onClick={begin}>
                   Begin

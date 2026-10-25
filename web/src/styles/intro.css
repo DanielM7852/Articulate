@@ -122,16 +122,16 @@
 }
 .intro-landing__actions {
   display: grid;
-  grid-template-columns: minmax(0, 168px) minmax(0, 168px);
+  grid-template-columns: minmax(0, 260px);
   grid-template-areas:
-    "name room"
-    "begin join";
-  gap: 8px;
-  width: min(100%, 348px);
+    "name"
+    "begin";
+  gap: 12px;
+  width: min(100%, 260px);
   align-items: end;
 }
 .intro-landing .classroom-id--inline input {
-  height: 36px;
+  height: 40px;
 }
 .intro-landing__actions:not(:has(.classroom-id--inline)) {
   display: flex;
@@ -143,23 +143,10 @@
 .intro-landing .classroom-id--inline {
   display: contents;
 }
-.intro-landing .classroom-id--inline .classroom-id__label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  border: 0;
-}
-.intro-landing .classroom-id--inline label:first-of-type { grid-area: name; }
-.intro-landing .classroom-id--inline label:last-of-type { grid-area: room; }
-.intro-landing .classroom-id--inline [role="alert"] { grid-column: 1 / -1; }
-.intro-landing .classroom-id--inline button.btn--primary {
-  grid-area: join;
-  width: 100%;
-  height: 60px;
+.intro-landing .classroom-id--inline label { grid-area: name; }
+.intro-landing .classroom-id__optional {
+  font-weight: 400;
+  color: #606a70;
 }
 .intro-landing__begin {
   grid-area: begin;
