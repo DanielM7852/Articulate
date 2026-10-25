@@ -1,8 +1,9 @@
-"""Inference backends: TensorRT FP16 -> torch FP16 (CUDA) -> torch CPU, chosen automatically."""
+"""Inference backends: TensorRT FP16 -> torch FP16 (CUDA) -> torch MPS (Apple GPU, fp32) -> torch CPU, chosen automatically."""
 from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +25,14 @@ class TorchBackend:
         self.device = device
         self.dtype = torch.float16 if fp16 else torch.float32
         self.model = Wav2Vec2ForCTC.from_pretrained(model_dir).to(device=device, dtype=self.dtype).eval()
-        self.name = "torch-fp16" if fp16 else "torch-cpu"
+        if device == "cuda":
+            self.name = "torch-fp16" if fp16 else "torch-cuda-fp32"
+        elif device == "mps":
+            self.name = "torch-mps"
+        else:
+            self.name = "torch-cpu"
+        if device == "mps":  # compile kernels now so the first real request is not slow
+            self(np.zeros(32000, np.float32))
 
     def __call__(self, wave: np.ndarray) -> np.ndarray:
         torch = self.torch
@@ -33,6 +41,8 @@ class TorchBackend:
             out = self.model(x).logits[0].float()
             if self.device == "cuda":
                 torch.cuda.synchronize()
+            elif self.device == "mps":
+                torch.mps.synchronize()
             return out.cpu().numpy()
 
 
@@ -144,7 +154,7 @@ def load_vocab(model_dir: Path) -> tuple[dict[int, str], int]:
 
 
 def make_backend(settings: Settings):
-    """Pick a backend honouring settings.backend ('auto' tries tensorrt, torch-fp16, torch-cpu)."""
+    """Pick a backend honouring settings.backend ('auto' tries tensorrt, torch-fp16, torch-mps, torch-cpu)."""
     want = settings.backend
     errors: list[str] = []
     if want in ("auto", "tensorrt") and settings.plan_path.exists():
@@ -162,7 +172,18 @@ def make_backend(settings: Settings):
         except Exception as e:  # noqa: BLE001
             errors.append(f"torch-fp16: {e}")
             log.warning("torch CUDA unavailable: %s", e)
-    if want == "tensorrt" or want == "torch-fp16":
+    if want in ("auto", "torch-mps"):
+        try:
+            import torch
+
+            if torch.backends.mps.is_available():
+                # fp16 on MPS can diverge for wav2vec2, so fp32 unless PHONES_MPS_FP16=1.
+                return TorchBackend(settings.model_dir, "mps", os.environ.get("PHONES_MPS_FP16") == "1")
+            errors.append("torch-mps: MPS not available")
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"torch-mps: {e}")
+            log.warning("torch MPS unavailable: %s", e)
+    if want in ("tensorrt", "torch-fp16", "torch-mps"):
         raise RuntimeError("requested backend unavailable: " + "; ".join(errors))
     return TorchBackend(settings.model_dir, "cpu", False)
 

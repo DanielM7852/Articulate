@@ -2,12 +2,40 @@
 
 Local GPU IPA phone recognition: a wav2vec2 CTC model (default `KoelLabs/xlsr-english-01`) exported to ONNX and
 built into a TensorRT FP16 engine, streamed to the browser over a WebSocket. Falls back automatically to
-torch FP16 on CUDA, then torch CPU; the active one is reported by `/health` and the WS `ready` message.
+torch FP16 on CUDA, then torch MPS (Apple GPU), then torch CPU; the active one is reported by `/health` and the WS `ready` message.
 
 **Licensing / access.** `KoelLabs/xlsr-english-01` is AGPL-3.0 and gated on Hugging Face (accept the terms on the
 model page and provide `HF_TOKEN`). Weights, ONNX and engines are NOT committed (`models/`, `engines/`, `.venv/`
 are gitignored). Any Wav2Vec2ForCTC phone model works via `PHONES_MODEL_ID` (e.g. the ungated Apache-2.0
 `facebook/wav2vec2-lv-60-espeak-cv-ft`); the code path is identical.
+
+## Setup (macOS, Apple silicon)
+
+Runs on the Apple GPU through torch MPS (no ONNX/TensorRT needed). Backend order on a Mac: `torch-mps`, then `torch-cpu`.
+
+```
+brew install uv
+cd services/phones
+uv venv .venv --python 3.12
+uv pip install --python .venv/bin/python "torch>=2.8" "transformers>=4.50" fastapi "uvicorn[standard]" numpy soundfile scipy huggingface_hub pytest httpx websockets
+```
+
+Model access: accept the terms at https://huggingface.co/KoelLabs/xlsr-english-01, then log in with
+`.venv/bin/hf auth login` (or `export HF_TOKEN=...`), then download the weights into `models/`:
+
+```
+.venv/bin/python scripts/download_model.py
+```
+
+Run (from `services/phones`), then check `curl http://127.0.0.1:8020/health` (expect `"engine":"torch-mps"`):
+
+```
+.venv/bin/python -m uvicorn phones.app:app --app-dir src --host 127.0.0.1 --port 8020
+```
+
+Notes: MPS runs fp32 (fp16 can diverge for wav2vec2; opt in with `PHONES_MPS_FP16=1`). Force it with
+`PHONES_BACKEND=torch-mps`. If streaming lags, raise `PHONES_HOP_MS` (e.g. 150 or 200). The first request after
+start is warmed up at load.
 
 ## Setup (Windows, RTX 50-series needs CUDA 12.8 torch and TensorRT >= 10.8)
 
@@ -37,7 +65,7 @@ normalization/softmax layers) to FP32.
 services/phones/.venv/Scripts/python.exe -m uvicorn phones.app:app --app-dir services/phones/src --host 127.0.0.1 --port 8020
 ```
 
-Settings (env): `PHONES_MODEL_ID`, `PHONES_BACKEND` (auto|tensorrt|torch-fp16|torch-cpu), `PHONES_HOP_MS=100`,
+Settings (env): `PHONES_MODEL_ID`, `PHONES_BACKEND` (auto|tensorrt|torch-fp16|torch-mps|torch-cpu), `PHONES_MPS_FP16=1`, `PHONES_HOP_MS=100`,
 `PHONES_WINDOW_MS=2000`, `PHONES_MIN_WINDOW_MS=500`, `PHONES_COMMIT_LAG_MS=300`, `PHONES_SILENCE_RMS=0.004`.
 
 ## API
