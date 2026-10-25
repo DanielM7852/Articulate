@@ -6,23 +6,57 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AcceptInviteReducer from "../accept_invite_reducer";
+import AckLessonReducer from "../ack_lesson_reducer";
 import BeginAttemptReducer from "../begin_attempt_reducer";
+import ClaimLiveJobReducer from "../claim_live_job_reducer";
+import CleanupLiveStateReducer from "../cleanup_live_state_reducer";
+import ClearHelpReducer from "../clear_help_reducer";
 import CommitEventReducer from "../commit_event_reducer";
+import CommitVerifiedSummaryReducer from "../commit_verified_summary_reducer";
 import EndAttemptReducer from "../end_attempt_reducer";
+import EnqueueLiveJobReducer from "../enqueue_live_job_reducer";
+import FailLiveJobReducer from "../fail_live_job_reducer";
+import FinishLiveJobReducer from "../finish_live_job_reducer";
+import MintInviteReducer from "../mint_invite_reducer";
 import PushMetricsReducer from "../push_metrics_reducer";
 import RecordArticulationReducer from "../record_articulation_reducer";
 import RecordCoachTurnReducer from "../record_coach_turn_reducer";
 import RegisterLearnerReducer from "../register_learner_reducer";
+import RenewLiveJobReducer from "../renew_live_job_reducer";
+import ReportProvisionalReducer from "../report_provisional_reducer";
+import RequestHelpReducer from "../request_help_reducer";
+import RevokeLessonReducer from "../revoke_lesson_reducer";
+import SaveLessonReducer from "../save_lesson_reducer";
 import SetLearnerNoteReducer from "../set_learner_note_reducer";
 import SetLearnerProgressReducer from "../set_learner_progress_reducer";
+import SetLiveInsightReducer from "../set_live_insight_reducer";
+import SetPresenceReducer from "../set_presence_reducer";
 
+export type AcceptInviteParams = __Infer<typeof AcceptInviteReducer>;
+export type AckLessonParams = __Infer<typeof AckLessonReducer>;
 export type BeginAttemptParams = __Infer<typeof BeginAttemptReducer>;
+export type ClaimLiveJobParams = __Infer<typeof ClaimLiveJobReducer>;
+export type CleanupLiveStateParams = __Infer<typeof CleanupLiveStateReducer>;
+export type ClearHelpParams = __Infer<typeof ClearHelpReducer>;
 export type CommitEventParams = __Infer<typeof CommitEventReducer>;
+export type CommitVerifiedSummaryParams = __Infer<typeof CommitVerifiedSummaryReducer>;
 export type EndAttemptParams = __Infer<typeof EndAttemptReducer>;
+export type EnqueueLiveJobParams = __Infer<typeof EnqueueLiveJobReducer>;
+export type FailLiveJobParams = __Infer<typeof FailLiveJobReducer>;
+export type FinishLiveJobParams = __Infer<typeof FinishLiveJobReducer>;
+export type MintInviteParams = __Infer<typeof MintInviteReducer>;
 export type PushMetricsParams = __Infer<typeof PushMetricsReducer>;
 export type RecordArticulationParams = __Infer<typeof RecordArticulationReducer>;
 export type RecordCoachTurnParams = __Infer<typeof RecordCoachTurnReducer>;
 export type RegisterLearnerParams = __Infer<typeof RegisterLearnerReducer>;
+export type RenewLiveJobParams = __Infer<typeof RenewLiveJobReducer>;
+export type ReportProvisionalParams = __Infer<typeof ReportProvisionalReducer>;
+export type RequestHelpParams = __Infer<typeof RequestHelpReducer>;
+export type RevokeLessonParams = __Infer<typeof RevokeLessonReducer>;
+export type SaveLessonParams = __Infer<typeof SaveLessonReducer>;
 export type SetLearnerNoteParams = __Infer<typeof SetLearnerNoteReducer>;
 export type SetLearnerProgressParams = __Infer<typeof SetLearnerProgressReducer>;
+export type SetLiveInsightParams = __Infer<typeof SetLiveInsightReducer>;
+export type SetPresenceParams = __Infer<typeof SetPresenceReducer>;
 

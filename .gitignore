@@ -16,6 +16,7 @@ __pycache__/
 # Local secrets and data
 .env
 .env.secrets
+.tools/spacetime-worker.json
 .data/
 .local_store/
 spacetimedb/node_modules/

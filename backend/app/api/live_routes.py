@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
+from app.audio.pitch_table import compare_wav, features_from_table, phrase_cue
 from app.integrations.spacetime import SpacetimeError
 from app.live import insight
 from app.live.articulation import annotate_attempts, extract_features
@@ -245,7 +246,7 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
         runtime.release_articulation()
         return
     try:
-        features = history = None
+        features = history = table = None
         state = request.app.state
         async with runtime.articulation_slot(reserved=True) as ok:
             if ok:
@@ -255,6 +256,10 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
                         wav, attempt_id=attempt_id, capture_start_monotonic_ms=clock[0], time_origin_unix_ms=clock[1]
                     )
                     features = extract_features(bundle) if bundle is not None else None
+                if state.settings.pitch_table_enabled:
+                    table = await asyncio.to_thread(compare_wav, state.settings, wav, sound)
+                if table is not None:
+                    features = {**features, "pitchTable": table} if features is not None else features_from_table(table)
                 if features is not None:
                     history = getattr(state, "live_history", None) or runtime.history(
                         getattr(state, "live_spacetime_transport", None)
@@ -265,6 +270,15 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
             await sink.set(attempt_id, profile_id, sound, "none")
             return
         model_client = getattr(state, "live_client", None) or runtime.anthropic()
+        # 2026-10-24: a Parselmouth-only table has no SPARC claim, so the cue is spoken from the measured difference.
+        if features.get("source") == "parselmouth":
+            cue = (table or {}).get("cue")
+            if not cue:
+                await sink.set(attempt_id, profile_id, sound, "none")
+                return
+            say, source = await phrase_cue(state.settings, model_client, table["word"], cue)
+            await sink.set(attempt_id, profile_id, sound, "ready", say, source)
+            return
         await _insight_lane(runtime, sink, history, state.settings, model_client, profile_id, attempt_id, sound, features)
     except Exception as exc:  # noqa: BLE001
         logger.warning("articulation job failed: %s", type(exc).__name__)
@@ -319,7 +333,8 @@ async def live_articulation(
     authorize_profile(request, profileId)
     state = request.app.state
     runtime = get_runtime(request.app)
-    if not state.settings.articulation_configured and getattr(state, "live_articulation", None) is None:
+    collector = state.settings.articulation_configured or getattr(state, "live_articulation", None) is not None
+    if not collector and not state.settings.pitch_table_enabled:
         return JSONResponse({"accepted": False, "reason": "disabled"})
     if not runtime.reserve_articulation():
         return JSONResponse({"accepted": False, "reason": "busy"})

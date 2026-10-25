@@ -34,59 +34,187 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AcceptInviteReducer from "./accept_invite_reducer";
+import AckLessonReducer from "./ack_lesson_reducer";
 import BeginAttemptReducer from "./begin_attempt_reducer";
+import ClaimLiveJobReducer from "./claim_live_job_reducer";
+import CleanupLiveStateReducer from "./cleanup_live_state_reducer";
+import ClearHelpReducer from "./clear_help_reducer";
 import CommitEventReducer from "./commit_event_reducer";
+import CommitVerifiedSummaryReducer from "./commit_verified_summary_reducer";
 import EndAttemptReducer from "./end_attempt_reducer";
+import EnqueueLiveJobReducer from "./enqueue_live_job_reducer";
+import FailLiveJobReducer from "./fail_live_job_reducer";
+import FinishLiveJobReducer from "./finish_live_job_reducer";
+import MintInviteReducer from "./mint_invite_reducer";
 import PushMetricsReducer from "./push_metrics_reducer";
 import RecordArticulationReducer from "./record_articulation_reducer";
 import RecordCoachTurnReducer from "./record_coach_turn_reducer";
 import RegisterLearnerReducer from "./register_learner_reducer";
+import RenewLiveJobReducer from "./renew_live_job_reducer";
+import ReportProvisionalReducer from "./report_provisional_reducer";
+import RequestHelpReducer from "./request_help_reducer";
+import RevokeLessonReducer from "./revoke_lesson_reducer";
+import SaveLessonReducer from "./save_lesson_reducer";
 import SetLearnerNoteReducer from "./set_learner_note_reducer";
 import SetLearnerProgressReducer from "./set_learner_progress_reducer";
+import SetLiveInsightReducer from "./set_live_insight_reducer";
+import SetPresenceReducer from "./set_presence_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import ClassroomBoardRow from "./classroom_board_table";
+import LearnerAttemptCardsRow from "./learner_attempt_cards_table";
+import MyAttemptCardsRow from "./my_attempt_cards_table";
+import MyClassroomLessonRow from "./my_classroom_lesson_table";
 
 /** Type-only namespace exports for generated type groups. */
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  classroomBoard: __table({
+    name: 'classroom_board',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, ClassroomBoardRow),
+  learnerAttemptCards: __table({
+    name: 'learner_attempt_cards',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, LearnerAttemptCardsRow),
+  myAttemptCards: __table({
+    name: 'my_attempt_cards',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyAttemptCardsRow),
+  myClassroomLesson: __table({
+    name: 'my_classroom_lesson',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, MyClassroomLessonRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("accept_invite", AcceptInviteReducer),
+  __reducerSchema("ack_lesson", AckLessonReducer),
   __reducerSchema("begin_attempt", BeginAttemptReducer),
+  __reducerSchema("claim_live_job", ClaimLiveJobReducer),
+  __reducerSchema("cleanup_live_state", CleanupLiveStateReducer),
+  __reducerSchema("clear_help", ClearHelpReducer),
   __reducerSchema("commit_event", CommitEventReducer),
+  __reducerSchema("commit_verified_summary", CommitVerifiedSummaryReducer),
   __reducerSchema("end_attempt", EndAttemptReducer),
+  __reducerSchema("enqueue_live_job", EnqueueLiveJobReducer),
+  __reducerSchema("fail_live_job", FailLiveJobReducer),
+  __reducerSchema("finish_live_job", FinishLiveJobReducer),
+  __reducerSchema("mint_invite", MintInviteReducer),
   __reducerSchema("push_metrics", PushMetricsReducer),
   __reducerSchema("record_articulation", RecordArticulationReducer),
   __reducerSchema("record_coach_turn", RecordCoachTurnReducer),
   __reducerSchema("register_learner", RegisterLearnerReducer),
+  __reducerSchema("renew_live_job", RenewLiveJobReducer),
+  __reducerSchema("report_provisional", ReportProvisionalReducer),
+  __reducerSchema("request_help", RequestHelpReducer),
+  __reducerSchema("revoke_lesson", RevokeLessonReducer),
+  __reducerSchema("save_lesson", SaveLessonReducer),
   __reducerSchema("set_learner_note", SetLearnerNoteReducer),
   __reducerSchema("set_learner_progress", SetLearnerProgressReducer),
+  __reducerSchema("set_live_insight", SetLiveInsightReducer),
+  __reducerSchema("set_presence", SetPresenceReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
 const proceduresSchema = __procedures(
 );
 
+type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "tables"> & {
+  tables: typeof tablesSchema.schemaType.tables & {
+    /** @deprecated Use `classroomBoard` instead. This alias will be removed in the next major version. */
+    readonly "classroom_board": Omit<typeof tablesSchema.schemaType.tables["classroomBoard"], "accessorName"> & { readonly accessorName: "classroom_board" };
+    /** @deprecated Use `learnerAttemptCards` instead. This alias will be removed in the next major version. */
+    readonly "learner_attempt_cards": Omit<typeof tablesSchema.schemaType.tables["learnerAttemptCards"], "accessorName"> & { readonly accessorName: "learner_attempt_cards" };
+    /** @deprecated Use `myAttemptCards` instead. This alias will be removed in the next major version. */
+    readonly "my_attempt_cards": Omit<typeof tablesSchema.schemaType.tables["myAttemptCards"], "accessorName"> & { readonly accessorName: "my_attempt_cards" };
+    /** @deprecated Use `myClassroomLesson` instead. This alias will be removed in the next major version. */
+    readonly "my_classroom_lesson": Omit<typeof tablesSchema.schemaType.tables["myClassroomLesson"], "accessorName"> & { readonly accessorName: "my_classroom_lesson" };
+  };
+};
+
 /** The remote SpacetimeDB module schema, both runtime and type information. */
 const REMOTE_MODULE = {
   versionInfo: {
     cliVersion: "2.13.0" as const,
   },
-  tables: tablesSchema.schemaType.tables,
+  tables: tablesSchema.schemaType.tables as __SchemaWithTableAccessorAliases["tables"],
+  viewsWithArgs: ["learner_attempt_cards"],
   reducers: reducersSchema.reducersType.reducers,
   ...proceduresSchema,
 } satisfies __RemoteModule<
-  typeof tablesSchema.schemaType,
+  __SchemaWithTableAccessorAliases,
   typeof reducersSchema.reducersType,
   typeof proceduresSchema
 >;
 
+const tableAccessorAliases = {
+  "classroom_board": "classroomBoard",
+  "learner_attempt_cards": "learnerAttemptCards",
+  "my_attempt_cards": "myAttemptCards",
+  "my_classroom_lesson": "myClassroomLesson",
+} as const;
+
+function __withTableAccessorAliases<T extends object>(target: T, freeze = false): T {
+  const out = Object.create(Object.getPrototypeOf(target)) as T & Record<string, unknown>;
+  Object.defineProperties(out, Object.getOwnPropertyDescriptors(target));
+  for (const [deprecatedAccessor, targetAccessor] of Object.entries(tableAccessorAliases)) {
+    if (deprecatedAccessor in out) {
+      continue;
+    }
+    Object.defineProperty(out, deprecatedAccessor, {
+      enumerable: true,
+      configurable: false,
+      get: () => out[targetAccessor],
+    });
+  }
+  return freeze ? Object.freeze(out) : out;
+}
+
+type __DbViewBase = __DbConnectionImpl<typeof REMOTE_MODULE>["db"];
+export type DbView = __DbViewBase & {
+  /** @deprecated Use `classroomBoard` instead. This alias will be removed in the next major version. */
+  readonly "classroom_board": __DbViewBase["classroomBoard"];
+  /** @deprecated Use `learnerAttemptCards` instead. This alias will be removed in the next major version. */
+  readonly "learner_attempt_cards": __DbViewBase["learnerAttemptCards"];
+  /** @deprecated Use `myAttemptCards` instead. This alias will be removed in the next major version. */
+  readonly "my_attempt_cards": __DbViewBase["myAttemptCards"];
+  /** @deprecated Use `myClassroomLesson` instead. This alias will be removed in the next major version. */
+  readonly "my_classroom_lesson": __DbViewBase["myClassroomLesson"];
+};
+
+type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
+export type Tables = __TablesBase & {
+  /** @deprecated Use `classroomBoard` instead. This alias will be removed in the next major version. */
+  readonly "classroom_board": __TablesBase["classroomBoard"];
+  /** @deprecated Use `learnerAttemptCards` instead. This alias will be removed in the next major version. */
+  readonly "learner_attempt_cards": __TablesBase["learnerAttemptCards"];
+  /** @deprecated Use `myAttemptCards` instead. This alias will be removed in the next major version. */
+  readonly "my_attempt_cards": __TablesBase["myAttemptCards"];
+  /** @deprecated Use `myClassroomLesson` instead. This alias will be removed in the next major version. */
+  readonly "my_classroom_lesson": __TablesBase["myClassroomLesson"];
+};
+
 /** The tables available in this remote SpacetimeDB module. Each table reference doubles as a query builder. */
-export const tables: __QueryBuilder<typeof tablesSchema.schemaType> = __makeQueryBuilder(tablesSchema.schemaType);
+const tablesBase: __TablesBase = __makeQueryBuilder(tablesSchema.schemaType);
+export const tables: Tables = __withTableAccessorAliases(tablesBase, true) as Tables;
 
 /** The reducers available in this remote SpacetimeDB module. */
 export const reducers = __convertToAccessorMap(reducersSchema.reducersType.reducers);
@@ -95,13 +223,13 @@ export const reducers = __convertToAccessorMap(reducersSchema.reducersType.reduc
 export const procedures = __convertToAccessorMap(proceduresSchema.procedures);
 
 /** The context type returned in callbacks for all possible events. */
-export type EventContext = __EventContextInterface<typeof REMOTE_MODULE>;
+export type EventContext = Omit<__EventContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The context type returned in callbacks for reducer events. */
-export type ReducerEventContext = __ReducerEventContextInterface<typeof REMOTE_MODULE>;
+export type ReducerEventContext = Omit<__ReducerEventContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The context type returned in callbacks for subscription events. */
-export type SubscriptionEventContext = __SubscriptionEventContextInterface<typeof REMOTE_MODULE>;
+export type SubscriptionEventContext = Omit<__SubscriptionEventContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The context type returned in callbacks for error events. */
-export type ErrorContext = __ErrorContextInterface<typeof REMOTE_MODULE>;
+export type ErrorContext = Omit<__ErrorContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The subscription handle type to manage active subscriptions created from a {@link SubscriptionBuilder}. */
 export type SubscriptionHandle = __SubscriptionHandleImpl<typeof REMOTE_MODULE>;
 
@@ -113,6 +241,13 @@ export class DbConnectionBuilder extends __DbConnectionBuilder<DbConnection> {}
 
 /** The typed database connection to manage connections to the remote SpacetimeDB instance. This class has type information specific to the generated module. */
 export class DbConnection extends __DbConnectionImpl<typeof REMOTE_MODULE> {
+  declare db: DbView;
+
+  constructor(config: __DbConnectionConfig<typeof REMOTE_MODULE>) {
+    super(config);
+    this.db = __withTableAccessorAliases(this.db) as DbView;
+  }
+
   /** Creates a new {@link DbConnectionBuilder} to configure and connect to the remote SpacetimeDB instance. */
   static builder = (): DbConnectionBuilder => {
     return new DbConnectionBuilder(REMOTE_MODULE, (config: __DbConnectionConfig<typeof REMOTE_MODULE>) => new DbConnection(config));

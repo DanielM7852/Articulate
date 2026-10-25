@@ -50,7 +50,7 @@ def test_accepted_and_features_stored(tmp_path):
 
 
 def test_disabled_without_url(tmp_path):
-    c, h = make(tmp_path, url="")
+    c, h = make(tmp_path, url="", pitch_table_enabled=False)
     r = c.post(URL + Q, content=WAV, headers=H)
     assert r.status_code == 200 and r.json() == {"accepted": False, "reason": "disabled"} and not h.recorded
 

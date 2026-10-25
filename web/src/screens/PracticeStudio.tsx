@@ -31,6 +31,7 @@ import { attemptsFor, useAppState } from '../state/AppState';
 import { learnerProfileId } from '../state/learnerId';
 import { SOUNDS, SOUND_ORDER, type Attempt } from '../state/types';
 import { TARGETS } from '../vowel/targets';
+import { setCaptureBusy } from '../classroom/captureGate';
 
 /**
  * Practice Studio: a therapist-led, hands-free session (see conversation/director/useSessionDirector.ts for the
@@ -100,7 +101,7 @@ export default function PracticeStudio() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration: voiceOn, captions } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration: voiceOn, captions, preferences, lessonTarget, lessonCue, lessonRevision, lessonRepetitions } = useAppState();
   const profileId = useMemo(() => learnerProfileId(), []);
   const [liveResp, setLiveResp] = useState<LiveCoachResponse | null>(null);
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
@@ -139,6 +140,10 @@ export default function PracticeStudio() {
   const runId = useRef(0);
   const coachAbort = useRef<AbortController | null>(null);
   const [phase, setPhase] = useState<Phase>('ready');
+  useEffect(() => {
+    setCaptureBusy(phase === 'recording' || phase === 'analyzing');
+    return () => setCaptureBusy(false);
+  }, [phase]);
   const [current, setCurrent] = useState<Attempt | null>(null);
   const [coach, setCoach] = useState<CoachResponse | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
@@ -274,8 +279,24 @@ export default function PracticeStudio() {
       quality: summary.quality,
       qualityReason: summary.qualityReason,
       recognizedText: null,
+      lessonRevision,
+      referenceVersion: lessonTarget ?? plan.sound,
     };
     addAttempt(attempt);
+    const finding = summary.quality === 'usable'
+      ? 'none'
+      : summary.qualityReason === 'too-short'
+        ? 'too_short'
+        : summary.qualityReason === 'clipping'
+          ? 'clipping'
+          : summary.qualityReason === 'silence'
+            ? 'silence'
+            : summary.qualityReason === 'no-mic'
+              ? 'no_mic'
+              : 'insufficient';
+    window.dispatchEvent(new CustomEvent('articulate-practice-attempt', {
+      detail: { attemptId: attempt.attemptId, exercise: lessonTarget ?? plan.sound, usable: summary.quality === 'usable', finding },
+    }));
     setCurrent(attempt);
     setSheetClosed(false);
     setPhase('analyzing');
@@ -359,7 +380,7 @@ export default function PracticeStudio() {
       };
     }
 
-    const response = await analyzeAttempt(attempt, history, { learnerId: profileId, plan });
+    const response = await analyzeAttempt(attempt, history, { learnerId: profileId, plan, preferences });
     // The session director owns the current sound; apply only pace and assistance.
     if (response.plan) updatePlan({ pace: response.plan.pace, assistance: response.plan.assistance });
     await seq.whenIdle(); // never overlap the bridge line
@@ -484,7 +505,7 @@ export default function PracticeStudio() {
         holdSec={tracking.holdSec}
         hidden={!assistanceOn}
         live={tracking.status !== 'off' && tracking.status !== 'error'}
-        emptyHint={`Begin the session, then hold “${s.spelled}” steadily.`}
+        emptyHint={lessonTarget ? `Teacher target: ${lessonTarget}. Repetitions ${lessonRepetitions}.` : `Begin the session, then hold “${s.spelled}” steadily.`}
       />
       <div className="lp-overlay lp-overlay--tl lp-pills">
         {compact ? (
@@ -507,7 +528,7 @@ export default function PracticeStudio() {
 
   const guidePane = (
     <section className="lp-pane" aria-label="Mouth guide">
-      <MouthReference ref={mouthRef} cue={cueForSound(plan.sound)} view={refView} slow={slow} paused={narration.paused} />
+      <MouthReference ref={mouthRef} cue={lessonCue === 'spread-lips' || lessonCue === 'round-lips' || lessonCue === 'open-jaw' ? lessonCue : cueForSound(plan.sound)} view={refView} slow={slow} paused={narration.paused} />
       <div className="lp-overlay lp-overlay--tl lp-pills">
         {compact ? (
           viewSwitch
@@ -691,11 +712,20 @@ export default function PracticeStudio() {
         </button>
         <StepHeading
           title={
-            <>
-              Find your {s.spelled} <span className="navy">{s.ipa}</span>
-            </>
+            lessonTarget === 'head' ? (
+              <>Practice <span className="navy">head</span></>
+            ) : (
+              <>
+                Find your {s.spelled} <span className="navy">{s.ipa}</span>
+              </>
+            )
           }
         />
+        {lessonRevision > 0 && (
+          <p className="ob-fine">
+            {lessonTarget === 'head' ? 'Word' : 'Isolated sound'} · {lessonCue === 'spread-lips' ? 'Spread lips' : lessonCue === 'round-lips' ? 'Round lips' : lessonCue === 'open-jaw' ? 'Open jaw' : 'No cue'} · {plan.assistance === 'cue-target' ? 'Cue and target' : plan.assistance === 'target-only' ? 'Target only' : 'No extra support'} · {lessonRepetitions} {lessonRepetitions === 1 ? 'repetition' : 'repetitions'}
+          </p>
+        )}
         <Segmented
           className="lp-sounds"
           label="Choose a sound"

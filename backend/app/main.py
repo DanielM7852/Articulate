@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.classroom_routes import router as classroom_router
 from app.api.live_routes import health_router, router as live_router
 from app.api.routes import router
 from app.realtime.routes import router as realtime_router
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return JSONResponse({"detail": "identity_required"}, status_code=401)
             return await call_next(request)
     app.include_router(router)
+    app.include_router(classroom_router)
     app.include_router(live_router)
     app.include_router(health_router)
     app.include_router(realtime_router)

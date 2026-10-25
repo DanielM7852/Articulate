@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     live_session_ttl_s: float = 3600.0
     live_coach_timeout_s: float = 15.0
     live_history_limit: int = 12
-    articulation_url: str = ""  # local collector (services/articulation); blank disables background analysis
+    articulation_url: str = ""  # local collector (services/articulation); blank skips the SPARC collector
+    pitch_table_enabled: bool = True  # Parselmouth pitch/formant table stored with the attempt
     articulation_timeout_s: float = 30.0
     articulation_models: str = "sparc,silero_vad"
     articulation_max_queue: int = 2

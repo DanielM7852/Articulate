@@ -1,4 +1,32 @@
 import { schema, table, t, type ReducerCtx } from "spacetimedb/server";
+import {
+  acceptInvite,
+  ackLesson,
+  attemptSummary,
+  classAssignment,
+  classIdentity,
+  classInvite,
+  classMember,
+  classRoom,
+  classroomBoardRows,
+  clearHelp,
+  commitVerified,
+  learnerAttemptRows,
+  learnerRoll,
+  lessonAck,
+  lessonAckEvent,
+  lessonCommand,
+  lessonOverride,
+  markDisconnected,
+  mintInvite,
+  myAttemptRows,
+  myLessonRows,
+  reportProvisional,
+  requestHelp,
+  revokeLesson,
+  saveLesson,
+  setPresence,
+} from "./classroom";
 
 // No public tables. Browsers call owned metric reducers or the authenticated Python gateway.
 const backend = table(
@@ -154,6 +182,17 @@ const db = schema({
   liveQueue,
   liveQuota,
   liveInsight,
+  classInvite,
+  classIdentity,
+  classRoom,
+  classMember,
+  lessonOverride,
+  classAssignment,
+  lessonCommand,
+  lessonAck,
+  lessonAckEvent,
+  attemptSummary,
+  learnerRoll,
 });
 export default db;
 
@@ -730,4 +769,140 @@ export const cleanup_live_state = db.reducer(
       if (insight && insight.expires_at <= now) ctx.db.liveInsight.attempt_id.delete(id);
     }
   },
+);
+
+const lessonView = t.row("ClassroomLessonRow", {
+  profile_id: t.string().primaryKey(),
+  revision: t.u32(),
+  command_id: t.string(),
+  source: t.string(),
+  settings_json: t.string(),
+  visible: t.string(),
+  status: t.string(),
+  ack_phase: t.string(),
+});
+
+const boardView = t.row("ClassroomBoardRow", {
+  profile_id: t.string().primaryKey(),
+  display_name: t.string(),
+  classroom_id: t.string(),
+  presence: t.string(),
+  presence_at: t.u64(),
+  exercise: t.string(),
+  lesson_revision: t.u32(),
+  lesson_source: t.string(),
+  override_revision: t.u32(),
+  classroom_revision: t.u32(),
+  visible: t.string(),
+  settings_json: t.string(),
+  ack_phase: t.string(),
+  usable: t.u32(),
+  unusable: t.u32(),
+  last_finding: t.string(),
+  last_kind: t.string(),
+  last_provenance: t.string(),
+  last_at: t.u64(),
+  repeat_count: t.u32(),
+  needs_attention: t.bool(),
+  synthetic_repeat: t.u32(),
+  help_requested: t.bool(),
+  help_note: t.string(),
+});
+
+const attemptView = t.row("AttemptCardRow", {
+  attempt_id: t.string().primaryKey(),
+  profile_id: t.string(),
+  exercise: t.string(),
+  usable: t.bool(),
+  finding: t.string(),
+  kind: t.string(),
+  provenance: t.string(),
+  reference_version: t.string(),
+  analysis_version: t.string(),
+  cue_id: t.string(),
+  measurements_json: t.string(),
+  synthetic: t.bool(),
+  created_at: t.u64(),
+});
+
+export const mint_invite = db.reducer(
+  { code: t.string(), role: t.string(), profile_id: t.string(), classroom_id: t.string(), display_name: t.string() },
+  (ctx, args) => mintInvite(ctx, args),
+);
+export const accept_invite = db.reducer({ code: t.string() }, (ctx, { code }) => acceptInvite(ctx, code));
+export const save_lesson = db.reducer(
+  {
+    command_id: t.string(),
+    scope: t.string(),
+    target_profile: t.string(),
+    classroom_id: t.string(),
+    expected_revision: t.u32(),
+    settings_json: t.string(),
+    expires_in_minutes: t.u32(),
+  },
+  (ctx, args) => saveLesson(ctx, args),
+);
+export const revoke_lesson = db.reducer(
+  { command_id: t.string(), scope: t.string(), target_profile: t.string(), classroom_id: t.string(), expected_revision: t.u32() },
+  (ctx, args) => revokeLesson(ctx, args),
+);
+export const ack_lesson = db.reducer(
+  { revision: t.u32(), phase: t.string(), command_id: t.string() },
+  (ctx, args) => ackLesson(ctx, args),
+);
+export const set_presence = db.reducer(
+  { presence: t.string(), exercise: t.string() },
+  (ctx, { presence, exercise }) => setPresence(ctx, presence, exercise),
+);
+export const request_help = db.reducer({ message: t.string() }, (ctx, { message }) => requestHelp(ctx, message));
+export const clear_help = db.reducer({ profile_id: t.string() }, (ctx, { profile_id }) => clearHelp(ctx, profile_id));
+export const report_provisional = db.reducer(
+  {
+    attempt_id: t.string(),
+    exercise: t.string(),
+    usable: t.bool(),
+    finding: t.string(),
+    reference_version: t.string(),
+    measurements_json: t.string(),
+  },
+  (ctx, args) => reportProvisional(ctx, args),
+);
+export const commit_verified_summary = db.reducer(
+  {
+    profile_id: t.string(),
+    attempt_id: t.string(),
+    exercise: t.string(),
+    usable: t.bool(),
+    finding: t.string(),
+    provenance: t.string(),
+    reference_version: t.string(),
+    analysis_version: t.string(),
+    cue_id: t.string(),
+    measurements_json: t.string(),
+    synthetic: t.bool(),
+  },
+  (ctx, args) => commitVerified(ctx, args),
+);
+export const classroom_disconnect = db.clientDisconnected((ctx) => markDisconnected(ctx));
+
+export const my_classroom_lesson = db.view(
+  { public: true, name: "my_classroom_lesson" },
+  t.array(lessonView),
+  (ctx) => myLessonRows(ctx),
+);
+export const classroom_board = db.view(
+  { public: true, name: "classroom_board" },
+  t.array(boardView),
+  (ctx) => classroomBoardRows(ctx),
+);
+export const my_attempt_cards = db.view(
+  { public: true, name: "my_attempt_cards" },
+  t.array(attemptView),
+  (ctx) => myAttemptRows(ctx),
+);
+export const learner_attempt_cards = db.view(
+  { public: true, name: "learner_attempt_cards" },
+  { profile_id: t.string() },
+  t.array(attemptView),
+  (ctx, { profile_id }) => learnerAttemptRows(ctx, profile_id),
 );
