@@ -37,4 +37,27 @@ assert.deepEqual(routeOf(ev('lesson.saved', 'ui', 'db')), ['ui', 'classroom']);
 assert.deepEqual(routeOf(ev('head.speak', 'ui', 'db', { ms: 4200 })), ['tts', 'head']);
 assert.deepEqual(routeOf(ev('head.ready', 'ui', 'db', { driver: 'talkinghead' })), ['ui', 'head']);
 
+// claude.*: the backend's own calls (grade included) keep source -> target; recap calls run between the model and Recap.
+assert.deepEqual(routeOf(ev('claude.request', 'backend', 'claude', { purpose: 'decide' })), ['backend', 'claude']);
+assert.deepEqual(routeOf(ev('claude.response', 'claude', 'backend', { purpose: 'notes' })), ['claude', 'backend']);
+assert.deepEqual(routeOf(ev('claude.request', 'backend', 'claude')), ['backend', 'claude']);
+assert.deepEqual(routeOf(ev('claude.request', 'backend', 'claude', { purpose: 'grade' })), ['backend', 'claude']);
+assert.deepEqual(routeOf(ev('claude.response', 'claude', 'backend', { purpose: 'grade' })), ['claude', 'backend']);
+assert.deepEqual(routeOf(ev('claude.request', 'backend', 'claude', { purpose: 'recap' })), ['recap', 'claude']);
+assert.deepEqual(routeOf(ev('claude.response', 'claude', 'backend', { purpose: 'recap' })), ['claude', 'recap']);
+assert.deepEqual(routeOf(ev('claude.error', 'claude', 'backend', { purpose: 'recap' })), ['claude', 'recap']);
+
+// recap.*: the learner starts it and gets the outcome back; the email attempt takes the email leg.
+assert.deepEqual(routeOf(ev('recap.start', 'backend', 'db', { attempts: 4 })), ['ui', 'recap']);
+assert.deepEqual(routeOf(ev('recap.start', 'ui', 'db', { attempts: 4 })), ['ui', 'recap']);
+assert.deepEqual(routeOf(ev('recap.ready', 'backend', 'db', { ms: 2400 })), ['recap', 'ui']);
+assert.deepEqual(routeOf(ev('recap.error', 'backend', 'db', { ms: 9000, error: 'TimeoutError' })), ['recap', 'ui']);
+assert.deepEqual(routeOf(ev('recap.limited', 'backend', 'db', { reason: 'per_hour' })), ['recap', 'ui']);
+assert.deepEqual(routeOf(ev('recap.email', 'backend', 'db', { ok: true, ms: 380, provider: 'resend' })), ['recap', 'email']);
+assert.deepEqual(routeOf(ev('recap.email_skipped', 'backend', 'db', { reason: 'not_configured' })), ['recap', 'email']);
+
+// checker.* has no node: its rows keep their own source -> target.
+assert.deepEqual(routeOf(ev('checker.run', 'backend', 'db', { source: 'spacetime', turns: 24 })), ['backend', 'db']);
+assert.deepEqual(routeOf(ev('checker.report', 'backend', 'db', { rows: 24, passRate: 87 })), ['backend', 'db']);
+
 console.log('route ok');

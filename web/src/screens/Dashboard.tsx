@@ -3,7 +3,7 @@ import { subscribeTelemetry, type TelemetryEvent } from '../telemetry/client';
 import brandMark from '../assets/landing/brand-mark.svg';
 import { FACE_POINTS, canonicalFace, createDotFace, decodeFaceV2, decodeFaceV3 } from '../dashboard/dotFace';
 import { WAVE_SAMPLES, createWaveCloud, decodeWave, tonesFrom } from '../dashboard/waveCloud';
-import { routeOf, sttNodeOf, type GraphId, type SttNode } from '../dashboard/route';
+import { routeOf, sttNodeOf, type GraphId, type RouteEnd, type SttNode } from '../dashboard/route';
 import { EDGES, H, NODE, NODES, W, makeCurve, pointOn, type Curve, type Loc, type NodeDef } from '../dashboard/layout';
 import '../styles/dashboard.css';
 
@@ -12,7 +12,8 @@ import '../styles/dashboard.css';
  * own visual language. Each part the app runs is a breathing cluster of navy dots lit from the upper left;
  * every telemetry event (docs/telemetry.md) sends a packet of dots along its route and the target ripples.
  * The deployed reducer only knows twelve source / target ids, so the parts it has no id for (OpenAI Realtime, the
- * phone model, Azure, the classroom database, Ava's head) are routed by event kind and payload (dashboard/route.ts).
+ * phone model, Azure, the classroom database, Ava's head, the session recap) are routed by event kind and payload
+ * (dashboard/route.ts). An `attempt` prop narrows the cards, packets and ticker to one practice attempt.
  * The layout (dashboard/layout.ts) is a fixed 1600 x 900 design space scaled to fit the viewport; one 2D canvas
  * draws all the dots and the HTML labels and live detail cards share its transform. Animation state lives in refs;
  * React only re-renders the cards, at most 10 times a second.
@@ -49,7 +50,7 @@ const SCOPED = new Set([
   'head.speak',
 ]);
 /** The ticker names a route by its nodes as the graph labels them, not by the reducer's ids. */
-const TICK_NAME: Partial<Record<GraphId, string>> = {
+const TICK_NAME: Partial<Record<RouteEnd, string>> = {
   stt: 'ink',
   tts: 'sonic',
   ui: 'learner',
@@ -58,6 +59,16 @@ const TICK_NAME: Partial<Record<GraphId, string>> = {
   db: 'spacetimedb',
   mic: 'microphone',
 };
+/**
+ * Cards that show one attempt's result. With an `attempt` prop a row that carries the selected attemptId pins its card,
+ * and later rows without an attemptId no longer replace it (rows from other attempts never reach a card).
+ */
+function attemptCardOf(kind: string): string | null {
+  if (kind === 'phones.score') return 'phones';
+  if (kind === 'lip.batch' || kind === 'audio.batch') return 'batch';
+  const family = kind.split('.')[0];
+  return family === 'claude' || family === 'pitch' || family === 'azure' || family === 'sparc' ? family : null;
+}
 /** High-rate kinds: they animate but stay out of the ticker. */
 const QUIET = new Set(['lip.frame', 'audio.frame', 'lip.batch', 'audio.batch', 'ui.ping', 'phones.frame', ...PERCEPT]);
 
@@ -121,6 +132,8 @@ type FaceState = 'mesh' | 'tracking' | 'none';
 /** waiting: watched for less than PHONES_IDLE_MS with no evidence; not running: no phones.* row in that long */
 type PhonesState = 'waiting' | 'connected' | 'closed' | 'not running';
 type HeadState = 'waiting' | 'speaking' | 'idle';
+/** idle: no recap.start on this stream; writing: started, not yet ready or failed */
+type RecapState = 'idle' | 'writing' | 'ready' | 'error';
 
 const PROVIDER_TAG: Record<CoachProvider, { name: string; loc: Loc }> = {
   openai: { name: 'GPT', loc: 'OpenAI' },
@@ -212,6 +225,23 @@ interface Model {
   };
   /** speakingUntil is performance.now() */
   head: { driver: string | null; speakingUntil: number; seen: boolean };
+  /** the latest recap job; `at` is the event time of its newest row */
+  recap: {
+    state: RecapState;
+    attempts: number | null;
+    word: string | null;
+    ms: number | null;
+    error: string | null;
+    /** this job's email attempt, or Resend not configured; null when none was reported */
+    email: { ok: boolean; ms: number | null } | 'not configured' | null;
+    /** the reason the latest request was refused (recap.limited) */
+    limited: string | null;
+    at: number;
+  };
+  /** attempt view: cards (attemptCardOf) whose shown row carried the selected attemptId */
+  pinned: Set<string>;
+  /** bumped whenever claudeLine is set, so the typed line restarts for each new response */
+  lineSeq: number;
   dbReads: number[];
   dbWrites: number[];
   dbTable: string | null;
@@ -236,6 +266,9 @@ interface Model {
 
 const freshStt = (): SttCard => ({ open: null, model: null, text: null, final: false });
 const freshPhones = (): Model['phones'] => ({ host: null, openAt: null, closedAt: null, lastAt: null, frames: [], score: null });
+const freshAzure = (): Model['azure'] => ({ status: null, word: null, accuracy: null, ms: null, note: null });
+const freshSparc = (): Model['sparc'] => ({ feats: null, n: null, latency: null, skipped: null, seen: false });
+const freshRecap = (): Model['recap'] => ({ state: 'idle', attempts: null, word: null, ms: null, error: null, email: null, limited: null, at: -Infinity });
 
 const freshModel = (): Model => ({
   count: 0,
@@ -251,11 +284,14 @@ const freshModel = (): Model => ({
   tts: null,
   pitch: null,
   pitchMethod: null,
-  sparc: { feats: null, n: null, latency: null, skipped: null, seen: false },
+  sparc: freshSparc(),
   phones: freshPhones(),
-  azure: { status: null, word: null, accuracy: null, ms: null, note: null },
+  azure: freshAzure(),
   classroom: { stage: null, revision: null, sessions: 0, role: null, verified: null, scaleRooms: null, probe: null, seen: false },
   head: { driver: null, speakingUntil: -1e9, seen: false },
+  recap: freshRecap(),
+  pinned: new Set(),
+  lineSeq: 0,
   dbReads: [],
   dbWrites: [],
   dbTable: null,
@@ -296,6 +332,7 @@ interface Snap {
   azure: Model['azure'];
   classroom: Model['classroom'];
   head: { state: HeadState; driver: string | null };
+  recap: Model['recap'];
   dbReads: number;
   dbWrites: number;
   dbTable: string | null;
@@ -413,6 +450,7 @@ function snapshot(m: Model, now: number): Snap {
     azure: m.azure,
     classroom: m.classroom,
     head: { state: d.head, driver: m.head.driver },
+    recap: m.recap,
     dbReads: within(m.dbReads, now, 60000),
     dbWrites: within(m.dbWrites, now, 60000),
     dbTable: m.dbTable,
@@ -452,9 +490,11 @@ function prunePresence(m: Model): boolean {
 /**
  * Folds one event into the card model. Older events (backfill) never overwrite newer state of the same kind (per
  * speech-to-text service for stt.*). `learner` (a classroom profile id, '' for the whole stream) limits the
- * perception cards to that learner's tabs.
+ * perception cards to that learner's tabs. `attempt` (an attemptId, '' for all) hides rows of other attempts and
+ * keeps the per-attempt cards on that attempt's rows. Returns false for a row hidden by `attempt`: it counted
+ * toward presence and the event count but reaches no card, packet or ticker.
  */
-function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner = '') {
+function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner = '', attempt = ''): boolean {
   m.count += 1;
   const psid = typeof e.payload?.sid === 'string' ? e.payload.sid : null;
   if (psid && Date.now() - e.at <= PRESENCE_MS) {
@@ -471,27 +511,43 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
     }
   }
   if (live) m.stamps.push(now);
+  const p = e.payload ?? {};
+  const att = typeof p.attemptId === 'string' ? p.attemptId : null;
+  if (attempt && att !== null && att !== attempt) return false;
   const counted = live ? now : now - 1; // backfill still counts toward the rolling minute
   const [from, to] = routeOf(e);
   // The browser's request carries a sid; the backend logs a duplicate without one, which is not a request.
   if (from === 'ui' && to === 'backend' && psid) m.backendReqs.push(counted);
-  if (from === 'backend') m.backendOut.push(counted);
+  // the recap job runs in the backend, so its traffic leaves the backend too
+  if (from === 'backend' || from === 'recap') m.backendOut.push(counted);
   // Per-learner view: other tabs still count as traffic and presence (above), but never reach the perception cards.
   // Filtered here, at apply time, so a tab is picked up as soon as its ui.join / ui.ping names the learner.
   const mine = !learner || (psid !== null && m.pidBySid.get(psid) === learner);
-  if (!mine && SCOPED.has(e.kind)) return;
-  const p = e.payload ?? {};
+  if (!mine && SCOPED.has(e.kind)) return true;
   const sttNode = sttNodeOf(p);
   const lastKey = e.kind.startsWith('stt.') ? `${e.kind}:${sttNode}` : e.kind;
   const prev = m.lastAt[lastKey];
-  if (prev !== undefined && e.at < prev) return;
-  m.lastAt[lastKey] = e.at;
+  if (prev !== undefined && e.at < prev) return true;
   // arrival in performance.now() time: backfill lands as far in the past as the row is old, so it never reads live
   const arrived = live ? now : now - Math.max(0, Date.now() - e.at);
   const noteCoach = () => {
     const provider = coachProviderOf(p);
     if (provider && (!m.coachProvider || e.at >= m.coachProvider.at)) m.coachProvider = { provider, at: e.at };
   };
+  // Attempt view: once the selected attempt has filled a per-attempt card, rows without an attemptId leave it alone.
+  const card = attempt ? attemptCardOf(e.kind) : null;
+  if (card) {
+    if (att === attempt) m.pinned.add(card);
+    else if (m.pinned.has(card)) {
+      if (e.kind === 'claude.request') {
+        noteCoach();
+        m.claudeCalls += 1;
+      } else if (e.kind.startsWith('claude.')) noteCoach();
+      else if (e.kind === 'phones.score') m.phones.lastAt = Math.max(m.phones.lastAt ?? -Infinity, arrived);
+      return true;
+    }
+  }
+  m.lastAt[lastKey] = e.at;
   const stt = m.stt[sttNode];
   switch (e.kind) {
     case 'camera.on':
@@ -708,6 +764,7 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
         error: null,
       };
       m.claudeLine = (str(p.line) ?? '').slice(0, 120);
+      m.lineSeq += 1;
       break;
     case 'claude.error':
       noteCoach();
@@ -725,6 +782,33 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
       break;
     case 'video.score':
       m.ui = { ...m.ui, score: str(p.verdict) };
+      break;
+  }
+  if (e.kind.startsWith('recap.') && e.at >= m.recap.at) applyRecap(m, e.kind, p, e.at);
+  return true;
+}
+
+/** recap.*: a start opens a new job (its email and any earlier refusal no longer apply); the rest fill it in. */
+function applyRecap(m: Model, kind: string, p: Record<string, unknown>, at: number) {
+  const r = m.recap;
+  switch (kind) {
+    case 'recap.start':
+      m.recap = { ...freshRecap(), state: 'writing', attempts: num(p.attempts), word: str(p.word)?.slice(0, 24) ?? null, at };
+      break;
+    case 'recap.ready':
+      m.recap = { ...r, state: 'ready', ms: num(p.ms), error: null, at };
+      break;
+    case 'recap.error':
+      m.recap = { ...r, state: 'error', ms: num(p.ms), error: (str(p.error) ?? 'error').slice(0, 40), at };
+      break;
+    case 'recap.limited':
+      m.recap = { ...r, limited: (str(p.reason) ?? 'limited').slice(0, 40), at };
+      break;
+    case 'recap.email':
+      m.recap = { ...r, email: { ok: p.ok === true, ms: num(p.ms) }, at };
+      break;
+    case 'recap.email_skipped':
+      m.recap = { ...r, email: 'not configured', at };
       break;
   }
 }
@@ -1144,8 +1228,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
       }
       sctx.fillStyle = '#7e97b8';
       sctx.fill();
-    }
-  };
+    }  };
 
   const resize = () => {
     const box = canvas.parentElement?.getBoundingClientRect();
@@ -1474,13 +1557,14 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
       const now = performance.now();
       const [from, to] = routeOf(e);
       const src = byId[from];
-      const dst = byId[to];
+      // the recap's email has no node (Resend shows on the Recap card): it lights the recap only
+      const dst = to === 'email' ? undefined : byId[to];
       if (src) {
         src.glowAt = now;
         src.glowAmp = 1;
       }
       if (src && dst && e.kind === 'claude.response') src.haloAt = now;
-      const c = src && dst ? curveFor(from, to) : undefined;
+      const c = src && dst ? curveFor(from, dst.def.id) : undefined;
       if (c && dst) {
         c.heatAt = now;
         const quiet = QUIET.has(e.kind);
@@ -1629,6 +1713,9 @@ function WaveCanvas({ model, idle }: { model: RefObject<Model>; idle: boolean })
 const SPARC_LABELS = ['tongue height', 'tongue front', 'jaw open', 'lip forward', 'lip aperture'];
 
 const onOff = (v: boolean | null | undefined) => (v == null ? '—' : v ? 'on' : 'off');
+
+/** recap.limited reasons as the Recap card says them */
+const LIMIT_REASON: Record<string, string> = { per_learner: 'already pending', per_hour: 'hourly limit' };
 
 /** A card with nothing to show yet: "waiting", or a standby line when the backend said the part is off. */
 function Standby({ line, meta, small = false }: { line: string; meta?: string | null; small?: boolean }) {
@@ -1889,6 +1976,35 @@ function Detail({
         </div>
       );
     }
+    case 'recap': {
+      const r = s.recap;
+      const limited = r.limited ? `limited · ${LIMIT_REASON[r.limited] ?? r.limited}` : null;
+      if (r.state === 'idle') return <Standby line="idle" meta={limited ?? 'no recap yet'} />;
+      const emailFailed = r.email !== null && r.email !== 'not configured' && !r.email.ok;
+      const email =
+        r.email === null
+          ? null
+          : r.email === 'not configured'
+            ? 'email not configured'
+            : r.email.ok
+              ? `emailed${r.email.ms != null ? ` in ${fmt(Math.round(r.email.ms))} ms` : ''}`
+              : 'email failed';
+      return (
+        <div className="dash-card">
+          <p className="dash-readout">
+            <span className="dash-recap__state" data-state={r.state}>{r.state}</span>
+            <span className="dash-rms"><b>{r.ms == null ? '—' : fmt(Math.round(r.ms))}</b> ms</span>
+          </p>
+          <p className="dash-meta">
+            {r.attempts ?? '—'} {r.attempts === 1 ? 'attempt' : 'attempts'}
+            {r.word ? ` · ${r.word}` : ''}
+          </p>
+          {r.state === 'error' && <p className="dash-meta dash-warn">error · {r.error}</p>}
+          {email && <p className={emailFailed ? 'dash-meta dash-warn' : 'dash-meta'}>{email}</p>}
+          {limited && <p className="dash-meta">{limited}</p>}
+        </div>
+      );
+    }
     case 'ui':
       return (
         <div className="dash-card">
@@ -1973,6 +2089,12 @@ export type LiveGraphProps = {
    * (ui.join / ui.ping `pid`). Empty or undefined, and in demo replay, the whole stream as before.
    */
   learner?: string;
+  /**
+   * An attemptId: rows carrying another attemptId still count toward presence and the event count but reach no card,
+   * packet or ticker, and the per-attempt cards (coach model, acoustics, Azure, SPARC, phone score, SpacetimeDB
+   * batches) keep this attempt's rows over rows without an attemptId. Empty or undefined, and in demo replay, off.
+   */
+  attempt?: string;
 };
 
 export default function Dashboard({
@@ -1983,6 +2105,7 @@ export default function Dashboard({
   onEvent,
   onStream,
   learner = '',
+  attempt = '',
 }: LiveGraphProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -2012,6 +2135,10 @@ export default function Dashboard({
   const scope = demo ? '' : learner;
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
+  /** the attempt the cards, packets and ticker are limited to; never in demo replay */
+  const attemptScope = demo ? '' : attempt;
+  const attemptRef = useRef(attemptScope);
+  attemptRef.current = attemptScope;
   const liveSeen = useRef(false);
   const tickSeq = useRef(0);
   const lastStamp = useRef<number | null>(null);
@@ -2019,17 +2146,20 @@ export default function Dashboard({
   const ingest = useCallback((e: TelemetryEvent, animate: boolean) => {
     const now = performance.now();
     const m = model.current;
-    apply(m, e, now, animate, scopeRef.current);
-    if (animate) {
+    const seq = m.lineSeq;
+    const shown = apply(m, e, now, animate, scopeRef.current, attemptRef.current);
+    const newLine = m.lineSeq !== seq && m.claudeLine !== '';
+    // a row of another attempt (shown false) counts toward the header and presence, and reaches nothing else
+    if (shown && animate) {
       engine.current?.fire(e);
-      if (e.kind === 'claude.response' && m.claudeLine) engine.current?.setLine(m.claudeLine);
+      if (newLine) engine.current?.setLine(m.claudeLine);
       if (!QUIET.has(e.kind)) {
         tickSeq.current += 1;
         const [from, to] = routeOf(e);
         m.ticker.unshift({ key: `${e.id}-${tickSeq.current}`, source: TICK_NAME[from] ?? from, target: TICK_NAME[to] ?? to, label: e.label, at: now });
         if (m.ticker.length > 7) m.ticker.length = 7;
       }
-    } else if (e.kind === 'claude.response' && m.claudeLine) {
+    } else if (shown && newLine) {
       engine.current?.setLine(m.claudeLine);
     }
     dirty.current = true;
@@ -2117,6 +2247,22 @@ export default function Dashboard({
     for (const k of Object.keys(m.lastAt)) if (SCOPED.has(k.split(':')[0])) delete m.lastAt[k];
     dirty.current = true;
   }, [scope]);
+
+  // A different attempt (or none) starts the per-attempt cards empty, so no other attempt's result lingers.
+  useEffect(() => {
+    const m = model.current;
+    m.claude = null;
+    m.claudeLine = '';
+    m.pitch = null;
+    m.pitchMethod = null;
+    m.sparc = freshSparc();
+    m.azure = freshAzure();
+    m.phones = { ...m.phones, score: null };
+    m.pinned.clear();
+    for (const k of Object.keys(m.lastAt)) if (attemptCardOf(k)) delete m.lastAt[k];
+    engine.current?.setLine('');
+    dirty.current = true;
+  }, [attemptScope]);
 
   // Live stream: always subscribed, so a live event can end an automatic replay.
   useEffect(() => {
@@ -2260,8 +2406,13 @@ export default function Dashboard({
         })}
 
         <aside className="dash-legend" aria-label="How to read this view">
-          <p className="dash-legend__title">How to read it</p>
           <p>
+            {attemptScope && (
+              <span className="dash-legend__filter" title={attemptScope}>
+                showing attempt <b>{shortId(attemptScope)}</b>
+              </span>
+            )}
+            <span className="dash-legend__title">How to read it</span>
             Each cluster is a part the app really runs; a packet follows the path its event took. Realtime, Ink and the
             coach model are named from each event’s provider. A pale cluster is off on this server.{' '}
             {scope
