@@ -144,6 +144,10 @@ export function createParticles({ camera, count = 180, reducedMotion = false }) 
     setVisible(on) {
       points.visible = !!on;
     },
+    /** The renderer's pixel ratio (point sizes are in drawing-buffer pixels). */
+    setPixelRatio(px) {
+      uniforms.uPx.value = px > 0 ? px : 1;
+    },
     setSwing(dir) {
       swingDir = dir > 0 ? 1 : dir < 0 ? -1 : 0;
     },
