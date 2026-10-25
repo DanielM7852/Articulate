@@ -22,6 +22,8 @@ RUN cd web && npm ci --no-audit --no-fund
 COPY web web
 COPY mouth-demo mouth-demo
 COPY vowel-mapper vowel-mapper
+# web aliases @lesson-rules to the classroom module's lessonRules.ts.
+COPY spacetimedb/src spacetimedb/src
 # `build` runs `tsc --noEmit` first, then copies the MediaPipe wasm into public/ and runs vite build.
 RUN cd web && npm run build
 
