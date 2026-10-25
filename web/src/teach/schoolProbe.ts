@@ -1,5 +1,9 @@
 import { DbConnection } from '../module_bindings';
 import { wsUri } from '../classroom/session';
+import { emit as telemetryEmit } from '../telemetry/client';
+
+/** Seats from the latest openSeats, so a finished probe write can report the whole school's update count. */
+let openedSeats: Seat[] = [];
 
 const SETTINGS = JSON.stringify({
   target: 'i',
@@ -96,6 +100,7 @@ export async function openSeats(rooms: ScaleRoom[], gate: Gate, onReady: (ready:
     seats.push(seat);
     onReady(seats.length * 2);
   }
+  openedSeats = seats;
   return seats;
 }
 
@@ -143,10 +148,15 @@ export async function assignRoom(seat: Seat): Promise<number> {
     }
     return false;
   });
-  return Math.round(performance.now() - started);
+  const ms = Math.round(performance.now() - started);
+  const school = openedSeats.includes(seat) ? openedSeats : [seat];
+  const updates = school.reduce((sum, item) => sum + item.updates, 0);
+  telemetryEmit('ui', 'db', 'classroom.probe', `probe write ${seat.classroomId} acked`, { rooms: school.length, updates, ms });
+  return ms;
 }
 
 export function closeSeats(seats: Seat[]): void {
+  if (seats === openedSeats) openedSeats = [];
   for (const seat of seats) {
     (seat.teacher as DbConnection & { disconnect?: () => void }).disconnect?.();
     (seat.learner as DbConnection & { disconnect?: () => void }).disconnect?.();

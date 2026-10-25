@@ -3,7 +3,19 @@
  * Taps a MediaStream with a private AudioContext + AudioWorklet (inline blob, same approach as attemptAudio.ts),
  * downsamples to 16 kHz mono Int16 and sends ~50 ms binary chunks. Fails soft: any problem reports state
  * 'error'/'closed' and never throws into the caller.
+ * Dashboard telemetry (kind-routed, ui -> db): phones.open, phones.close and a throttled phones.frame.
  */
+
+import { emit as telemetryEmit, throttledEmit } from '../telemetry/client';
+
+/** Host (and port) of the phone service URL, never the path or query. */
+function phonesHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
+}
 
 export interface Phone {
   p: string;
@@ -222,6 +234,12 @@ export function connectPhoneStream(stream: MediaStream, opts: PhoneStreamOptions
     }
     sock.binaryType = 'arraybuffer';
     ws = sock;
+    let opened = false;
+    let messages = 0;
+    sock.onopen = () => {
+      opened = true;
+      telemetryEmit('ui', 'db', 'phones.open', 'phone service open', { provider: 'koellabs', transport: 'ws', host: phonesHost(url) });
+    };
     sock.onmessage = (e) => {
       if (typeof e.data !== 'string') return;
       try {
@@ -232,6 +250,8 @@ export function connectPhoneStream(stream: MediaStream, opts: PhoneStreamOptions
           state = EMPTY_PHONES;
           emit('ready', { engine: m.engine, model: m.model });
         } else if (m.type === 'phones') {
+          messages++;
+          throttledEmit('phones.frame', 500, 'ui', 'db', 'phones.frame', 'phone frames', { n: messages });
           state = mergePhones(state, m);
           if (!closed) opts.onPhones({ ...state, inferMs: m.inferMs, frames: parseFrames(m.frames) });
         } else if (m.type === 'error') {
@@ -248,8 +268,14 @@ export function connectPhoneStream(stream: MediaStream, opts: PhoneStreamOptions
       if (ws === sock) ws = null;
       const wasReady = ready;
       ready = false;
-      if (closed) return;
+      if (closed) {
+        if (opened) telemetryEmit('ui', 'db', 'phones.close', 'phone service closed', { reason: 'client' });
+        return;
+      }
       const reason = classifyClose(e?.code ?? 1006, wasReady);
+      // A service that never answers retries every few seconds: report that at most every 30 s.
+      if (opened) telemetryEmit('ui', 'db', 'phones.close', `phone service ${reason}`, { reason });
+      else throttledEmit('phones.unreachable', 30_000, 'ui', 'db', 'phones.close', `phone service ${reason}`, { reason });
       warnUnavailable(url, reason);
       emit('closed', { reason });
       schedule();

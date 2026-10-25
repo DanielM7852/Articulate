@@ -24,7 +24,7 @@ SETTINGS = dict(azure_speech_key="k", azure_speech_region="westus2")
 
 @pytest.fixture(autouse=True)
 def no_praat(monkeypatch):
-    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones: CLEAR)
+    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones, *_: CLEAR)
 
 
 def mock_assess(monkeypatch, result=ASSESSMENT, delay=0.0, calls=None):
@@ -117,7 +117,7 @@ def test_azure_failure_or_timeout_coaches_without_azure(tmp_path, monkeypatch, f
 
 
 def test_azure_and_acoustics_run_concurrently(tmp_path, monkeypatch):
-    def slow_measure(wav, zones):
+    def slow_measure(wav, zones, *_):
         time.sleep(0.4)
         return CLEAR
 

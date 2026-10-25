@@ -277,11 +277,12 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
                     )
                     features = extract_features(bundle) if bundle is not None else None
                     if features is not None:
+                        ms = round((time.perf_counter() - t0) * 1000)
                         telemetry.emit(
-                            "sparc", "backend", "sparc.features", "SPARC features",
+                            "sparc", "backend", "sparc.features", f"SPARC features ({len(features)})",
                             {**{k: features.get(k) for k in
                                 ("tongueHeight", "tongueFront", "jawOpen", "lipForward", "lipAperture")},
-                             "latencyMs": round((time.perf_counter() - t0) * 1000)},
+                             "ms": ms, "n": len(features), "latencyMs": ms},
                         )
                 if reference or state.settings.pitch_table_enabled:
                     table = await asyncio.to_thread(

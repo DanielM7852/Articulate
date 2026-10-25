@@ -269,6 +269,8 @@ async def coach_consonant(deps: LiveDeps, body: ConsonantRequest) -> ConsonantRe
         azure_ms = _ms(t0, time.perf_counter())
         azure = azure_evidence(assessment, body.part)
         t_model = time.perf_counter()
+    else:
+        azure_pronunciation.emit_skipped("not_configured")
 
     pass_score = settings.consonant_azure_pass
     if llm.is_openai(settings) and deps.model_available:

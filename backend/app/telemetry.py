@@ -137,12 +137,25 @@ def live_model(settings: Settings) -> str:
     return settings.live_openai_model if settings.live_coach_provider == "openai" else settings.live_coach_model
 
 
+def _classroom_configured(settings: Settings) -> bool:
+    """True when the classroom owner credentials are present (the classroom routes can reach the database)."""
+    try:
+        from app.classroom.owner import load_owner
+
+        return load_owner(settings) is not None
+    except Exception:  # noqa: BLE001 - an unreadable owner file means no classroom
+        return False
+
+
 def emit_backend_up(settings: Settings, identity: str) -> None:
     payload = {
         "provider": settings.live_coach_provider,
         "model": live_model(settings),
         "articulation": bool(settings.articulation_configured),
         "pitchTable": bool(getattr(settings, "pitch_table_enabled", False)),
+        "praat": bool(getattr(settings, "word_acoustics_enabled", False)),
+        "azure": bool(settings.azure_configured),
+        "classroom": _classroom_configured(settings),
         "coordination": settings.live_coordination,
         "telemetryIdentity": identity,
     }

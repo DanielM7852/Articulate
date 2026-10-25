@@ -8,7 +8,13 @@ from pydantic import BaseModel, Field
 from app.classroom.owner import browser_database_uri, dev_classroom_enabled, load_owner
 from uuid import uuid4
 
-from app.classroom.provision import ClassroomError, commit_verified_summary, open_dev_session, open_scale_school
+from app.classroom.provision import (
+    ClassroomError,
+    commit_verified_summary,
+    emit_classroom,
+    open_dev_session,
+    open_scale_school,
+)
 
 router = APIRouter()
 
@@ -52,6 +58,7 @@ async def classroom_session(body: DevSessionRequest, request: Request) -> dict:
     try:
         session = await open_dev_session(request.app.state.settings, body.role, body.name, body.classroom)
         session["uri"] = _visible_uri(request, session["uri"])
+        emit_classroom("classroom.session", f"{body.role} session open", {"role": body.role})
         return session
     except ClassroomError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
@@ -72,6 +79,7 @@ async def classroom_scale(request: Request) -> dict:
         room["teacher"]["uri"] = uri
         room["learner"]["uri"] = uri
     school["uri"] = uri
+    emit_classroom("classroom.scale", f"scale school open ({len(school['rooms'])} rooms)", {"rooms": len(school["rooms"])})
     return school
 
 

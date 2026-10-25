@@ -12,11 +12,20 @@ from typing import Any
 
 import httpx
 
+from app import telemetry
 from app.classroom.owner import load_owner
 from app.config import Settings
 from app.paths import BACKEND_ROOT
 
 _NAMES = __import__("re").compile(r"^[a-z0-9-]{1,24}$")
+
+
+def emit_classroom(kind: str, label: str, payload: dict[str, Any]) -> None:
+    """Dashboard telemetry for the classroom database (kind-routed, backend -> db). Never raises."""
+    try:
+        telemetry.emit("backend", "db", kind, label, payload)
+    except Exception:  # noqa: BLE001 - telemetry never affects the classroom
+        pass
 
 
 class ClassroomError(RuntimeError):
@@ -146,4 +155,7 @@ async def commit_verified_summary(settings: Settings, args: list[Any]) -> bool:
         await call_reducer(owner, owner["token"], "commit_verified_summary", args)
     except ClassroomError:
         return False
+    verified = len(args) > 5 and args[5] == "verified"
+    emit_classroom("classroom.summary", "verified summary stored" if verified else "synthetic summary stored",
+                   {"verified": verified})
     return True

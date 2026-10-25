@@ -4,6 +4,14 @@
 // useAvaRealtime), so no remote audio track is played. The secret is only held in memory and never logged.
 
 import { openAecMic } from '../conversation/audio/micAec';
+import { emit as telemetryEmit } from '../telemetry/client';
+
+/** Dashboard telemetry for the OpenAI speech-to-text leg (provider openai). Never affects the session. */
+function sttTelemetry(source: 'mic' | 'stt', target: 'stt' | 'ui', kind: string, label: string, payload: Record<string, unknown>, model: string | null): void {
+  try {
+    telemetryEmit(source, target, kind, label, { ...payload, provider: 'openai', ...(model ? { model } : {}) });
+  } catch { /* telemetry never breaks the session */ }
+}
 
 export interface RealtimeSecret {
   client_secret: string;
@@ -161,7 +169,10 @@ export class RealtimeSession {
 
   private setState(s: RealtimeState): void {
     if (this._state === s) return;
+    const prev = this._state;
     this._state = s;
+    if (s === 'open') sttTelemetry('mic', 'stt', 'stt.open', 'realtime session open', {}, this.model);
+    else if (prev === 'open') sttTelemetry('mic', 'stt', 'stt.close', 'realtime session closed', {}, this.model);
     this.emit('state', s);
   }
 
@@ -487,6 +498,10 @@ export class RealtimeSession {
       }
       case 'conversation.item.input_audio_transcription.completed':
         this.emit('userTranscript', { itemId: str(ev.item_id), transcript: str(ev.transcript) });
+        {
+          const heard = str(ev.transcript).trim();
+          sttTelemetry('stt', 'ui', 'stt.transcript', `heard ${heard.slice(0, 40)}`, { text: heard.slice(0, 80), final: true }, this.model);
+        }
         break;
       case 'input_audio_buffer.speech_started':
         this.emit('speechStarted', { itemId: str(ev.item_id) || null });

@@ -204,7 +204,8 @@ def test_anonymous_identity_minted_cached_and_announced(tmp_path):
     assert args[:4] == ["backend", "db", "backend.up", "backend online"]
     assert json.loads(args[4]) == {
         "provider": "openai", "model": settings.live_openai_model, "articulation": True,
-        "pitchTable": settings.pitch_table_enabled, "coordination": "local", "telemetryIdentity": "anonymous",
+        "pitchTable": settings.pitch_table_enabled, "praat": settings.word_acoustics_enabled, "azure": False,
+        "classroom": False, "coordination": "local", "telemetryIdentity": "anonymous",
     }
     assert cloud.kinds() == ["backend.up", "pitch.extract"]
     cached = json.loads(telemetry.identity_path(settings).read_text(encoding="utf-8"))

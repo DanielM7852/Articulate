@@ -2,6 +2,12 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import type { AssemblyOptions, MouthCueId, MouthDemo, MouthView, SpeakOptions, SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
 import { acquireGuide, releaseGuide } from '../guide/guide';
 import type { SoundId } from '../state/types';
+import { emit as telemetryEmit, throttledEmit } from '../telemetry/client';
+
+/** The mouth-demo driver the guide ended up on ("auto" tries TalkingHead, then falls back to three.js). */
+function headDriver(name: string | undefined): 'talkinghead' | 'three' | 'unknown' {
+  return name === 'talkinghead' || name === 'three' ? name : 'unknown';
+}
 
 /**
  * The 3D guide: the mouth-demo workstream's hologram face, mounted inside React.
@@ -70,6 +76,7 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
   const demoRef = useRef<MouthDemo | null>(null);
+  const speakAtRef = useRef<number | null>(null);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
   useImperativeHandle(
@@ -88,7 +95,10 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
         demoRef.current?.stop();
       },
       speak(opts) {
-        return demoRef.current?.speak(opts) ?? null;
+        const demo = demoRef.current;
+        if (!demo) return null;
+        speakAtRef.current = performance.now();
+        return demo.speak(opts);
       },
       assemble(opts) {
         return demoRef.current?.assemble(opts) ?? Promise.resolve(false);
@@ -119,10 +129,19 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
     const host = hostRef.current;
     if (!host) return;
     let cancelled = false;
+    // Dashboard telemetry (kind-routed, ui -> db): which driver drew the head, and when its speech starts.
+    const onSpeechStart = () => {
+      const at = speakAtRef.current;
+      speakAtRef.current = null;
+      throttledEmit('head.speak', 2000, 'ui', 'db', 'head.speak', 'Ava speaking', at === null ? {} : { ms: Math.round(performance.now() - at) });
+    };
+    host.addEventListener('speech:start', onSpeechStart);
     acquireGuide(host, { startDispersed })
       .then((demo) => {
         if (cancelled) return;
         demoRef.current = demo;
+        const driver = headDriver(demo.driverName);
+        telemetryEmit('ui', 'db', 'head.ready', `head ready (${driver})`, { driver });
         setState({ kind: 'ready' });
       })
       .catch((err: unknown) => {
@@ -133,6 +152,7 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
       });
     return () => {
       cancelled = true;
+      host.removeEventListener('speech:start', onSpeechStart);
       // a screen's start picture and backdrop do not follow the guide to the next screen
       demoRef.current?.setStartShape(null);
       demoRef.current?.setBackdrop(null);

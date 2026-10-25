@@ -2,7 +2,9 @@
 
 Every subsystem reports small, non-sensitive events to one public SpacetimeDB table.
 The teaching console subscribes to that table from `teach.html#/live`. `/#/dashboard` opens the same section.
-No media, transcripts, or profile ids are written here. A lesson event may add a command id and a revision.
+No media (audio, video, images) and no profile ids are written here. Some short text is public: `stt.transcript`
+carries up to 80 chars of what the learner said, and `coach.decision` labels and `claude.response` lines carry up
+to 120 chars of the coach's caption or output. A lesson event may add a command id and a revision.
 
 ## Table `telemetry_event` (public)
 
@@ -54,6 +56,8 @@ At most 400 rows. When an insert pushes the count over, the oldest rows among th
 | claude    | Anthropic Claude (coach decisions, notes, insights)          | Anthropic     |
 | ui        | the learner's screen                                         | browser       |
 
+The dashboard also derives extra nodes from event kinds and payload fields; see "Kind-routed components".
+
 ## Event kinds and payloads
 
 | kind               | source -> target    | payload (JSON)                                                         |
@@ -63,8 +67,8 @@ At most 400 rows. When an insert pushes the count over, the oldest rows among th
 | lip.batch          | mediapipe -> db     | `{frames, seq}`                                                        |
 | audio.frame        | audio -> db         | `{f1, f2, rms, env}` env = 32 floats 0..1 downsampled envelope         |
 | audio.batch        | audio -> db         | `{frames, seq}`                                                        |
-| stt.open / stt.close | mic -> stt        | `{}`                                                                   |
-| stt.transcript     | stt -> ui           | `{text, final}` text truncated to 80 chars                             |
+| stt.open / stt.close | mic -> stt        | `{provider, model?}` provider `openai` (Realtime, word lesson; `model` from the session secret) or `cartesia` (Ink) |
+| stt.transcript     | stt -> ui           | `{text, final, provider, model?}` text truncated to 80 chars; OpenAI sends one per completed transcription (`final: true`) |
 | tts.token          | backend -> tts      | `{}`                                                                   |
 | tts.speak          | ui -> tts           | `{chars, voice}`                                                       |
 | tts.audio          | tts -> ui           | `{ms}` duration of audio received                                      |
@@ -73,20 +77,43 @@ At most 400 rows. When an insert pushes the count over, the oldest rows among th
 | claude.request     | backend -> claude   | `{model, purpose}` purpose in decide, word, notes, insight, session, ask |
 | claude.response    | claude -> backend   | `{model, purpose, latencyMs, inputTokens, outputTokens, line}` line <= 120 chars |
 | claude.error       | claude -> backend   | `{model, purpose, latencyMs, error}`                                   |
-| pitch.extract      | backend -> pitch    | `{seconds}`                                                            |
-| pitch.result       | pitch -> backend    | `{f0Mean, f0Min, f0Max, voicedPct, latencyMs}`                         |
+| pitch.extract      | backend -> pitch    | `{seconds, method}` method `praat` (Parselmouth: word-coach acoustics and the pitch table) or `pyin` (legacy librosa path) |
+| pitch.result       | pitch -> backend    | `{method, ms, latencyMs, f0Mean, f0Min, f0Max, voicedPct, f1Hz?, f2Hz?}` F0 in Hz over voiced frames (null when none), voicedPct 0..100, f1Hz/f2Hz median formants (Praat only, omitted when not measured); latencyMs = ms, kept for older readers; label "f0 <mean> Hz" for Praat. Not sent when the pass fails or times out |
 | sparc.request      | backend -> sparc    | `{seconds}`                                                            |
-| sparc.features     | sparc -> backend    | `{tongueHeight, tongueFront, jawOpen, lipForward, lipAperture, latencyMs}` |
+| sparc.features     | sparc -> backend    | `{tongueHeight, tongueFront, jawOpen, lipForward, lipAperture, ms, n, latencyMs}` n = number of feature keys extracted, ms = collector round trip (latencyMs repeats it) |
 | sparc.skipped      | backend -> sparc    | `{reason}`                                                             |
 | db.read / db.write | backend -> db       | `{table, rows}`                                                        |
-| backend.up         | backend -> db       | `{provider, model, articulation, pitchTable, coordination, telemetryIdentity}` once at startup when telemetry goes live; label "backend online"; telemetryIdentity is `anonymous` or `configured` |
+| backend.up         | backend -> db       | `{provider, model, articulation, pitchTable, praat, azure, classroom, coordination, telemetryIdentity}` once at startup when telemetry goes live; label "backend online"; praat = word acoustics enabled, azure = both Azure Speech settings set, classroom = classroom owner credentials present; telemetryIdentity is `anonymous` or `configured` |
 | video.score        | backend -> ui       | `{verdict, okFrames}`                                                  |
 | ui.join            | ui -> db            | `{sid, ua, pid?}` ua = coarse device class: phone, tablet or desktop; pid = classroom profile id, joined learners only; label "learner joined" |
 | ui.ping            | ui -> db            | `{sid, pid?}` every 20 s while the tab is visible                      |
 | ui.leave           | ui -> db            | `{sid}` on `pagehide`, best effort                                     |
+| azure.request      | backend -> db       | `{word}` before each Azure Pronunciation Assessment call (word coach and consonant coach) |
+| azure.result       | backend -> db       | `{ms, ok: true, accuracy?}` accuracy = whole-word AccuracyScore 0..100; no transcript, no per-phoneme scores |
+| azure.error        | backend -> db       | `{ms, error, status?}` error = exception type name, `HTTPStatusError` (with `status`) or `RecognitionFailed` |
+| azure.skipped      | backend -> db       | `{reason, ms?}` reason `not_configured`, `timeout` (with ms), `no_audio`, `unclear`, `part_only` or `local_pass` |
+| phones.open        | ui -> db            | `{provider: "koellabs", transport: "ws", host}` host = host:port of the phone service URL only |
+| phones.close       | ui -> db            | `{reason}` `client`, `closed`, `unreachable` or `origin-rejected`; a service that never opens reports at most every 30 s |
+| phones.frame       | ui -> db            | `{n}` phones messages received on this socket so far; at most every 500 ms |
+| phones.score       | ui -> db            | `{word, ms, ok}` after each POST /v1/phones/score; word falls back to the target phones when the caller gives none |
+| classroom.session  | backend -> db       | `{role}` teacher or learner, when a development classroom session is opened |
+| classroom.summary  | backend -> db       | `{verified}` after `commit_verified_summary` stores a row (false for synthetic fixtures) |
+| classroom.scale    | backend -> db       | `{rooms}` when the scale school is opened                              |
+| classroom.probe    | ui -> db            | `{rooms, updates, ms}` when a school probe write is acknowledged; updates = subscription updates seen across all rooms |
+| head.ready         | ui -> db            | `{driver}` `talkinghead`, `three` or `unknown`, once per guide mount   |
+| head.speak         | ui -> db            | `{ms?}` when the guide's speech playback starts, at most every 2 s; ms = delay from `speak()` to playback |
 
 Rates: lip.frame and audio.frame are throttled to at most 5 per second each by the browser.
 Everything else is one event per occurrence.
+
+## Kind-routed components
+
+The deployed reducer only accepts the twelve node ids above, so components it does not name are identified by the
+event kind and payload fields instead of new ids. `azure.*` (Azure Pronunciation Assessment), `phones.*` (the KoelLabs
+phone recognizer in `services/phones`, called from the browser), `classroom.*` (the classroom database) and `head.*`
+(Ava's 3D head) all travel as `backend -> db` or `ui -> db`. The `provider` field on `stt.*` separates OpenAI Realtime
+from Cartesia Ink, and the `method` field on `pitch.*` separates Praat from pYIN. The dashboard routes these packets by
+kind and field and draws each of these components as its own node.
 
 ## Session id and presence
 
@@ -227,7 +254,9 @@ canonical tesselation, like Ava's head.
 | yaw, pitch, roll | head pose in degrees from the LipFrame, one decimal |
 
 Normalisation: the same nose-centred square as v1 and v2 (centre = landmark 1, half-size = 1.6 x
-inter-ocular), x and y quantised to 0..255 across the square and clamped; z = landmark z divided by
+inter-ocular), x and y quantised to 0..255 across the square and clamped. Landmark x and z are in image-width
+units and y in image-height units, so x and z are multiplied by the frame aspect (width / height) first and the
+square is square in pixels (v1 points use the same aspect correction); z = landmark z divided by
 inter-ocular, mapped from [-0.6, 0.6] to 0..255 (0 = nearest the camera). The dashboard decodes x and y
 as byte / 255, the same 0..1 square as v2.
 
