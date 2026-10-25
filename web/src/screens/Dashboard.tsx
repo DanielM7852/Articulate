@@ -23,7 +23,11 @@ import '../styles/dashboard.css';
 const W = 1600;
 const H = 900;
 
-type Loc = 'browser' | 'server' | 'Cartesia' | 'Anthropic' | 'maincloud';
+/**
+ * Where a node runs. The coach model and speech to text take their tag from the live provider; 'LLM' and 'STT' are
+ * the neutral tags shown before any evidence arrives.
+ */
+type Loc = 'browser' | 'server' | 'Cartesia' | 'Anthropic' | 'OpenAI' | 'LLM' | 'STT' | 'maincloud';
 
 interface NodeDef {
   id: NodeId;
@@ -45,19 +49,22 @@ const NODES: NodeDef[] = [
   { id: 'camera', name: 'Camera', caption: 'webcam capture', loc: 'browser', x: 404, y: 112, r: 28, n: 150, ann: [446, 92, 140] },
   { id: 'mediapipe', name: 'MediaPipe', caption: 'FaceLandmarker → LipFrame', loc: 'browser', x: 404, y: 262, r: 40, n: 230, ann: [44, 76, 306], align: 'right' },
   { id: 'mic', name: 'Microphone', caption: 'microphone capture', loc: 'browser', x: 84, y: 540, r: 28, n: 150, ann: [52, 580, 170] },
-  { id: 'audio', name: 'Audio', caption: 'formant / loudness analysis (vowel-mapper worklet)', loc: 'browser', x: 300, y: 568, r: 40, n: 230, ann: [96, 652, 214], align: 'right' },
-  { id: 'stt', name: 'Ink', caption: 'Cartesia Ink speech to text', loc: 'Cartesia', x: 664, y: 176, r: 40, n: 220, ann: [660, 228, 214] },
+  { id: 'audio', name: 'Audio', caption: 'spectrum and formant analysis in the browser', loc: 'browser', x: 300, y: 568, r: 40, n: 230, ann: [96, 652, 214], align: 'right' },
+  { id: 'stt', name: 'Speech to text', caption: 'OpenAI Realtime in the word lesson · Cartesia Ink in hands-free practice', loc: 'STT', x: 664, y: 176, r: 40, n: 220, ann: [660, 228, 214] },
   { id: 'tts', name: 'Sonic', caption: 'Cartesia Sonic text to speech (Ava’s voice)', loc: 'Cartesia', x: 930, y: 176, r: 40, n: 220, ann: [930, 228, 196] },
-  { id: 'backend', name: 'Backend', caption: 'FastAPI app', loc: 'server', x: 790, y: 488, r: 52, n: 320, ann: [566, 404, 160], align: 'right' },
-  { id: 'pitch', name: 'Pitch', caption: 'librosa F0 extraction', loc: 'server', x: 566, y: 762, r: 34, n: 190, ann: [322, 742, 198], align: 'right' },
-  { id: 'sparc', name: 'SPARC', caption: 'articulatory model service', loc: 'server', x: 1010, y: 650, r: 38, n: 210, ann: [1058, 606, 184] },
+  { id: 'backend', name: 'Backend', caption: 'FastAPI app', loc: 'server', x: 790, y: 488, r: 52, n: 320, ann: [536, 404, 190], align: 'right' },
+  { id: 'pitch', name: 'Acoustics', caption: 'Praat/Parselmouth pitch and formants', loc: 'server', x: 566, y: 762, r: 34, n: 190, ann: [324, 712, 200], align: 'right' },
+  { id: 'sparc', name: 'SPARC', caption: 'articulatory model collector (needs ARTICULATION_URL)', loc: 'server', x: 1010, y: 650, r: 38, n: 210, ann: [1058, 606, 184] },
   { id: 'db', name: 'SpacetimeDB', caption: 'live tables, subscriptions', loc: 'maincloud', x: 790, y: 768, r: 44, n: 260, ann: [846, 736, 170] },
-  { id: 'claude', name: 'Claude', caption: 'coach decisions, notes, insights', loc: 'Anthropic', x: 1212, y: 470, r: 112, n: 760, ann: [1262, 612, 312] },
+  { id: 'claude', name: 'Coach model', caption: 'language model: coach decisions, notes, insights', loc: 'LLM', x: 1212, y: 470, r: 112, n: 760, ann: [1262, 612, 312] },
   { id: 'ui', name: 'Learner', caption: 'the learner’s screen', loc: 'browser', x: 1478, y: 196, r: 44, n: 260, ann: [1416, 250, 170] },
 ];
 const NODE = Object.fromEntries(NODES.map((n) => [n.id, n])) as Record<NodeId, NodeDef>;
 
-/** Edges drawn on the paper: every source -> target pair in the contract, plus mic -> audio. Bend is a fraction of the length. */
+/**
+ * Edges drawn on the paper: the source -> target pairs in docs/telemetry.md, plus mic -> audio. A pair missing here
+ * still animates (curveFor makes an undrawn lane on first use) but has no dotted line. Bend is a fraction of the length.
+ */
 const EDGES: [NodeId, NodeId, number][] = [
   ['camera', 'mediapipe', 0.06],
   ['mic', 'audio', 0.06],
@@ -77,12 +84,13 @@ const EDGES: [NodeId, NodeId, number][] = [
   ['backend', 'sparc', 0.16],
   ['sparc', 'backend', 0.16],
   ['backend', 'db', 0.05],
+  ['ui', 'db', 0.2], // ui.join / ui.ping / ui.leave; bowed clear of the coach model's halo
 ];
 
 /** Perception streams (10 Hz): they drive the wireframe and the audio equaliser in place, no packets. */
 const PERCEPT = new Set(['lip.mesh', 'audio.spectrum']);
 /** High-rate kinds: they animate but stay out of the ticker. */
-const QUIET = new Set(['lip.frame', 'audio.frame', 'lip.batch', 'audio.batch', ...PERCEPT]);
+const QUIET = new Set(['lip.frame', 'audio.frame', 'lip.batch', 'audio.batch', 'ui.ping', ...PERCEPT]);
 
 const PACKET_MS = 600;
 const RIPPLE_MS = 760;
@@ -97,6 +105,12 @@ const FADE_MS = 500;
 const MAX_DOTS = 24;
 /** A perception stream with no frame for this long reads as gone (wireframe fades, equaliser relaxes). */
 const PERCEPT_MS = 1500;
+/** The camera reads "on" only while camera.on was seen and a lip.frame or lip.mesh arrived this recently. */
+const FACE_MS = 5000;
+/** A microphone stream with no spectrum for this long reads as closed. */
+const MIC_QUIET_MS = 3000;
+/** sparc.features are EMA units; the bars span -SPARC_RANGE..+SPARC_RANGE around a centre line. */
+const SPARC_RANGE = 2;
 /** lip.mesh v1: 81 points as flat x, y pairs (docs/telemetry.md, "Perception streams"). */
 const MESH_LEN = 162;
 const MESH_LERP_MS = 80;
@@ -125,13 +139,37 @@ interface TickItem {
   at: number;
 }
 
+type CoachProvider = 'openai' | 'anthropic';
+type SttProvider = 'openai' | 'cartesia';
+type CameraState = 'waiting' | 'on' | 'off';
+type MicState = 'waiting' | 'listening' | 'closed';
+/** MediaPipe card: a live mesh, lip.frame tracking without a mesh, or no face */
+type FaceState = 'mesh' | 'tracking' | 'none';
+
+const PROVIDER_TAG: Record<CoachProvider, Loc> = { openai: 'OpenAI', anthropic: 'Anthropic' };
+const STT_TAG: Record<SttProvider, Loc> = { openai: 'OpenAI', cartesia: 'Cartesia' };
+const STT_NAME: Record<SttProvider, string> = { openai: 'OpenAI Realtime', cartesia: 'Cartesia Ink' };
+
+interface BackendUp {
+  provider: CoachProvider | null;
+  model: string | null;
+  articulation: boolean | null;
+  pitchTable: boolean | null;
+}
+
 interface Model {
   count: number;
   stamps: number[];
-  camera: boolean | null;
-  micOpen: boolean | null;
-  lip: { ok: boolean; opening: number; width: number; rounding: number } | null;
-  audio: { f1: number; f2: number; rms: number; env: number[] } | null;
+  /** the latest camera.on / camera.off and the tab that sent it */
+  camera: { on: boolean; sid: string | null } | null;
+  /** any microphone evidence yet: audio.spectrum or an stt.* event */
+  micSeen: boolean;
+  /** performance.now() of the newest sign of an open stream (audio.spectrum, stt.open) */
+  micAt: number | null;
+  /** latest lip.frame; `at` is its arrival in performance.now() time (backfill lands in the past) */
+  lip: { ok: boolean; opening: number; width: number; rounding: number; at: number; sid: string | null } | null;
+  /** f1 / f2 stay null when the frame had none (outside practice attempts) */
+  audio: { f1: number | null; f2: number | null; rms: number; env: number[] } | null;
   /**
    * latest lip.mesh; `at` is performance.now() on arrival. v1: `pts` 81 points 0..255. v2: `xyz` the full mesh,
    * decoded once on arrival (dotFace.ts frame) from a wire v2 (replay) or v3 (live) payload; `n` is the point
@@ -141,13 +179,30 @@ interface Model {
   /** latest audio.spectrum, bins 0..1 */
   spectrum: { bins: number[]; rms: number; at: number; sid: string | null } | null;
   stt: { text: string; final: boolean } | null;
+  sttProvider: SttProvider | null;
   tts: { chars: number; voice: string; ms: number | null } | null;
-  pitch: { mean: number; min: number; max: number; voiced: number | null; latency: number | null } | null;
-  sparc: { feats: number[] | null; latency: number | null; skipped: string | null };
+  /** voiced is 0..100; f1 / f2 (Hz) only when the backend measured formants */
+  pitch: {
+    mean: number | null;
+    min: number | null;
+    max: number | null;
+    voiced: number | null;
+    latency: number | null;
+    method: string | null;
+    f1: number | null;
+    f2: number | null;
+  } | null;
+  /** method named by the latest pitch.extract or pitch.result */
+  pitchMethod: string | null;
+  /** feats are signed EMA units; seen is true once any sparc.* event arrived */
+  sparc: { feats: number[] | null; latency: number | null; skipped: string | null; seen: boolean };
   dbReads: number[];
   dbWrites: number[];
   dbTable: string | null;
   claude: { model: string; purpose: string; latency: number | null; inTok: number | null; outTok: number | null; error: string | null } | null;
+  /** who answered the latest claude.* event (or a newer backend.up); `at` is its event time */
+  coachProvider: { provider: CoachProvider; at: number } | null;
+  backendUp: BackendUp | null;
   claudeCalls: number;
   claudeLine: string;
   backendReqs: number[];
@@ -163,19 +218,24 @@ const freshModel = (): Model => ({
   count: 0,
   stamps: [],
   camera: null,
-  micOpen: null,
+  micSeen: false,
+  micAt: null,
   lip: null,
   audio: null,
   mesh: null,
   spectrum: null,
   stt: null,
+  sttProvider: null,
   tts: null,
   pitch: null,
-  sparc: { feats: null, latency: null, skipped: null },
+  pitchMethod: null,
+  sparc: { feats: null, latency: null, skipped: null, seen: false },
   dbReads: [],
   dbWrites: [],
   dbTable: null,
   claude: null,
+  coachProvider: null,
+  backendUp: null,
   claudeCalls: 0,
   claudeLine: '',
   backendReqs: [],
@@ -189,8 +249,9 @@ const freshModel = (): Model => ({
 interface Snap {
   count: number;
   rate: number;
-  camera: boolean | null;
-  micOpen: boolean | null;
+  cameraState: CameraState;
+  micState: MicState;
+  faceState: FaceState;
   lip: Model['lip'];
   audio: Model['audio'];
   meshLive: boolean;
@@ -199,13 +260,18 @@ interface Snap {
   /** only while the stream is live */
   spectrum: { bins: number[]; rms: number } | null;
   stt: Model['stt'];
+  sttProvider: SttProvider | null;
   tts: Model['tts'];
   pitch: Model['pitch'];
+  pitchMethod: string | null;
   sparc: Model['sparc'];
   dbReads: number;
   dbWrites: number;
   dbTable: string | null;
   claude: Model['claude'];
+  /** the latest provider evidence, else backend.up's idle default; null before either */
+  coachProvider: CoachProvider | null;
+  backendUp: BackendUp | null;
   claudeCalls: number;
   backendRpm: number;
   backendOut: number;
@@ -227,25 +293,62 @@ function within(list: number[], now: number, ms: number) {
 const meshLive = (m: Model, now: number) => m.mesh !== null && now - m.mesh.at < PERCEPT_MS;
 const specLive = (m: Model, now: number) => m.spectrum !== null && now - m.spectrum.at < PERCEPT_MS;
 
+/** 'openai' | 'anthropic' from a payload's `provider`, else inferred from its model (rows without one, e.g. the replay). */
+function coachProviderOf(p: Record<string, unknown>): CoachProvider | null {
+  const v = str(p.provider)?.toLowerCase();
+  if (v === 'openai' || v === 'anthropic') return v;
+  const model = str(p.model)?.toLowerCase() ?? '';
+  if (model.startsWith('gpt-')) return 'openai';
+  if (model.startsWith('claude-')) return 'anthropic';
+  return null;
+}
+
+/** 'openai' (Realtime) | 'cartesia' (Ink). Rows from before the field existed all came from Cartesia Ink. */
+function sttProviderOf(p: Record<string, unknown>): SttProvider | null {
+  if (p.provider === undefined) return 'cartesia';
+  const v = str(p.provider)?.toLowerCase();
+  return v === 'openai' || v === 'cartesia' ? v : null;
+}
+
+/** States derived from stream liveness; they change with time alone, so the card loop re-renders on their key. */
+function derive(m: Model, now: number) {
+  const ml = meshLive(m, now);
+  const sl = specLive(m, now);
+  const faceAt = Math.max(m.lip?.at ?? -Infinity, m.mesh?.at ?? -Infinity);
+  const cameraState: CameraState =
+    m.camera?.on === true && now - faceAt < FACE_MS ? 'on' : m.camera === null && faceAt === -Infinity ? 'waiting' : 'off';
+  // stt.close never closes the mic on its own: the spectrum decides, with a grace of MIC_QUIET_MS
+  const micState: MicState = sl || (m.micAt !== null && now - m.micAt <= MIC_QUIET_MS) ? 'listening' : m.micSeen ? 'closed' : 'waiting';
+  const lipLive = m.lip !== null && m.lip.ok && now - m.lip.at < PERCEPT_MS;
+  const faceState: FaceState = ml ? 'mesh' : lipLive ? 'tracking' : 'none';
+  return { ml, sl, cameraState, micState, faceState, key: `${ml}|${sl}|${cameraState}|${micState}|${faceState}` };
+}
+
 function snapshot(m: Model, now: number): Snap {
+  const d = derive(m, now);
   return {
     count: m.count,
     rate: within(m.stamps, now, 10000) / 10,
-    camera: m.camera,
-    micOpen: m.micOpen,
+    cameraState: d.cameraState,
+    micState: d.micState,
+    faceState: d.faceState,
     lip: m.lip,
     audio: m.audio,
-    meshLive: meshLive(m, now),
+    meshLive: d.ml,
     meshPoints: m.mesh ? m.mesh.n : FACE_POINTS,
-    spectrum: m.spectrum && specLive(m, now) ? { bins: m.spectrum.bins, rms: m.spectrum.rms } : null,
+    spectrum: m.spectrum && d.sl ? { bins: m.spectrum.bins, rms: m.spectrum.rms } : null,
     stt: m.stt,
+    sttProvider: m.sttProvider,
     tts: m.tts,
     pitch: m.pitch,
+    pitchMethod: m.pitch?.method ?? m.pitchMethod,
     sparc: m.sparc,
     dbReads: within(m.dbReads, now, 60000),
     dbWrites: within(m.dbWrites, now, 60000),
     dbTable: m.dbTable,
     claude: m.claude,
+    coachProvider: m.coachProvider?.provider ?? m.backendUp?.provider ?? null,
+    backendUp: m.backendUp,
     claudeCalls: m.claudeCalls,
     backendRpm: within(m.backendReqs, now, 60000),
     backendOut: within(m.backendOut, now, 60000),
@@ -287,23 +390,34 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
     }
   }
   if (live) m.stamps.push(now);
+  const counted = live ? now : now - 1; // backfill still counts toward the rolling minute
+  // The browser's coach.request carries a sid; the backend logs a duplicate without one, which is not a request.
+  if (e.kind === 'coach.request' && psid) m.backendReqs.push(counted);
   const prev = m.lastAt[e.kind];
   if (prev !== undefined && e.at < prev) return;
   m.lastAt[e.kind] = e.at;
   const p = e.payload ?? {};
-  const counted = live ? now : now - 1; // backfill still counts toward the rolling minute
+  // arrival in performance.now() time: backfill lands as far in the past as the row is old, so it never reads live
+  const arrived = live ? now : now - Math.max(0, Date.now() - e.at);
+  const noteCoach = () => {
+    const provider = coachProviderOf(p);
+    if (provider && (!m.coachProvider || e.at >= m.coachProvider.at)) m.coachProvider = { provider, at: e.at };
+  };
   switch (e.kind) {
     case 'camera.on':
-      m.camera = true;
+      m.camera = { on: true, sid: psid };
       break;
     case 'camera.off':
-      m.camera = false;
+      m.camera = { on: false, sid: psid };
       break;
     case 'stt.open':
-      m.micOpen = true;
+      m.micSeen = true;
+      m.micAt = Math.max(m.micAt ?? -Infinity, arrived);
+      m.sttProvider = sttProviderOf(p) ?? m.sttProvider;
       break;
     case 'stt.close':
-      m.micOpen = false;
+      m.micSeen = true;
+      m.sttProvider = sttProviderOf(p) ?? m.sttProvider;
       break;
     case 'lip.frame':
       m.lip = {
@@ -311,14 +425,26 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
         opening: clamp01(num(p.opening) ?? 0),
         width: clamp01(num(p.width) ?? 0),
         rounding: clamp01(num(p.rounding) ?? 0),
+        at: arrived,
+        sid: psid,
       };
-      if (m.camera === null) m.camera = true;
       break;
     case 'audio.frame': {
       const env = Array.isArray(p.env) ? p.env.map((v) => clamp01(Number(v) || 0)).slice(0, 32) : [];
-      m.audio = { f1: num(p.f1) ?? 0, f2: num(p.f2) ?? 0, rms: clamp01(num(p.rms) ?? 0), env };
+      m.audio = { f1: num(p.f1), f2: num(p.f2), rms: clamp01(num(p.rms) ?? 0), env };
       break;
     }
+    case 'ui.leave':
+      // the tab is gone: its camera, face and microphone stop reading live at once
+      if (!psid) break;
+      if (m.camera?.sid === psid) m.camera = { on: false, sid: psid };
+      if (m.lip?.sid === psid) m.lip = null;
+      if (m.mesh?.sid === psid) m.mesh = null;
+      if (m.spectrum?.sid === psid) {
+        m.spectrum = null;
+        m.micAt = null;
+      }
+      break;
     case 'lip.mesh': {
       // Backfill is stale by definition; and one face at a time: a second tab waits until the first goes quiet.
       if (!live) break;
@@ -332,8 +458,7 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
         // v1 stays valid; while full-mesh (v2/v3) frames from this tab are flowing they win
         if (m.mesh && m.mesh.v === 2 && m.mesh.sid === psid && now - m.mesh.at < PERCEPT_MS) break;
         m.mesh = { v: 1, pts: p.pts.map((v) => Math.min(255, Math.max(0, Number(v) || 0))), n: 81, at: now, sid: psid };
-      } else break;
-      if (m.camera === null) m.camera = true;
+      }
       break;
     }
     case 'audio.spectrum': {
@@ -345,12 +470,14 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
         at: now,
         sid: psid,
       };
-      if (m.micOpen === null) m.micOpen = true;
+      m.micSeen = true;
+      m.micAt = now;
       break;
     }
     case 'stt.transcript':
       m.stt = { text: (str(p.text) ?? '').slice(0, 80), final: p.final === true };
-      if (m.micOpen === null) m.micOpen = true;
+      m.micSeen = true;
+      m.sttProvider = sttProviderOf(p) ?? m.sttProvider;
       break;
     case 'tts.speak':
       m.tts = { chars: num(p.chars) ?? 0, voice: str(p.voice) ?? '—', ms: m.tts?.ms ?? null };
@@ -358,25 +485,52 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
     case 'tts.audio':
       m.tts = { chars: m.tts?.chars ?? 0, voice: m.tts?.voice ?? '—', ms: num(p.ms) };
       break;
-    case 'pitch.result':
+    case 'pitch.extract':
+      m.pitchMethod = str(p.method) ?? m.pitchMethod;
+      break;
+    case 'pitch.result': {
+      const voiced = num(p.voicedPct);
+      const method = str(p.method);
       m.pitch = {
-        mean: num(p.f0Mean) ?? 0,
-        min: num(p.f0Min) ?? 0,
-        max: num(p.f0Max) ?? 0,
-        voiced: num(p.voicedPct),
+        mean: num(p.f0Mean),
+        min: num(p.f0Min),
+        max: num(p.f0Max),
+        // 0..100; the recorded replay still carries a 0..1 fraction
+        voiced: voiced == null ? null : voiced <= 1 ? voiced * 100 : voiced,
         latency: num(p.latencyMs),
+        method,
+        f1: num(p.f1Hz),
+        f2: num(p.f2Hz),
       };
+      if (method) m.pitchMethod = method;
+      break;
+    }
+    case 'sparc.request':
+      m.sparc = { ...m.sparc, seen: true };
       break;
     case 'sparc.features':
       m.sparc = {
-        feats: [p.tongueHeight, p.tongueFront, p.jawOpen, p.lipForward, p.lipAperture].map((v) => clamp01(num(v) ?? 0)),
+        feats: [p.tongueHeight, p.tongueFront, p.jawOpen, p.lipForward, p.lipAperture].map((v) => num(v) ?? 0),
         latency: num(p.latencyMs),
         skipped: null,
+        seen: true,
       };
       break;
     case 'sparc.skipped':
-      m.sparc = { ...m.sparc, skipped: str(p.reason) ?? 'skipped' };
+      m.sparc = { ...m.sparc, skipped: str(p.reason) ?? 'skipped', seen: true };
       break;
+    case 'backend.up': {
+      const up: BackendUp = {
+        provider: coachProviderOf(p),
+        model: str(p.model),
+        articulation: typeof p.articulation === 'boolean' ? p.articulation : null,
+        pitchTable: typeof p.pitchTable === 'boolean' ? p.pitchTable : null,
+      };
+      m.backendUp = up;
+      // a backend that started after the latest call is newer evidence than that call
+      if (up.provider && m.coachProvider && e.at >= m.coachProvider.at) m.coachProvider = { provider: up.provider, at: e.at };
+      break;
+    }
     case 'db.read':
       m.dbReads.push(counted);
       m.dbTable = str(p.table) ?? m.dbTable;
@@ -388,13 +542,15 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
     case 'lip.batch':
     case 'audio.batch':
       m.dbWrites.push(counted);
-      m.dbTable = e.kind === 'lip.batch' ? 'lip_frames' : 'audio_frames';
+      m.dbTable = 'metric_batch';
       break;
     case 'claude.request':
+      noteCoach();
       m.claudeCalls += 1;
       m.claude = { model: str(p.model) ?? m.claude?.model ?? '—', purpose: str(p.purpose) ?? '—', latency: null, inTok: null, outTok: null, error: null };
       break;
     case 'claude.response':
+      noteCoach();
       m.claude = {
         model: str(p.model) ?? m.claude?.model ?? '—',
         purpose: str(p.purpose) ?? m.claude?.purpose ?? '—',
@@ -406,6 +562,7 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
       m.claudeLine = (str(p.line) ?? '').slice(0, 120);
       break;
     case 'claude.error':
+      noteCoach();
       m.claude = {
         model: str(p.model) ?? m.claude?.model ?? '—',
         purpose: str(p.purpose) ?? m.claude?.purpose ?? '—',
@@ -422,7 +579,6 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
       m.ui = { ...m.ui, score: str(p.verdict) };
       break;
   }
-  if (e.target === 'backend' && e.source === 'ui') m.backendReqs.push(counted);
   if (e.source === 'backend') m.backendOut.push(counted);
 }
 
@@ -1255,9 +1411,9 @@ const SPARC_LABELS = ['tongue height', 'tongue front', 'jaw open', 'lip forward'
 function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HTMLCanvasElement> }): ReactNode {
   switch (id) {
     case 'camera':
-      return <p className="dash-status" data-on={s.camera === true || undefined}>{s.camera === null ? 'waiting' : s.camera ? 'on' : 'off'}</p>;
+      return <p className="dash-status" data-on={s.cameraState === 'on' || undefined}>{s.cameraState}</p>;
     case 'mic':
-      return <p className="dash-status" data-on={s.micOpen === true || undefined}>{s.micOpen === null ? 'waiting' : s.micOpen ? 'listening' : 'closed'}</p>;
+      return <p className="dash-status" data-on={s.micState === 'listening' || undefined}>{s.micState}</p>;
     case 'mediapipe':
       return (
         <div className="dash-card dash-card--mesh">
@@ -1269,7 +1425,9 @@ function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HT
             <div><dt>round</dt><dd>{s.lip ? s.lip.rounding.toFixed(2) : '—'}</dd></div>
             <div><dt>face</dt><dd data-warn={s.lip && !s.lip.ok ? 'true' : undefined}>{s.lip ? (s.lip.ok ? 'ok' : 'lost') : '—'}</dd></div>
           </dl>
-          <p className="dash-meta">{s.meshLive ? `face mesh · ${s.meshPoints} points` : 'no face'}</p>
+          <p className="dash-meta">
+            {s.faceState === 'mesh' ? `face mesh · ${s.meshPoints} points` : s.faceState === 'tracking' ? 'tracking · mesh unavailable' : 'no face'}
+          </p>
         </div>
       );
     case 'audio': {
@@ -1283,6 +1441,7 @@ function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HT
             <span className="dash-unit dash-unit--inline">Hz</span>
             <span className="dash-rms">rms <b>{rms == null ? '—' : rms.toFixed(2)}</b></span>
           </p>
+          {!s.audio && <p className="dash-meta">F1/F2 during practice attempts</p>}
         </div>
       );
     }
@@ -1292,7 +1451,10 @@ function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HT
           <p className="dash-quote" data-final={s.stt?.final ? 'true' : 'false'}>
             {s.stt?.text ? `“${s.stt.text}”` : <span className="dash-dim">no speech yet</span>}
           </p>
-          <p className="dash-meta">{s.stt ? (s.stt.final ? 'final' : 'partial') : 'waiting'}</p>
+          <p className="dash-meta">
+            {s.stt ? (s.stt.final ? 'final' : 'partial') : 'waiting'}
+            {s.sttProvider ? ` · ${STT_NAME[s.sttProvider]}` : ''}
+          </p>
         </div>
       );
     case 'tts':
@@ -1313,39 +1475,66 @@ function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HT
             <span> req / min</span>
           </p>
           <p className="dash-meta">{s.backendOut} calls out / min</p>
+          {s.backendUp && (
+            <>
+              <p className="dash-meta">
+                coach: {s.backendUp.provider ?? '—'} · {s.backendUp.model ?? '—'}
+              </p>
+              <p className="dash-meta">
+                SPARC {s.backendUp.articulation == null ? '—' : s.backendUp.articulation ? 'on' : 'off'} · pitch table{' '}
+                {s.backendUp.pitchTable == null ? '—' : s.backendUp.pitchTable ? 'on' : 'off'}
+              </p>
+            </>
+          )}
         </div>
       );
-    case 'pitch':
+    case 'pitch': {
+      const pt = s.pitch;
+      const formants = pt != null && (pt.f1 != null || pt.f2 != null);
+      // with formants the Hz unit sits on their row and the method leads the meta line
+      const meta = pt
+        ? [formants ? null : 'Hz', s.pitchMethod, pt.voiced != null ? `${Math.round(pt.voiced)}% voiced` : null, pt.latency != null ? `${Math.round(pt.latency)} ms` : null]
+        : ['waiting', s.pitchMethod];
       return (
         <div className="dash-card">
           <p className="dash-readout">
-            <span>mean <b>{hz(s.pitch?.mean)}</b></span>
-            <span>min <b>{hz(s.pitch?.min)}</b></span>
-            <span>max <b>{hz(s.pitch?.max)}</b></span>
+            <span>mean <b>{hz(pt?.mean)}</b></span>
+            <span>min <b>{hz(pt?.min)}</b></span>
+            <span>max <b>{hz(pt?.max)}</b></span>
           </p>
-          <p className="dash-meta">
-            Hz{s.pitch?.voiced != null ? ` · ${Math.round(s.pitch.voiced * 100)}% voiced` : ''}
-            {s.pitch?.latency != null ? ` · ${Math.round(s.pitch.latency)} ms` : ''}
-          </p>
+          {formants && (
+            <p className="dash-readout">
+              <span>F1 <b>{hz(pt.f1)}</b></span>
+              <span>F2 <b>{hz(pt.f2)}</b></span>
+              <span className="dash-unit">Hz</span>
+            </p>
+          )}
+          <p className="dash-meta">{meta.filter(Boolean).join(' · ')}</p>
         </div>
       );
+    }
     case 'sparc': {
       const feats = s.sparc.feats;
-      if (!feats)
+      if (!feats) {
+        const noCollector = s.backendUp?.articulation === false && !s.sparc.seen;
         return (
           <div className="dash-card">
-            <p className="dash-standby">{s.sparc.skipped ? 'standby' : 'waiting'}</p>
-            {s.sparc.skipped && <p className="dash-meta">skipped · {s.sparc.skipped}</p>}
+            <p className="dash-standby" data-small={noCollector || undefined}>
+              {noCollector ? 'standby · no collector' : s.sparc.skipped ? 'standby' : 'waiting'}
+            </p>
+            {!noCollector && s.sparc.skipped && <p className="dash-meta">skipped · {s.sparc.skipped}</p>}
           </div>
         );
+      }
       return (
         <div className="dash-card" data-stale={s.sparc.skipped ? 'true' : undefined}>
           <ul className="dash-bars">
             {feats.map((v, i) => (
               <li key={SPARC_LABELS[i]}>
                 <span>{SPARC_LABELS[i]}</span>
-                <i style={{ '--v': Math.max(0.02, v) } as CSSProperties} />
-                <b>{v.toFixed(2)}</b>
+                {/* centred on zero: right for positive, left for negative, full at ±SPARC_RANGE */}
+                <i style={{ '--v': Math.min(1, Math.max(-1, v / SPARC_RANGE)).toFixed(3) } as CSSProperties} />
+                <b>{v > 0 ? '+' : ''}{v.toFixed(2)}</b>
               </li>
             ))}
           </ul>
@@ -1394,16 +1583,21 @@ function Presence({ dots }: { dots: Snap['dots'] }) {
   );
 }
 
+/** The tag beside a node's name: the coach model and speech to text follow the provider that last answered. */
+function locOf(n: NodeDef, s: Snap): Loc {
+  if (n.id === 'claude') return s.coachProvider ? PROVIDER_TAG[s.coachProvider] : n.loc;
+  if (n.id === 'stt') return s.sttProvider ? STT_TAG[s.sttProvider] : n.loc;
+  return n.loc;
+}
+
 function ClaudeCard({ s, lineRef }: { s: Snap; lineRef: RefObject<HTMLSpanElement> }) {
   const c = s.claude;
   return (
     <div className="dash-card dash-card--claude">
       <div className="dash-claude__top">
-        <span className="dash-chip">{c?.model ?? 'model —'}</span>
+        <span className="dash-chip">{c?.model ?? s.backendUp?.model ?? 'model —'}</span>
+        <span className="dash-chip dash-chip--line">{s.coachProvider ? PROVIDER_TAG[s.coachProvider] : 'provider —'}</span>
         <span className="dash-chip dash-chip--soft">{c?.purpose ?? 'idle'}</span>
-        <span className="dash-claude__calls">
-          <b>{s.claudeCalls}</b> {s.claudeCalls === 1 ? 'call' : 'calls'}
-        </span>
       </div>
       <p className="dash-claude__line" aria-live="off">
         <span ref={lineRef} />
@@ -1413,6 +1607,7 @@ function ClaudeCard({ s, lineRef }: { s: Snap; lineRef: RefObject<HTMLSpanElemen
         <div><dt>latency</dt><dd>{c?.latency != null ? `${fmt(Math.round(c.latency))} ms` : c ? '…' : '—'}</dd></div>
         <div><dt>in</dt><dd>{fmt(c?.inTok)}</dd></div>
         <div><dt>out</dt><dd>{fmt(c?.outTok)}</dd></div>
+        <div className="dash-claude__calls"><dt>{s.claudeCalls === 1 ? 'call' : 'calls'}</dt><dd>{s.claudeCalls}</dd></div>
       </dl>
       {c?.error && <p className="dash-meta dash-warn">error · {c.error}</p>}
     </div>
@@ -1432,8 +1627,8 @@ export default function Dashboard() {
   const engine = useRef<Engine | null>(null);
   const model = useRef<Model>(freshModel());
   const dirty = useRef(true);
-  /** perception liveness as last rendered, so going quiet re-renders the cards once */
-  const shownLive = useRef<[boolean, boolean]>([false, false]);
+  /** liveness-derived states as last rendered (derive().key), so going quiet re-renders the cards once */
+  const shownLive = useRef('');
   const [snap, setSnap] = useState<Snap>(() => snapshot(model.current, performance.now()));
   const [conn, setConn] = useState<Conn>('connecting');
   const [forced, setForced] = useState<boolean | null>(() => (params.has('demo') ? true : null));
@@ -1486,13 +1681,12 @@ export default function Dashboard() {
       const m = model.current;
       const now = performance.now();
       if (prunePresence(m)) dirty.current = true;
-      const ml = meshLive(m, now);
-      const sl = specLive(m, now);
-      if (ml !== shownLive.current[0] || sl !== shownLive.current[1]) dirty.current = true;
+      const { key } = derive(m, now);
+      if (key !== shownLive.current) dirty.current = true;
       if (!dirty.current && !m.ticker.some((t) => now - t.at >= TICK_MS)) return;
       m.ticker = m.ticker.filter((t) => now - t.at < TICK_MS);
       dirty.current = false;
-      shownLive.current = [ml, sl];
+      shownLive.current = key;
       setSnap(snapshot(m, now));
     }, 100);
     return () => window.clearInterval(id);
@@ -1635,7 +1829,7 @@ export default function Dashboard() {
             >
               <h2 className="dash-node__name">
                 {n.name}
-                <span className="dash-node__loc">{n.loc}</span>
+                <span className="dash-node__loc">{locOf(n, snap)}</span>
               </h2>
               <p className="dash-node__cap">{n.caption}</p>
               {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} />}
@@ -1648,7 +1842,7 @@ export default function Dashboard() {
           <p className="dash-legend__title">How to read it</p>
           <p>
             Each cluster of dots is one part of the system, lit like Ava’s head. When an event flows, a packet of dots
-            runs along its line and the part it reaches ripples. Everything converges on Claude.
+            runs along its line and the part it reaches ripples. Everything converges on the coach model.
           </p>
         </aside>
 

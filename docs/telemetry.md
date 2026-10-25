@@ -1,8 +1,13 @@
 # Telemetry stream for the backend dashboard
 
-Every subsystem reports small, non-sensitive events to one public SpacetimeDB table.
+Every subsystem reports small events to one public SpacetimeDB table.
 The dashboard page (`/#/dashboard` in `web/`) subscribes to that table and animates
-the system graph. No media, transcripts, profile ids or attempt ids are ever written here.
+the system graph. No media (audio, video, images), profile ids or attempt ids are written here.
+
+The table is public, and it does carry some text: speech-to-text transcripts truncated to 80 characters
+(`stt.transcript.text`) and the coach model's caption lines up to 120 characters (`claude.response.line`).
+Anyone who can subscribe to the database can read them. Each browser row also carries the anonymous
+per-tab `sid` (see "Session id and presence").
 
 ## Table `telemetry_event` (public)
 
@@ -39,20 +44,32 @@ At most 400 rows. When an insert pushes the count over, the oldest rows among th
 
 ## Node ids
 
-| id        | what it is                                                   | where it runs |
-|-----------|--------------------------------------------------------------|---------------|
-| camera    | webcam capture                                               | browser       |
-| mediapipe | MediaPipe FaceLandmarker -> LipFrame                         | browser worker|
-| mic       | microphone capture                                           | browser       |
-| audio     | formant / loudness analysis (vowel-mapper worklet)           | browser       |
-| stt       | Cartesia Ink speech to text                                  | Cartesia      |
-| tts       | Cartesia Sonic text to speech (Ava's voice)                  | Cartesia      |
-| backend   | FastAPI app (`backend/`)                                     | server        |
-| pitch     | librosa F0 extraction                                        | server        |
-| sparc     | SPARC articulatory model service (`services/articulation`)   | server        |
-| db        | SpacetimeDB                                                  | maincloud     |
-| claude    | Anthropic Claude (coach decisions, notes, insights)          | Anthropic     |
-| ui        | the learner's screen                                         | browser       |
+The ids are fixed by the reducer allowlist; the dashboard only changes what it displays for them.
+
+| id        | dashboard name | what it is                                                          | tag (where it runs) |
+|-----------|----------------|---------------------------------------------------------------------|---------------------|
+| camera    | Camera         | webcam capture                                                      | browser             |
+| mediapipe | MediaPipe      | MediaPipe FaceLandmarker -> LipFrame                                | browser             |
+| mic       | Microphone     | microphone capture                                                  | browser             |
+| audio     | Audio          | spectrum and formant analysis in the browser                        | browser             |
+| stt       | Speech to text | OpenAI Realtime in the word lesson · Cartesia Ink in hands-free practice | from `provider`: OpenAI or Cartesia; `STT` before the first stt.* event |
+| tts       | Sonic          | Cartesia Sonic text to speech (Ava's voice)                         | Cartesia            |
+| backend   | Backend        | FastAPI app (`backend/`)                                            | server              |
+| pitch     | Acoustics      | Praat/Parselmouth pitch and formants                                | server              |
+| sparc     | SPARC          | articulatory model collector (needs `ARTICULATION_URL`; off without it) | server          |
+| db        | SpacetimeDB    | live tables, subscriptions                                          | maincloud           |
+| claude    | Coach model    | language model: coach decisions, notes, insights                    | from `provider`: OpenAI or Anthropic; `LLM` before any evidence |
+| ui        | Learner        | the learner's screen                                                | browser             |
+
+Provider-aware tags:
+- `claude`: the provider of the latest `claude.*` event, else `backend.up.provider` (the idle default). Rows
+  without `provider` (older rows, the replay) are inferred from the model: `gpt-*` is OpenAI, `claude-*` is
+  Anthropic. The backend's default live coach provider is OpenAI (`gpt-5.4-mini` for decide, word, ask and session;
+  `gpt-5.5` for notes and insight; `gpt-audio-1.5` for word scoring from the WAV). Anthropic answers only when
+  `LIVE_COACH_PROVIDER=anthropic`, or for purpose `coach` (`/v1/coach`).
+- `stt`: from `provider` on `stt.open`, `stt.close` and `stt.transcript`. The default word lesson transcribes with
+  OpenAI Realtime (`gpt-4o-mini-transcribe`); Cartesia Ink runs only in hands-free `/practice`. Rows without
+  `provider` predate the field and came from Cartesia Ink.
 
 ## Event kinds and payloads
 
@@ -60,26 +77,26 @@ At most 400 rows. When an insert pushes the count over, the oldest rows among th
 |--------------------|---------------------|------------------------------------------------------------------------|
 | camera.on / camera.off | camera -> mediapipe | `{}`                                                                |
 | lip.frame          | mediapipe -> db     | `{ok, opening, width, rounding, spread, jaw, yaw}` numbers 0..1 / deg  |
-| lip.batch          | mediapipe -> db     | `{frames, seq}`                                                        |
-| audio.frame        | audio -> db         | `{f1, f2, rms, env}` env = 32 floats 0..1 downsampled envelope         |
-| audio.batch        | audio -> db         | `{frames, seq}`                                                        |
-| stt.open / stt.close | mic -> stt        | `{}`                                                                   |
-| stt.transcript     | stt -> ui           | `{text, final}` text truncated to 80 chars                             |
+| lip.batch          | mediapipe -> db     | `{frames, seq}` one write of the attempt's lip frames to table `metric_batch` |
+| audio.frame        | audio -> db         | `{f1, f2, rms, env}` env = 32 floats 0..1 downsampled envelope; f1 / f2 may be null outside practice attempts |
+| audio.batch        | audio -> db         | `{frames, seq}` one write of the attempt's audio frames to table `metric_batch` |
+| stt.open / stt.close | mic -> stt        | `{provider}` provider = `cartesia` or `openai`                         |
+| stt.transcript     | stt -> ui           | `{text, final, provider}` text truncated to 80 chars; OpenAI Realtime sends finals only (`final: true`) |
 | tts.token          | backend -> tts      | `{}`                                                                   |
 | tts.speak          | ui -> tts           | `{chars, voice}`                                                       |
 | tts.audio          | tts -> ui           | `{ms}` duration of audio received                                      |
 | coach.request      | ui -> backend       | `{sound, mode}`                                                        |
 | coach.decision     | backend -> ui       | `{verdict, cue}`                                                       |
-| claude.request     | backend -> claude   | `{model, purpose}` purpose in decide, word, notes, insight, session, ask |
-| claude.response    | claude -> backend   | `{model, purpose, latencyMs, inputTokens, outputTokens, line}` line <= 120 chars |
-| claude.error       | claude -> backend   | `{model, purpose, latencyMs, error}`                                   |
-| pitch.extract      | backend -> pitch    | `{seconds}`                                                            |
-| pitch.result       | pitch -> backend    | `{f0Mean, f0Min, f0Max, voicedPct, latencyMs}`                         |
+| claude.request     | backend -> claude   | `{model, purpose, provider}` purpose in decide, word, notes, insight, session, ask, coach; provider = `openai` or `anthropic` |
+| claude.response    | claude -> backend   | `{model, purpose, provider, latencyMs, inputTokens, outputTokens, line}` line <= 120 chars |
+| claude.error       | claude -> backend   | `{model, purpose, provider, latencyMs, error}`                         |
+| pitch.extract      | backend -> pitch    | `{seconds, method}` method = `praat` (Praat/Parselmouth, every word attempt) or `pyin` (librosa, legacy `/v1/comparisons` only) |
+| pitch.result       | pitch -> backend    | `{f0Mean, f0Min, f0Max, voicedPct, latencyMs, method, f1Hz?, f2Hz?}` F0 in Hz, voicedPct 0..100, formants in Hz when measured |
 | sparc.request      | backend -> sparc    | `{seconds}`                                                            |
 | sparc.features     | sparc -> backend    | `{tongueHeight, tongueFront, jawOpen, lipForward, lipAperture, latencyMs}` |
 | sparc.skipped      | backend -> sparc    | `{reason}`                                                             |
 | db.read / db.write | backend -> db       | `{table, rows}`                                                        |
-| backend.up         | backend -> db       | `{provider, model, articulation, pitchTable, coordination, telemetryIdentity}` once at startup when telemetry goes live; label "backend online"; telemetryIdentity is `anonymous` or `configured` |
+| backend.up         | backend -> db       | `{provider, model, articulation, pitchTable, coordination, telemetryIdentity}` once at startup when telemetry goes live; label "backend online"; provider / model = the live coach default; articulation = `ARTICULATION_URL` is set (SPARC on); pitchTable = the Parselmouth pitch/formant table is stored with each attempt (`PITCH_TABLE_ENABLED`); telemetryIdentity is `anonymous` or `configured` |
 | video.score        | backend -> ui       | `{verdict, okFrames}`                                                  |
 | ui.join            | ui -> db            | `{sid, ua}` ua = coarse device class: phone, tablet or desktop; label "learner joined" |
 | ui.ping            | ui -> db            | `{sid}` every 20 s while the tab is visible                            |
@@ -87,6 +104,17 @@ At most 400 rows. When an insert pushes the count over, the oldest rows among th
 
 Rates: lip.frame and audio.frame are throttled to at most 5 per second each by the browser.
 Everything else is one event per occurrence.
+
+`coach.request` is logged twice per request: once by the browser (with `sid`) and once by the backend on receipt
+(without `sid`). The dashboard's req/min counts only the rows with a `sid`.
+
+Notes on the server side:
+- Per-attempt acoustics are Praat/Parselmouth (`method: praat`), on every word attempt. librosa pyin
+  (`method: pyin`) runs only on the legacy `/v1/comparisons` endpoint, which the app does not call.
+- SPARC is off unless `ARTICULATION_URL` is set; `backend.up.articulation` says which. With it off and no
+  `sparc.*` event, the dashboard's SPARC card reads "standby · no collector". `sparc.features` values are EMA
+  units, drawn as signed bars over -2..+2.
+- Browser metric batches (`lip.batch`, `audio.batch`) write the `metric_batch` table.
 
 ## Session id and presence
 
@@ -105,7 +133,8 @@ The header shows "N learners live" and the Learner node shows one dot per live s
 `web/src/telemetry/client.ts` exports:
 - `emit(source, target, kind, label, payload)` fire-and-forget, no-op when disconnected. Adds `sid`.
 - `getSessionId(): string` the anonymous per-tab id.
-- `subscribeTelemetry(cb: (e: TelemetryEvent) => void): () => void` live inserts, newest first on backfill.
+- `subscribeTelemetry(cb: (e: TelemetryEvent) => void): () => void` replays the existing rows oldest first
+  (id ascending) once the subscription is applied, then forwards every live insert.
 - `TelemetryEvent = { id: string; at: number; source; target; kind; label; payload: Record<string, unknown> }`
 
 Delivery is visible in the console. In SpacetimeDB 2.13 each reducer accessor
@@ -170,8 +199,10 @@ audio node. Both are throttled to 10 Hz per tab and stay well under the 2048-byt
 
 Coordinates are normalised into a square centred on the nose tip (index 1) with half-size
 1.6 x the inter-ocular distance (midpoints of 33/133 and 362/263), then quantised to 0..255 and
-clamped. x grows to the viewer's right, y grows downward. Emitted only for frames MediaPipe
-accepted (a face was found), whether or not the LipFrame quality flags passed.
+clamped. x offsets are scaled by the frame aspect so the square is isotropic in pixels (MediaPipe's
+normalised x and y span different pixel lengths on a non-square frame). x grows to the viewer's right,
+y grows downward. Emitted only for frames MediaPipe accepted (a face was found), whether or not the
+LipFrame quality flags passed.
 
 `audio.spectrum` bins are 32 log-spaced bands from an AnalyserNode (fftSize 1024, smoothing 0.6)
 over `getByteFrequencyData`, covering roughly 80 Hz to 8 kHz. Emitted whenever a microphone
@@ -192,8 +223,9 @@ canonical tesselation, like Ava's head.
 
 Normalisation: the same nose-centred square as v1 and v2 (centre = landmark 1, half-size = 1.6 x
 inter-ocular), x and y quantised to 0..255 across the square and clamped; z = landmark z divided by
-inter-ocular, mapped from [-0.6, 0.6] to 0..255 (0 = nearest the camera). The dashboard decodes x and y
-as byte / 255, the same 0..1 square as v2.
+inter-ocular, mapped from [-0.6, 0.6] to 0..255 (0 = nearest the camera). x offsets are scaled by the
+frame aspect so the square is isotropic in pixels. The dashboard decodes x and y as byte / 255, the same
+0..1 square as v2 (the decode is unchanged by the aspect correction).
 
 Size: 478 x 3 = 1,434 bytes = 1,912 base64 chars. The worst-case payload with pose and `sid`
 (`{v:3,n:478,pts,yaw:-123.4,pitch:-123.4,roll:-123.4,sid:"8626a337"}`) is 1,995 bytes. The browser drops
