@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { speakTeacher, type TeacherSpeech } from '../audio/teacher';
+import { bakedEntry } from '../audio/bakedVoice';
 import type { MouthReferenceHandle } from '../components/MouthReference';
 import type { MouthCueId } from '@mouth-demo/src/mouth-demo.js';
 import type { PartSound } from '../game/ghost/partSounds';
@@ -33,6 +34,8 @@ export interface PronounceSpec {
   sound: PartSound;
   /** Default 2. */
   reps?: number;
+  /** Called synchronously as each sound starts playing; durationMs is the baked clip length, null when unknown. */
+  onSound?: (sound: PartSound, durationMs: number | null) => void;
 }
 
 /**
@@ -179,9 +182,11 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
    * Speak one part sound. The IPA transcript is spoken only (never captioned or setSpeech'd); a browser-voice
    * fallback reads the plain caption. Baked clips play at speed 1, so no speed is passed.
    */
-  const speakSound = useCallback((sound: PartSound): TeacherSpeech => {
+  const speakSound = useCallback((sound: PartSound, onSound?: PronounceSpec['onSound']): TeacherSpeech => {
     const sp = speakTeacher(sound.say, { fallbackText: sound.caption });
     live.current.speech = sp;
+    const clip = bakedEntry(sound.say);
+    onSound?.(sound, clip ? Math.round(clip.durationS * 1000) : null);
     return sp;
   }, []);
 
@@ -221,7 +226,7 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
             if (phase === sound.at && played < reps) {
               played++;
               if (opts.narration) {
-                const sp = speakSound(sound);
+                const sp = speakSound(sound, spec.onSound);
                 lastDone = sp.done.then(
                   () => undefined,
                   () => undefined,
@@ -247,7 +252,7 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
         for (let i = 0; i < reps; i++) {
           if (!alive()) return;
           if (opts.narration) {
-            const sp = speakSound(sound);
+            const sp = speakSound(sound, spec.onSound);
             if (avatar) {
               live.current.touchedDemo = true;
               avatar.stop();

@@ -60,6 +60,16 @@ export interface GhostBoardProps {
   phoneCursor?: PhoneCursorInput;
   /** The zone Ava is coaching: emphasised on the path. */
   focusZoneId?: string | null;
+  /**
+   * A new non-zero value runs one "sound draw" in any mode: over demoMs the active line fills in from its start while the ghost dot
+   * travels it (no lead-in, so it lines up with an audio onset), holds, fades and parks. A new value mid-draw restarts it.
+   * It never calls onWatchEnd or onAttemptEnd.
+   */
+  demoRun?: number;
+  /** Duration of the sound draw in ms (default 650, at least 400). */
+  demoMs?: number;
+  /** The attempt was judged correct: the line stays fully drawn and a checkmark circle sits at the end of the path. */
+  success?: boolean;
 }
 
 const INK_WIDTH = 5;
@@ -73,6 +83,13 @@ const DOT_BASE = 30;
 const WATCH_LEAD_MS = 400;
 const WATCH_TAIL_MS = 350;
 const STOP_RADIUS = 17;
+/** Sound draw: default duration, floor, then the hold and fade of the finished line. */
+const DEMO_MS = 650;
+const DEMO_MIN_MS = 400;
+const DEMO_HOLD_MS = 350;
+const DEMO_FADE_MS = 250;
+/** A stop this close to the end of the unit (ms of word time) is the end circle: the check goes on it. */
+const END_STOP_MS = 40;
 /** The learner counts as on the ghost for the cursor colour above this closeness. */
 const INSIDE_CLOSENESS = 0.6;
 /** Phone map: off-target hysteresis (back on target below this fraction of OFF_PATH_MAP_DIST). */
@@ -125,6 +142,18 @@ interface Px {
   y: number;
 }
 
+/** How far along a segment the line is drawn at word time t: ts are the point times, fs the length fraction at each point. */
+function fillFraction(ts: number[], fs: number[], t: number): number {
+  const last = ts.length - 1;
+  if (t <= ts[0]) return 0;
+  if (t >= ts[last]) return 1;
+  let k = 0;
+  while (k < last - 1 && ts[k + 1] < t) k++;
+  const span = ts[k + 1] - ts[k];
+  const w = span > 0 ? clamp((t - ts[k]) / span, 0, 1) : 0;
+  return fs[k] + w * (fs[k + 1] - fs[k]);
+}
+
 export function GhostBoard({
   spec,
   model,
@@ -141,6 +170,9 @@ export function GhostBoard({
   judge,
   phoneCursor,
   focusZoneId = null,
+  demoRun = 0,
+  demoMs = DEMO_MS,
+  success = false,
 }: GhostBoardProps) {
   const plotRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -149,6 +181,8 @@ export function GhostBoard({
   const lipRingRef = useRef<SVGEllipseElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
   const livePathRefs = useRef<(SVGPathElement | null)[]>([]);
+  const fillLayerRef = useRef<SVGGElement>(null);
+  const fillRefs = useRef<(SVGPathElement | null)[]>([]);
 
   const [size, setSize] = useState({ w: 0, h: 0 });
   const sizeRef = useRef(size);
@@ -172,8 +206,8 @@ export function GhostBoard({
 
   const lipRef = useRef(lip);
   lipRef.current = lip;
-  const props = useRef({ spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge });
-  props.current = { spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge };
+  const props = useRef({ spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge, success });
+  props.current = { spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge, success };
 
   // Phone-map cursor: the unit's target phones, the start of its path and the path itself in map space.
   const phoneCfg = useMemo(() => {
@@ -217,6 +251,11 @@ export function GhostBoard({
     lastY: NaN,
   });
   const watchRef = useRef({ elapsed: 0, ended: false, passed: new Set<string>() });
+  /** The sound draw: start is a performance.now() stamp (-1 = not running). */
+  const demoRef = useRef({ start: -1, ms: DEMO_MS, passed: new Set<string>() });
+  const lastDemoRun = useRef(demoRun);
+  /** Per active segment, the point times and the fraction of the line's pixel length reached at each (rebuilt with the geometry). */
+  const fillGeomRef = useRef<{ ts: number[]; fs: number[] }[]>([]);
   const sig = useRef({
     lastFrameTs: 0,
     lastFramePerf: -Infinity,
@@ -324,6 +363,14 @@ export function GhostBoard({
     }
     // `sized`, `unit` and `spec` are read when an attempt starts (keyed by id): re-sizing mid-attempt would move the target under the learner.
   }, [mode, attemptId, unit.id, spec.word, publish, syncAttempt]);
+
+  // Sound draw: a new non-zero demoRun restarts it from empty; the rAF loop does the drawing.
+  useEffect(() => {
+    if (demoRun === lastDemoRun.current) return;
+    lastDemoRun.current = demoRun;
+    if (!demoRun) return;
+    demoRef.current = { start: performance.now(), ms: Math.max(DEMO_MIN_MS, demoMs), passed: new Set() };
+  }, [demoRun, demoMs]);
 
   // Frames: scoring and cursor inputs update synchronously; drawing happens in the rAF loop.
   const subscribe = frames.subscribe;
@@ -492,42 +539,84 @@ export function GhostBoard({
         }
       }
 
-      // Watch: the dot travels the unit's ghost at speed, pausing in the lead-in and the tail.
+      // Watch and sound draw: the dot travels the unit's ghost and the line fills in behind it. Watch runs at speed, pausing in
+      // the lead-in and the tail; the sound draw starts at once. Markers light as the dot passes them.
       const ghost = ghostRef.current;
+      const [t0, t1] = unitWindow(model, u);
+      const demo = demoRef.current;
+      const demoElapsed = demo.start < 0 ? -1 : now - demo.start;
+      const demoOn = md !== 'watch' && demoElapsed >= 0 && demoElapsed < demo.ms + DEMO_HOLD_MS + DEMO_FADE_MS;
+      if (demo.start >= 0 && md !== 'watch' && !demoOn) {
+        // Finished: park the dot and clear the lit markers.
+        demo.start = -1;
+        if (demo.passed.size && md !== 'live') publish(emptyView());
+        demo.passed.clear();
+      }
+      let drawT: number | null = null;
+      let fillOpacity = 0;
       if (md === 'watch') {
         const w = watchRef.current;
-        const [t0, t1] = unitWindow(model, u);
         const unitMs = Math.max(1, unitDurationMs(model, u));
         const travelMs = unitMs / Math.max(0.1, sp);
         if (!w.ended) w.elapsed += dt;
         const progress = clamp((w.elapsed - WATCH_LEAD_MS) / travelMs, 0, 1);
-        const t = t0 + progress * (t1 - t0);
-        const g = ghostAt(model, t);
-        const at = toPx(g);
-        if (ghost) {
-          ghost.style.transform = `translate(${at.x}px, ${at.y}px)`;
-          setData(ghost, 'shown', 'true');
-          setData(ghost, 'voiced', String(g.voiced));
-        }
-        // Markers light as the dot passes them.
+        drawT = t0 + progress * (t1 - t0);
+        fillOpacity = 1;
         let passedNow = false;
         if (progress > 0) {
           for (const m of model.markers) {
-            if (u.zoneIds.includes(m.zoneId) && m.t >= t0 - 1e-6 && m.t <= t && !w.passed.has(m.zoneId)) {
+            if (u.zoneIds.includes(m.zoneId) && m.t >= t0 - 1e-6 && m.t <= drawT && !w.passed.has(m.zoneId)) {
               w.passed.add(m.zoneId);
               passedNow = true;
             }
           }
         }
         if (passedNow) publish({ done: false, stops: {}, verdicts: {}, judged: false, passed: [...w.passed] });
-        setData(board, 'passing', String(model.markers.some((m) => u.zoneIds.includes(m.zoneId) && Math.abs(m.t - t) * model.durationMs < 60)));
         if (!w.ended && w.elapsed >= WATCH_LEAD_MS + travelMs + WATCH_TAIL_MS) {
           w.ended = true;
           props.current.onWatchEnd?.();
         }
-      } else if (ghost) {
-        setData(ghost, 'shown', 'false');
-        setData(board, 'passing', 'false');
+      } else if (demoOn) {
+        const progress = s.reducedMotion ? 1 : clamp(demoElapsed / demo.ms, 0, 1);
+        drawT = t0 + progress * (t1 - t0);
+        fillOpacity = 1 - clamp((demoElapsed - demo.ms - DEMO_HOLD_MS) / DEMO_FADE_MS, 0, 1);
+        if (md !== 'live') {
+          let passedNow = false;
+          for (const m of model.markers) {
+            if (u.zoneIds.includes(m.zoneId) && m.t >= t0 - 1e-6 && m.t <= drawT && !demo.passed.has(m.zoneId)) {
+              demo.passed.add(m.zoneId);
+              passedNow = true;
+            }
+          }
+          if (passedNow) publish({ done: false, stops: {}, verdicts: {}, judged: false, passed: [...demo.passed] });
+        }
+      }
+      if (ghost) {
+        if (drawT !== null) {
+          const g = ghostAt(model, drawT);
+          const at = toPx(g);
+          ghost.style.transform = `translate(${at.x}px, ${at.y}px)`;
+          setData(ghost, 'shown', String(fillOpacity > 0));
+          setData(ghost, 'voiced', String(g.voiced));
+        } else {
+          setData(ghost, 'shown', 'false');
+        }
+      }
+      const t = drawT;
+      setData(board, 'passing', String(t !== null && model.markers.some((m) => u.zoneIds.includes(m.zoneId) && Math.abs(m.t - t) * model.durationMs < 60)));
+
+      // The progressive line: each active segment is filled to the dot's place along it; success shows it whole.
+      const whole = props.current.success && md !== 'live';
+      const layer = fillLayerRef.current;
+      if (layer) {
+        const opacity = whole ? '1' : fillOpacity.toFixed(3);
+        if (layer.style.opacity !== opacity) layer.style.opacity = opacity;
+        fillGeomRef.current.forEach((seg, i) => {
+          const path = fillRefs.current[i];
+          if (!path) return;
+          const offset = (1 - (whole ? 1 : t === null ? 0 : fillFraction(seg.ts, seg.fs, t))).toFixed(4);
+          if (path.style.strokeDashoffset !== offset) path.style.strokeDashoffset = offset;
+        });
       }
     };
     raf = requestAnimationFrame(draw);
@@ -565,6 +654,24 @@ export function GhostBoard({
       active: seg.points.some((p) => activeSet.has(p.t)),
     }));
     const activeLines = active.map((seg) => ({ d: line(seg.points), width: bandWidth(seg.points, seg.spread) }));
+    // Fraction of each active segment's pixel length reached at each point: the fill follows the dot along the drawn line.
+    fillGeomRef.current = active.map((seg) => {
+      const lens = [0];
+      seg.points.forEach((p, i) => {
+        if (i === 0) return;
+        const a = toPx(seg.points[i - 1]);
+        const b = toPx(p);
+        lens.push(lens[i - 1] + Math.hypot(b.x - a.x, b.y - a.y));
+      });
+      const total = lens[lens.length - 1];
+      return { ts: seg.points.map((p) => p.t), fs: lens.map((l, i) => (total > 0 ? l / total : i === 0 ? 0 : 1)) };
+    });
+    // The end of the unit's path: a stop sitting there takes the check, otherwise a ring is drawn.
+    const [, endT] = unitWindow(shown, unit);
+    const end = {
+      at: toPx(ghostAt(shown, endT)),
+      onStop: shown.markers.some((m) => m.kind === 'stop' && unit.zoneIds.includes(m.zoneId) && Math.abs(m.t - endT) * shown.durationMs < END_STOP_MS),
+    };
     const zoneById = new Map(spec.zones.map((z) => [z.id, z]));
     const markers = shown.markers.map((m) => {
       const zone = zoneById.get(m.zoneId);
@@ -593,7 +700,7 @@ export function GhostBoard({
             return { sym, at: toPx(mapToFormants(place.x, place.y)) };
           })
         : [];
-    return { all, activeLines, markers, labels, phoneLabels, mapLabels };
+    return { all, activeLines, end, markers, labels, phoneLabels, mapLabels };
   }, [size.w, size.h, shown, displayModel, unit, spec, debug]);
 
   const unitZones = spec.zones.filter((z) => unit.zoneIds.includes(z.id));
@@ -638,6 +745,22 @@ export function GhostBoard({
               {geometry.activeLines.map((seg, i) => (
                 <path key={`active-${i}`} className="gb-line" data-active d={seg.d} />
               ))}
+              {/* The line drawn in as the dot travels (watch, sound draw) or whole on success. */}
+              <g className="gb-fill-layer" ref={fillLayerRef} data-success={success} style={{ opacity: 0 }}>
+                {geometry.activeLines.map((seg, i) => (
+                  <path
+                    key={`fill-${i}`}
+                    ref={(el) => {
+                      fillRefs.current[i] = el;
+                    }}
+                    className="gb-fill"
+                    d={seg.d}
+                    pathLength={1}
+                    strokeDasharray={1}
+                    style={{ strokeDashoffset: 1 }}
+                  />
+                ))}
+              </g>
 
               {geometry.labels.map(({ part, at }) => (
                 <text
@@ -655,7 +778,7 @@ export function GhostBoard({
                 if (!zone) return null;
                 const active = unit.zoneIds.includes(zone.id);
                 const focus = zone.id === focusZoneId;
-                const lit = mode === 'watch' && view.passed.includes(zone.id);
+                const lit = mode !== 'live' && view.passed.includes(zone.id);
                 if (marker.kind === 'stop') {
                   const hit = active && view.stops[zone.id] === true;
                   const verdict = view.verdicts[zone.id];
@@ -700,6 +823,18 @@ export function GhostBoard({
                   </g>
                 );
               })}
+
+              {/* End of the path: an open ring, or the success check (on the stop when one ends the path). */}
+              <g className="gb-end" data-success={success} transform={`translate(${geometry.end.at.x} ${geometry.end.at.y})`}>
+                {success ? (
+                  <>
+                    <circle className="gb-end-disc" r={STOP_RADIUS + 2} />
+                    <path className="gb-end-check" d="M-7,0.5 L-2,5.5 L7.5,-5" pathLength={1} />
+                  </>
+                ) : (
+                  !geometry.end.onStop && <circle className="gb-end-ring" r={STOP_RADIUS} />
+                )}
+              </g>
 
               {geometry.mapLabels.map(({ sym, at }) => (
                 <text key={`map-${sym}`} className="gb-map-label" x={at.x} y={at.y}>

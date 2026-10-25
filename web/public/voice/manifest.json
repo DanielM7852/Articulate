@@ -2415,5 +2415,321 @@
         "end": 0.52
       }
     ]
+  },
+  "Great!": {
+    "file": "/voice/91bb266617.wav",
+    "durationS": 0.76,
+    "words": [
+      {
+        "text": "Great!",
+        "start": 0.027,
+        "end": 0.67
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "ɡ",
+        "start": 0.027,
+        "end": 0.188
+      },
+      {
+        "p": "ɹ",
+        "start": 0.188,
+        "end": 0.348
+      },
+      {
+        "p": "eɪ",
+        "start": 0.348,
+        "end": 0.509
+      },
+      {
+        "p": "t",
+        "start": 0.509,
+        "end": 0.67
+      }
+    ]
+  },
+  "Good job!": {
+    "file": "/voice/6222cca519.wav",
+    "durationS": 1.055,
+    "words": [
+      {
+        "text": "Good",
+        "start": 0,
+        "end": 0.275
+      },
+      {
+        "text": "job!",
+        "start": 0.275,
+        "end": 0.995
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "ɡ",
+        "start": 0,
+        "end": 0.059
+      },
+      {
+        "p": "ʊ",
+        "start": 0.059,
+        "end": 0.167
+      },
+      {
+        "p": "d",
+        "start": 0.167,
+        "end": 0.275
+      },
+      {
+        "p": "dʒ",
+        "start": 0.275,
+        "end": 0.515
+      },
+      {
+        "p": "ɑː",
+        "start": 0.515,
+        "end": 0.755
+      },
+      {
+        "p": "b",
+        "start": 0.755,
+        "end": 0.995
+      }
+    ]
+  },
+  "Well done!": {
+    "file": "/voice/12532d83ae.wav",
+    "durationS": 1.045,
+    "words": [
+      {
+        "text": "Well",
+        "start": 0.041,
+        "end": 0.445
+      },
+      {
+        "text": "done!",
+        "start": 0.445,
+        "end": 0.925
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "w",
+        "start": 0.041,
+        "end": 0.176
+      },
+      {
+        "p": "ɛ",
+        "start": 0.176,
+        "end": 0.31
+      },
+      {
+        "p": "l",
+        "start": 0.31,
+        "end": 0.445
+      },
+      {
+        "p": "d",
+        "start": 0.445,
+        "end": 0.605
+      },
+      {
+        "p": "ʌ",
+        "start": 0.605,
+        "end": 0.765
+      },
+      {
+        "p": "n",
+        "start": 0.765,
+        "end": 0.925
+      }
+    ]
+  },
+  "Nice!": {
+    "file": "/voice/21536ceec5.wav",
+    "durationS": 0.825,
+    "words": [
+      {
+        "text": "Nice!",
+        "start": 0.064,
+        "end": 0.705
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "n",
+        "start": 0.064,
+        "end": 0.277
+      },
+      {
+        "p": "ʌ",
+        "start": 0.277,
+        "end": 0.491
+      },
+      {
+        "p": "s",
+        "start": 0.491,
+        "end": 0.705
+      }
+    ]
+  },
+  "That's it!": {
+    "file": "/voice/e93f4cf2c1.wav",
+    "durationS": 0.639,
+    "words": [
+      {
+        "text": "That's",
+        "start": 0.026,
+        "end": 0.271
+      },
+      {
+        "text": "it!",
+        "start": 0.351,
+        "end": 0.591
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "ð",
+        "start": 0.026,
+        "end": 0.087
+      },
+      {
+        "p": "ɐ",
+        "start": 0.087,
+        "end": 0.149
+      },
+      {
+        "p": "t",
+        "start": 0.149,
+        "end": 0.21
+      },
+      {
+        "p": "s",
+        "start": 0.21,
+        "end": 0.271
+      },
+      {
+        "p": "ʌ",
+        "start": 0.351,
+        "end": 0.471
+      },
+      {
+        "p": "tʰ",
+        "start": 0.471,
+        "end": 0.591
+      }
+    ]
+  },
+  "Nicely done!": {
+    "file": "/voice/49f12061f1.wav",
+    "durationS": 1.124,
+    "words": [
+      {
+        "text": "Nicely",
+        "start": 0.043,
+        "end": 0.524
+      },
+      {
+        "text": "done!",
+        "start": 0.524,
+        "end": 1.004
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "n",
+        "start": 0.043,
+        "end": 0.139
+      },
+      {
+        "p": "aɪ",
+        "start": 0.139,
+        "end": 0.235
+      },
+      {
+        "p": "s",
+        "start": 0.235,
+        "end": 0.331
+      },
+      {
+        "p": "l",
+        "start": 0.331,
+        "end": 0.428
+      },
+      {
+        "p": "i",
+        "start": 0.428,
+        "end": 0.524
+      },
+      {
+        "p": "d",
+        "start": 0.524,
+        "end": 0.684
+      },
+      {
+        "p": "ʌ",
+        "start": 0.684,
+        "end": 0.844
+      },
+      {
+        "p": "n",
+        "start": 0.844,
+        "end": 1.004
+      }
+    ]
+  },
+  "There you go!": {
+    "file": "/voice/b7b297e72d.wav",
+    "durationS": 0.8,
+    "words": [
+      {
+        "text": "There",
+        "start": 0.031,
+        "end": 0.2
+      },
+      {
+        "text": "you",
+        "start": 0.28,
+        "end": 0.28
+      },
+      {
+        "text": "go!",
+        "start": 0.36,
+        "end": 0.68
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "ð",
+        "start": 0.031,
+        "end": 0.116
+      },
+      {
+        "p": "ʌ",
+        "start": 0.116,
+        "end": 0.2
+      },
+      {
+        "p": "j",
+        "start": 0.28,
+        "end": 0.28
+      },
+      {
+        "p": "ʌ",
+        "start": 0.28,
+        "end": 0.28
+      },
+      {
+        "p": "ɡ",
+        "start": 0.36,
+        "end": 0.52
+      },
+      {
+        "p": "ʌ",
+        "start": 0.52,
+        "end": 0.68
+      }
+    ]
   }
 }
