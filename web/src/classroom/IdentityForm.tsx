@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { saveSession, saveLearnerName, loadLearnerName, type DevSession } from './session';
+import { ensureVirtualLearner, learnerSlug } from './autoJoin';
 
 const NAME = /^[a-z0-9-]{1,24}$/;
 
@@ -10,22 +11,18 @@ export function IdentityForm({
   onBegin,
 }: {
   role: 'teacher' | 'learner';
-  onReady: (session: DevSession) => void;
-  /** Landing page: name alone begins, name plus classroom joins the class. */
+  onReady?: (session: DevSession) => void;
+  /** Landing page: an optional name and Begin. A virtual learner is provisioned silently (autoJoin.ts). */
   compact?: boolean;
   onBegin?: () => void;
 }) {
   const [name, setName] = useState(compact ? loadLearnerName() : role === 'teacher' ? 'ada' : 'lea');
-  const [classroom, setClassroom] = useState(compact ? '' : 'room-1');
+  const [classroom, setClassroom] = useState('room-1');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (compact && !classroom.trim()) {
-      setError('Enter a classroom to join a class.');
-      return;
-    }
     if (!NAME.test(name)) {
       setError('Use a short name made of letters, numbers, or hyphens.');
       return;
@@ -46,7 +43,7 @@ export function IdentityForm({
       const session = { ...body, role, name, label: body.label || 'development identity' };
       saveSession(session);
       window.dispatchEvent(new Event('articulate-classroom-session'));
-      onReady(session);
+      onReady?.(session);
     } catch {
       setError('The backend is not reachable.');
     } finally {
@@ -54,17 +51,33 @@ export function IdentityForm({
     }
   }
 
-  function beginWithName() {
-    if (!NAME.test(name)) {
-      setError('Use a short name made of letters, numbers, or hyphens.');
-      return;
-    }
-    saveLearnerName(name);
+  // Begin always proceeds: the name is optional and only shapes the virtual learner's display name.
+  function begin(event: FormEvent) {
+    event.preventDefault();
+    const slug = learnerSlug(name);
+    saveLearnerName(slug);
+    void ensureVirtualLearner(slug);
     onBegin?.();
   }
 
+  if (compact) {
+    return (
+      <form className="classroom-id classroom-id--inline" onSubmit={begin}>
+        <label>
+          <span className="classroom-id__prompt">
+            What should Ava call you? <span className="classroom-id__optional">Optional</span>
+          </span>
+          <input value={name} onChange={(event) => setName(event.target.value)} maxLength={40} autoComplete="nickname" />
+        </label>
+        <button type="submit" className="intro-landing__begin">
+          Begin
+        </button>
+      </form>
+    );
+  }
+
   return (
-    <form className={compact ? 'classroom-id classroom-id--inline' : 'classroom-id'} onSubmit={submit}>
+    <form className="classroom-id" onSubmit={submit}>
       <p className="classroom-id__label">Development identity. A name here is not an account.</p>
       <label>
         Name
@@ -72,19 +85,9 @@ export function IdentityForm({
       </label>
       <label>
         Classroom
-        <input
-          value={classroom}
-          onChange={(event) => setClassroom(event.target.value)}
-          pattern="[a-z0-9-]{1,24}"
-          required={!compact}
-        />
+        <input value={classroom} onChange={(event) => setClassroom(event.target.value)} pattern="[a-z0-9-]{1,24}" required />
       </label>
-      {compact && (
-        <button type="button" className="intro-landing__begin" onClick={beginWithName}>
-          Begin
-        </button>
-      )}
-      <button type="submit" className="btn btn--primary" disabled={busy}>{busy ? 'Opening' : role === 'teacher' ? 'Open dashboard' : compact ? 'Join class' : 'Join as learner'}</button>
+      <button type="submit" className="btn btn--primary" disabled={busy}>{busy ? 'Opening' : role === 'teacher' ? 'Open dashboard' : 'Join as learner'}</button>
       {error && <p role="alert">{error}</p>}
     </form>
   );

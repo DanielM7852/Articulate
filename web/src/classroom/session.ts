@@ -7,6 +7,8 @@ export type DevSession = {
   uri: string;
   name: string;
   label: string;
+  /** Minted silently for this device (autoJoin.ts), not an explicit class join. */
+  auto?: boolean;
 };
 
 const KEY = 'articulate.classroom.session';
@@ -23,7 +25,12 @@ export function loadLearnerName(): string {
 }
 
 export function saveLearnerName(name: string): void {
-  localStorage.setItem(NAME_KEY, name);
+  try {
+    if (name) localStorage.setItem(NAME_KEY, name);
+    else localStorage.removeItem(NAME_KEY);
+  } catch {
+    /* storage blocked: the name is display only */
+  }
 }
 
 export function loadSession(): DevSession | null {
@@ -44,6 +51,37 @@ export function saveSession(session: DevSession): void {
 
 export function clearSession(): void {
   sessionStorage.removeItem(KEY);
+}
+
+function assignedKey(profileId: string): string {
+  return `articulate.classroom.assigned.${profileId}`;
+}
+
+/** LessonSync records whether this profile's current lesson came from a teacher (not the default plan). */
+export function storeTeacherLesson(profileId: string, assigned: boolean): void {
+  try {
+    if (assigned) localStorage.setItem(assignedKey(profileId), '1');
+    else localStorage.removeItem(assignedKey(profileId));
+  } catch {
+    /* storage blocked */
+  }
+}
+
+export function hasTeacherLesson(profileId: string): boolean {
+  try {
+    return localStorage.getItem(assignedKey(profileId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The classroom flow (teacher greeting, straight to practice, no survey) is for an explicit class join, or for a
+ * silently provisioned learner whose teacher has actually assigned a lesson. Otherwise onboarding is unchanged.
+ */
+export function classroomFlow(session: DevSession | null = loadSession()): boolean {
+  if (!session || session.role !== 'learner') return false;
+  return !session.auto || hasTeacherLesson(session.profileId);
 }
 
 export function wsUri(uri: string): string {

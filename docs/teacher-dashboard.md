@@ -16,9 +16,19 @@ Expiration is checked when a learner reducer runs, including the 5 second presen
 
 ## Identity
 
-A display name is not authority. On localhost the backend holds the publisher token in `backend/.local_store/classroom_owner.json` (gitignored) and mints a one-time invite. The browser accepts that invite with its own identity. The same development name returns the same token, so two browsers for one learner share the profile. Teacher and learner are different identities. A public reducer cannot grant teacher. Students cannot read the classroom board or another learner's attempts. Only the publisher identity can write a verified or synthetic summary.
+A display name is not authority. Where the classroom database runs beside the backend (localhost, or the `deploy/teach` container) the backend holds the publisher token in `backend/.local_store/classroom_owner.json` (gitignored) and mints a one-time invite. The browser accepts that invite with its own identity. The same development name returns the same token, so two browsers for one learner share the profile. Teacher and learner are different identities. A public reducer cannot grant teacher. Students cannot read the classroom board or another learner's attempts. Only the publisher identity can write a verified or synthetic summary.
 
 This is a development login. Production still needs a real account system that maps a signed-in person to one Spacetime identity, and the publisher token must stay on the server.
+
+### Virtual learners
+
+Nobody logs in or joins anything in the learner app. When a learner taps **Begin** (or reloads past the landing page without a session), `web/src/classroom/autoJoin.ts` quietly asks `/v1/dev/classroom/session` for a learner in the default classroom and keeps that session in the tab (`auto: true`). It never blocks Begin and never shows an error; if the backend is unreachable it tries once more after 10 seconds, then gives up for that page load and the app runs without the classroom.
+
+- A virtual learner is a device, not a person. Its name is the optional name typed on the landing page (lowercased, `[a-z0-9-]`, accents and other characters dropped) plus a 4-character device suffix kept in `localStorage` (`articulate.deviceId`), for example `lea-k3f9`, or `learner-k3f9` with no name. The whole name stays within 24 characters. The same device gets the same profile in every tab; two devices that type the same name get different profiles. Clearing site data makes a new device.
+- The name is display only. It grants nothing: the route only mints the role it is asked for, a learner identity cannot call teacher reducers, and nothing turns a learner into a teacher. The development route still mints a teacher identity for anyone who asks for `role: teacher` on a host where it is enabled; that is the existing development login, not something the virtual learner adds.
+- The default classroom is `VITE_CLASSROOM_DEFAULT` in `web/.env` (falls back to `room-1`).
+- A virtual learner keeps the usual onboarding (greeting, survey, tutorial). The classroom flow (the teacher greeting, straight to practice, no survey) applies to an explicit class join, or once a teacher has assigned that learner a lesson (a learner override or a classroom assignment, not the default plan). `LessonSync` records that per profile when the lesson arrives.
+- The route's guard is where the database lives, not who calls: it serves any caller when the owner URI in `classroom_owner.json` is `127.0.0.1` or `localhost`, and refuses (404) when the owner points anywhere else, such as Maincloud. That covers local development and the deployed teaching console (`deploy/teach`), whose database runs on `127.0.0.1` in the same container while nginx proxies `/v1/dev/` from the public host.
 
 ## Run it locally
 
@@ -37,10 +47,10 @@ npm run dev
 
 Open two windows:
 
-1. Learner: <http://127.0.0.1:5173/>. Development identity name `lea`, classroom `room-1`, then **Join as learner**.
+1. Learner: <http://127.0.0.1:5173/>. Optionally type `lea` in "What should Ava call you?", then **Begin**. A virtual learner such as `lea-k3f9` joins the default classroom (`VITE_CLASSROOM_DEFAULT`, else `room-1`) in the background; there is no join step.
 2. Teacher: <http://127.0.0.1:5173/teach.html>. Name `ada`, classroom `room-1`, then **Open dashboard**.
 
-The teacher board lists `lea` with presence, exercise, revision, usable and unusable counts, the latest finding, and acknowledgment. Select `lea`, set the target and context, choose **Preview visible change**, then **Save lesson**. The learner shows "Lesson updated by your teacher" and the new target. The board moves from pending to applied. Refreshing either window keeps that revision. A second learner name in the same classroom is independent. A different classroom name is not on this board.
+The teacher board lists `lea-k3f9` (the suffix is this browser's device id) with presence, exercise, revision, usable and unusable counts, the latest finding, and acknowledgment. Select that learner, set the target and context, choose **Preview visible change**, then **Save lesson**. The learner shows "Lesson updated by your teacher" and the new target. The board moves from pending to applied. Refreshing either window keeps that revision. Another browser (another device suffix) is an independent learner in the same classroom. A learner in a different classroom is not on this board.
 
 Practice audio still goes to the existing comparison service. A verified head comparison is written only when the learner's classroom profile id is sent to `/v1/word-match`. The dashboard subscribes to the compact board, and loads attempt cards only for the selected learner. Raw recordings are not in the subscription.
 
@@ -74,12 +84,12 @@ Publish a new database name. Do not point this at an existing production databas
 .tools\spacetime\spacetimedb-cli.exe publish articulate-classroom --server maincloud --module-path spacetimedb --yes=skip-login
 ```
 
-Put that database's publisher token only in the server environment, not in the browser. Leave `CLASSROOM` development routes off for any host that is not localhost; they already refuse a non-local owner URI. Generate bindings with `spacetime generate --lang typescript --out-dir web/src/module_bindings --module-path spacetimedb`. Then run the auth test against that database before sending teachers to it.
+Put that database's publisher token only in the server environment, not in the browser. The development routes stay off for this database: they refuse an owner URI that is not `127.0.0.1` or `localhost`, so virtual learners are not minted against Maincloud. Generate bindings with `spacetime generate --lang typescript --out-dir web/src/module_bindings --module-path spacetimedb`. Then run the auth test against that database before sending teachers to it.
 
 ## Limits
 
 - One teacher identity per classroom in this version.
-- The development invite route exists only for localhost.
+- The development invite route works only when the classroom database runs beside the backend (owner URI on `127.0.0.1` or `localhost`): local development and `deploy/teach`.
 - An acknowledgment means the lesson was received or applied, not that the learner understood it.
 - A lesson that arrives during recording waits until the take ends. The attempt keeps the revision it started with.
 - Reconnect shows the current lesson again and does not speak it.

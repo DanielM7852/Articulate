@@ -188,6 +188,16 @@ function startPresence(): void {
   }
 }
 
+/**
+ * A classroom session saved after ui.join went out (autoJoin.ts) would otherwise wait for the next 20 s ping to
+ * attribute this tab; one extra ping carries the pid now. Before ui.join this does nothing: the join reads it.
+ */
+export function announceLearner(): void {
+  if (!presenceStarted) return;
+  const p = learnerPid();
+  if (p) emit('ui', 'db', 'ui.ping', 'presence ping', { pid: p });
+}
+
 function convert(r: RawRow): TelemetryEvent {
   let payload: Record<string, unknown> = {};
   try {

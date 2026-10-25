@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { QUESTIONS, questionLine } from '../audio/bakedLines';
-import { loadSession } from '../classroom/session';
+import { classroomFlow } from '../classroom/session';
 import {
   AudioLines,
   CalendarDays,
@@ -76,7 +76,7 @@ export default function Quiz() {
   const { preferences, updatePreferences, updatePlan, completeQuiz, plan, skipClassroomSurvey } = useAppState();
   const narration = useNarration();
   const [saving, setSaving] = useState(false);
-  const classroomLearner = loadSession()?.role === 'learner';
+  const classroomLearner = classroomFlow();
 
   useEffect(() => {
     if (classroomLearner) skipClassroomSurvey();

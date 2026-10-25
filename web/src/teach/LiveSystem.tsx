@@ -107,8 +107,7 @@ export default function LiveSystem({
             paused={paused}
             demo={demo}
             learner={location.learner}
-            // 2026-10-25: the live graph's optional attempt prop is landing separately; this spread compiles before and after it does.
-            {...({ attempt: location.attempt } as object)}
+            attempt={location.attempt}
           onEvent={(event) => {
             const commandId = commandOf(event.payload);
             setEvents((current) => [{ ...event, commandId, payload: publicPayload(event.payload) }, ...current].slice(0, 40));

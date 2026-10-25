@@ -234,6 +234,9 @@
 }
 .dash-node--claude .dash-card {
   flex-basis: 100%;
+  /* hold the annotation's width: long figures move the call count to a second stats line instead of widening the card
+     into the lanes beside it */
+  min-width: 0;
 }
 
 /* ---------- Cards ---------- */
@@ -408,6 +411,28 @@
   color: var(--color-muted);
 }
 
+/* recap: the job's state leads its readout, with a dot that breathes while Claude writes */
+.dash-recap__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--color-navy);
+}
+.dash-recap__state::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.dash-recap__state[data-state='writing']::before {
+  animation: dash-breathe 1.6s ease-in-out infinite;
+}
+.dash-recap__state[data-state='error'] {
+  color: var(--color-warn);
+}
+
 /* sparc */
 .dash-standby {
   font-family: var(--font-serif);
@@ -531,7 +556,8 @@
   padding-top: 7px;
   border-top: 1px solid var(--color-line);
   display: flex;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 2px 10px;
   white-space: nowrap;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -552,21 +578,35 @@
 }
 
 /* ---------- Legend ---------- */
-/* bottom right, under the phone model */
+/* a strip along the top of the stage, between the brand and the counts (the embedded console hides the header, so
+   the strip sits alone above the graph); the right-hand column now holds the recap and the phone model */
 .dash-legend {
   position: absolute;
-  left: 1420px;
-  top: 604px;
-  width: 156px;
+  left: 360px;
+  top: 10px;
+  width: 720px;
   font-size: 11.5px;
   line-height: 17px;
   color: #8a9393;
 }
 .dash-legend__title {
-  margin-bottom: 3px;
+  margin-right: 6px;
   font-family: var(--font-serif);
   font-size: 13px;
   color: var(--color-navy);
+}
+/* the attempt filter, when one is set: it changes what every card shows, so it leads the strip in navy */
+.dash-legend__filter {
+  margin-right: 8px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-navy-soft);
+  color: var(--color-navy);
+  white-space: nowrap;
+}
+.dash-legend__filter b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Footer ticker ---------- */
@@ -645,6 +685,7 @@
 @media (prefers-reduced-motion: reduce) {
   .dash-pill i,
   .dash-caret,
+  .dash-recap__state::before,
   .dash-replay {
     animation: none;
   }

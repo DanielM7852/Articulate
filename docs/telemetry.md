@@ -42,22 +42,33 @@ At most 400 rows. When an insert pushes the count over, the oldest rows among th
 
 ## Node ids
 
-| id        | what it is                                                   | where it runs |
-|-----------|--------------------------------------------------------------|---------------|
-| camera    | webcam capture                                               | browser       |
-| mediapipe | MediaPipe FaceLandmarker -> LipFrame                         | browser worker|
-| mic       | microphone capture                                           | browser       |
-| audio     | formant / loudness analysis (vowel-mapper worklet)           | browser       |
-| stt       | Cartesia Ink speech to text                                  | Cartesia      |
-| tts       | Cartesia Sonic text to speech (Ava's voice)                  | Cartesia      |
-| backend   | FastAPI app (`backend/`)                                     | server        |
-| pitch     | librosa F0 extraction                                        | server        |
-| sparc     | SPARC articulatory model service (`services/articulation`)   | server        |
-| db        | SpacetimeDB                                                  | maincloud     |
-| claude    | Anthropic Claude (coach decisions, notes, insights, recaps, caption grading) | Anthropic |
-| ui        | the learner's screen                                         | browser       |
+The reducer allowlist has twelve ids (the rows without an asterisk). The dashboard draws six more clusters
+(marked *) that it derives from event kinds and payload fields; the reducer never sees those ids. See
+"Kind-routed components" for the routing rules. Positions are on the 1600 x 900 stage, with the cluster radius.
 
-The dashboard also derives extra nodes from event kinds and payload fields; see "Kind-routed components".
+| id         | name                | caption                                                             | where it runs                 | stage x, y (r)  |
+|------------|---------------------|---------------------------------------------------------------------|-------------------------------|-----------------|
+| camera     | Camera              | webcam capture                                                      | browser                       | 404, 112 (28)   |
+| mediapipe  | MediaPipe           | FaceLandmarker -> LipFrame; draws the learner's face                | browser worker                | 404, 262 (40)   |
+| mic        | Microphone          | microphone capture                                                  | browser                       | 84, 480 (28)    |
+| audio      | Audio               | AnalyserNode spectrum and waveform, vowel-mapper worklet formants   | browser                       | 300, 508 (40)   |
+| realtime*  | Realtime            | speech to text in the word lesson (OpenAI Realtime over WebRTC)     | OpenAI                        | 650, 236 (36)   |
+| stt        | Ink                 | hands-free speech to text (Cartesia Ink)                            | Cartesia                      | 860, 236 (34)   |
+| tts        | Sonic               | text to speech, Ava's voice                                         | Cartesia                      | 1070, 236 (36)  |
+| head*      | Head                | Ava's 3D head (three.js / TalkingHead)                              | browser                       | 1280, 236 (30)  |
+| ui         | Learner             | the learner's screen                                                | browser                       | 1490, 266 (44)  |
+| recap*     | Recap               | post-session recap by Claude, emailed via Resend                    | server                        | 1500, 400 (28)  |
+| phones*    | Phones              | KoelLabs wav2vec2 phone model                                       | GPU service                   | 1460, 690 (30)  |
+| backend    | Backend             | FastAPI app (`backend/`)                                            | server                        | 740, 430 (52)   |
+| claude     | GPT / Claude        | coach decisions, notes, insights, recaps, caption grading; named from each event's provider (`Coach model` before any evidence) | OpenAI / Anthropic | 970, 468 (72) |
+| db         | SpacetimeDB         | articulate-live: telemetry, attempts                                | maincloud                     | 470, 636 (38)   |
+| pitch      | Acoustics           | Praat / Parselmouth: F0, F1, F2                                     | server                        | 676, 636 (32)   |
+| sparc      | SPARC               | articulation service (off unless ARTICULATION_URL is set)           | server (`services/articulation`) | 862, 636 (34) |
+| azure*     | Azure               | pronunciation assessment                                            | Azure Speech                  | 1048, 644 (32)  |
+| classroom* | Classroom DB        | lessons, roster, summaries (separate database)                      | SpacetimeDB                   | 1340, 650 (36)  |
+
+The coach checker (`backend/scripts/grade_coach.py`) emits `checker.*` events but has no cluster; they show as
+plain backend -> db traffic. Layout and curves live in `web/src/dashboard/layout.ts`, routing in `route.ts`.
 
 ## Event kinds and payloads
 
