@@ -3,7 +3,7 @@ import type { VowelPoint } from '@vowel-mapper/audio/tracker';
 import { buildRibbons, buildTrail, sampleKey, trailHead, trailOpacity } from '@vowel-mapper/components/trail';
 import { useTrailAnimation } from '@vowel-mapper/components/useTrailAnimation';
 import { SOUNDS, SOUND_ORDER, type SoundId } from '../state/types';
-import { HOLD_GOAL_SEC, TARGETS, inTarget, project, targetEllipse } from '../vowel/targets';
+import { HOLD_GOAL_SEC, inTarget, project, targetEllipse, type VowelTarget } from '../vowel/targets';
 
 /** Ink widths in CSS pixels: a tapered comet tail while live, an even line otherwise. */
 const INK_WIDTH = 5;
@@ -26,6 +26,7 @@ export function VowelGraph({
   hidden,
   live = false,
   emptyHint,
+  targets,
 }: {
   sound: SoundId;
   point: VowelPoint | null;
@@ -40,6 +41,8 @@ export function VowelGraph({
   live?: boolean;
   /** Second line of the empty state; defaults to the recording hint. */
   emptyHint?: string;
+  /** The learner's three targets (see targetsFor): drawn, labelled and used for the hold. */
+  targets: Record<SoundId, VowelTarget>;
 }) {
   const plotRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -77,7 +80,7 @@ export function VowelGraph({
     );
   }
 
-  const target = TARGETS[sound];
+  const target = targets[sound];
   const ellipse = targetEllipse(target);
   // Display position only: eased along the trail toward the accepted point, which it reaches when movement stops.
   const cursor = point ? (trailHead(geometry, headMs) ?? toPx(point)) : null;
@@ -111,7 +114,7 @@ export function VowelGraph({
           <polygon
             className="vg-space"
             points={SOUND_ORDER.map((id) => {
-              const c = project(TARGETS[id]);
+              const c = project(targets[id]);
               return `${c.x},${c.y}`;
             }).join(' ')}
           />
@@ -126,7 +129,7 @@ export function VowelGraph({
         )}
 
         {SOUND_ORDER.map((id) => {
-          const c = project(TARGETS[id]);
+          const c = project(targets[id]);
           return (
             <span
               key={id}

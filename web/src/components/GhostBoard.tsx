@@ -6,8 +6,8 @@ import { SCORING, clamp, lipOk, lipShape, loudnessFromRms, smoothToward } from '
 import { GhostAttempt, ghostAt, sizeModel, unitDurationMs, unitSegments, unitWindow } from '../game/ghost/follow';
 import type { GhostPathModel, GhostUnit } from '../game/ghost/types';
 import type { GhostWordSpec } from '../game/ghost/words';
-import { SOUND_ORDER } from '../state/types';
-import { AXES, TARGETS, project } from '../vowel/targets';
+import { SOUND_ORDER, type SoundId } from '../state/types';
+import { AXES, project, type VowelTarget } from '../vowel/targets';
 import { InkTrail } from './board/ink';
 import '../styles/word-board.css';
 import '../styles/ghost-board.css';
@@ -25,6 +25,8 @@ export interface GhostBoardProps {
   model: GhostPathModel;
   /** The learner's ln voice factor (Karsten's single multiplier). */
   learnerFactor: number;
+  /** The learner's vowel targets (targetsFor): only the backdrop outline uses them; ghost sizing stays on the factor. */
+  targets: Record<SoundId, VowelTarget>;
   unit: GhostUnit;
   mode: 'idle' | 'watch' | 'live';
   /** Playback speed for watch mode: 1 = natural. */
@@ -77,7 +79,7 @@ const VERDICT_WORD: Record<ZoneVerdict, string> = {
 };
 
 /** Soft grid and the dashed vowel-space outline, in plot percent (same projection as VowelGraph). */
-const PlotBackdrop = memo(function PlotBackdrop() {
+const PlotBackdrop = memo(function PlotBackdrop({ targets }: { targets: Record<SoundId, VowelTarget> }) {
   return (
     <svg className="wb-backdrop" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
       {[25, 50, 75].map((g) => (
@@ -89,7 +91,7 @@ const PlotBackdrop = memo(function PlotBackdrop() {
       <polygon
         className="wb-space"
         points={SOUND_ORDER.map((id) => {
-          const c = project(TARGETS[id]);
+          const c = project(targets[id]);
           return `${c.x},${c.y}`;
         }).join(' ')}
       />
@@ -106,6 +108,7 @@ export function GhostBoard({
   spec,
   model,
   learnerFactor,
+  targets,
   unit,
   mode,
   speed,
@@ -450,7 +453,7 @@ export function GhostBoard({
         data-passing="false"
       >
         <div className="wb-plot" ref={plotRef}>
-          <PlotBackdrop />
+          <PlotBackdrop targets={targets} />
           {geometry && (
             <svg className="wb-layer" viewBox={`0 0 ${size.w} ${size.h}`} aria-hidden="true">
               {/* Close-zone band, then the model line: dim everywhere, solid on the active unit. */}

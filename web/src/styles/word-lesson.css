@@ -112,3 +112,12 @@ button.wl-pill {
     width: 100%;
   }
 }
+
+/* Replay the side-view demo: a real button inside the avatar pill row. */
+.wl-replay {
+  cursor: pointer;
+}
+.wl-replay:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

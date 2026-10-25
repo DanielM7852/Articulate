@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     live_openai_model: str = "gpt-5.4-mini"  # decide, word coach without audio, session, ask
     live_openai_background_model: str = "gpt-5.5"  # notes and insight
     live_openai_audio_model: str = "gpt-audio-1.5"  # word coach with the learner's attempt audio
+    # Azure Speech Pronunciation Assessment for the consonant coach. Configured only when key and region are both set.
+    azure_speech_key: str | None = None
+    azure_speech_region: str | None = None  # e.g. "westus2"
+    azure_pronunciation_timeout_s: float = 4.0
+    consonant_azure_pass: float = 60.0  # part score below this can never be got_it
     spacetime_uri: str = "https://maincloud.spacetimedb.com"
     spacetime_database: str | None = None
     spacetime_token: str | None = None
@@ -134,6 +139,10 @@ class Settings(BaseSettings):
     @property
     def openai_configured(self) -> bool:
         return bool(self.openai_api_key)
+
+    @property
+    def azure_configured(self) -> bool:
+        return bool(self.azure_speech_key and self.azure_speech_region)
 
     @property
     def spacetime_configured(self) -> bool:
