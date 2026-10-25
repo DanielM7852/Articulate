@@ -15,6 +15,7 @@ from app import telemetry
 from app.integrations.spacetime import SpacetimeError
 from app.live import insight, llm
 from app.live.articulation import annotate_attempts, extract_features
+from app.live.consonant import ConsonantRequest, ConsonantResponse, coach_consonant
 from app.live.coordination import Coordination
 from app.live.identity import authorize_profile, issue_identity, read_identity
 from app.live.notes import update_notes
@@ -169,6 +170,14 @@ async def live_word_ask(body: WordAskRequest, request: Request) -> WordAskRespon
     """A learner's question from Ava's ask_coach tool. Always 200 with a validated line (model or fallback)."""
     authorize_profile(request, body.profileId)
     return await answer_word_question(_deps(request), body)
+
+
+@router.post("/consonant", response_model=ConsonantResponse)
+async def live_consonant(body: ConsonantRequest, request: Request) -> ConsonantResponse:
+    """One recorded attempt at the tr or ck of "track", coached by the OpenAI audio model. Always 200 once validated."""
+    if body.profileId is not None:
+        authorize_profile(request, body.profileId)
+    return await coach_consonant(_deps(request), body)
 
 
 @router.post("/notes", response_model=LearnerNotes, responses=ACCEPTED)

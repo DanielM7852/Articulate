@@ -11,6 +11,7 @@ import PracticeStudio from './screens/PracticeStudio';
 import OnYourOwn from './screens/OnYourOwn';
 import WordLesson from './screens/WordLesson';
 import Dashboard from './screens/Dashboard';
+import ConsonantCoach from './screens/ConsonantCoach';
 
 /**
  * Flow: the guide greets the learner, then the quiz, then a tutorial where the
@@ -36,6 +37,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/lesson" element={<Guard need="quiz"><WordLesson /></Guard>} />
           <Route path="/practice" element={<Guard need="tutorial"><PracticeStudio /></Guard>} />
           <Route path="/own" element={<Guard need="tutorial"><OnYourOwn /></Guard>} />
+          <Route path="/consonants" element={<ConsonantCoach />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/summary" element={<Navigate to="/own" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
