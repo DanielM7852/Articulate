@@ -57,6 +57,9 @@ async def _lifespan(app: FastAPI):
     try:
         yield
     finally:
+        recap_service = getattr(app.state, "recap_service", None)
+        if recap_service is not None:
+            await recap_service.aclose()
         await telemetry.aclose()
         await runtime.aclose()
 

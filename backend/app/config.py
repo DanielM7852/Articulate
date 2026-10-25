@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     live_jobs_per_profile: int = Field(default=4, ge=1, le=16)
     live_job_retention_s: int = Field(default=3600, ge=300, le=86400)
 
+    # Post-session recap: always Claude. Email (Resend) is optional.
+    live_recap_model: str = "claude-opus-5-5"
+    live_recap_effort: str = "high"
+    live_recap_timeout_s: float = 120.0
+    resend_api_key: str | None = None
+    recap_email_from: str | None = None
+
     moss_project_id: str | None = None
     moss_project_key: str | None = None
     moss_index_name: str = "articulate-cues"
@@ -142,6 +149,10 @@ class Settings(BaseSettings):
     @property
     def spacetime_configured(self) -> bool:
         return bool(self.spacetime_database and self.spacetime_token)
+
+    @property
+    def resend_configured(self) -> bool:
+        return bool(self.resend_api_key and self.recap_email_from)
 
     @property
     def articulation_configured(self) -> bool:

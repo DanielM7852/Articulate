@@ -30,6 +30,7 @@ import { GHOST_WORDS, partPrompt, type GhostWordSpec } from '../game/ghost/words
 import type { WordAttemptResult } from '../game/types';
 import { useAppState } from '../state/AppState';
 import { learnerProfileId } from '../state/learnerId';
+import { rememberedRecapEmail, startRecap, type RecapStatus } from '../live/recap';
 import { targetsFor } from '../vowel/targets';
 import { FormantDebug } from '../components/FormantDebug';
 import '../conversation/director/director.css';
@@ -223,6 +224,9 @@ export default function WordLesson() {
   const attemptTap = useAttemptAudio(mic.stream);
   /** When the board produced the result being judged (Date.now() clock), so the coach clip ends there, not after scoring. */
   const judgedAt = useRef<{ attemptId: string; at: number } | null>(null);
+  /** Attempt ids judged this lesson, and the recap started for them on Finish (re-run only if more were judged since). */
+  const judgedIds = useRef<Set<string>>(new Set());
+  const recapStart = useRef<{ count: number; promise: Promise<RecapStatus | null> } | null>(null);
   const voice = useVoiceFrames(mic.stream);
   const { camera, setCamera, narration: voiceOn, captions, completeOnboarding } = useAppState();
   const profileId = useMemo(() => learnerProfileId(), []);
@@ -649,6 +653,17 @@ export default function WordLesson() {
     [newAttempt, realtimeActive, setPhase, takeFloor],
   );
 
+  /** Start the session recap for the attempts judged so far (null when there are none or it can't start). Never throws. */
+  const startRecapOnce = useCallback((): Promise<RecapStatus | null> => {
+    const ids = [...judgedIds.current].slice(-200);
+    if (ids.length === 0) return Promise.resolve(null);
+    if (recapStart.current && recapStart.current.count === judgedIds.current.size) return recapStart.current.promise;
+    const promise = startRecap({ profileId, attemptIds: ids, word: cur.current.spec.word, email: rememberedRecapEmail() || null })
+      .catch(() => null);
+    recapStart.current = { count: judgedIds.current.size, promise };
+    return promise;
+  }, [profileId]);
+
   /** The word is finished: Ava says so (unless her relay already did) and offers the next word. */
   const wordDone = useCallback(
     async (viaAva: boolean) => {
@@ -958,6 +973,7 @@ export default function WordLesson() {
       } catch {
         audio = null;
       }
+      judgedIds.current.add(result.attemptId); // sent to the backend coach, so it counts for the recap
       try {
         const resp = await requestWordCoach({ result, profileId, practiceZoneIds: practice, audio }, ctl.signal);
         caption = resp.caption;
@@ -1094,6 +1110,7 @@ export default function WordLesson() {
    */
   const judgeAttempt = useCallback(async (result: WordAttemptResult): Promise<WordAttemptResult> => {
     judgedAt.current = { attemptId: result.attemptId, at: Date.now() };
+    judgedIds.current.add(result.attemptId);
     try {
       const { spec: word, plan } = cur.current;
       const step = plan[shownStep.current];
@@ -1325,12 +1342,14 @@ export default function WordLesson() {
     }
   }, [endWindow, gateAva, goLive, quietAva, realtimeActive, rememberSide, seq.speakLine, setPhase, takeFloor, talkWindow]);
 
-  function finish() {
+  async function finish() {
     stopRun();
     quietAva();
     ava.disconnect();
     completeOnboarding();
-    navigate('/');
+    // Start (or reuse) the recap; wait briefly for its id, otherwise go home as before.
+    const recap = await Promise.race([startRecapOnce(), new Promise<null>((r) => setTimeout(() => r(null), 3000))]);
+    navigate(recap ? `/recap/${encodeURIComponent(recap.recapId)}` : '/');
   }
 
   /**
