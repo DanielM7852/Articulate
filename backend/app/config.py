@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     spacetime_uri: str = "https://maincloud.spacetimedb.com"
     spacetime_database: str | None = None
     spacetime_token: str | None = None
+    # Dashboard telemetry (docs/telemetry.md). Without SPACETIME_TOKEN the backend mints and caches an anonymous
+    # identity (the telemetry table and reducer are public) and writes to SPACETIME_DATABASE or this database.
+    telemetry_enabled: bool = True
+    telemetry_database: str = "articulate-live"
     live_coach_model: str = "claude-sonnet-5-5"
     live_coach_thinking: str = "on"  # "on" (adaptive, default) or "off"
     live_notes_model: str = "claude-sonnet-5-5"

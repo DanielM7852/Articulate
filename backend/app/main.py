@@ -28,14 +28,16 @@ from app import telemetry
 
 
 def _ensure_live_logging() -> None:
-    """Make app.live INFO lines (timings, warm-up) visible under uvicorn, which leaves app loggers silent."""
-    log = logging.getLogger("app.live")
-    if log.level == logging.NOTSET or log.level > logging.INFO:
-        log.setLevel(logging.INFO)
-    if not log.handlers and not logging.getLogger().handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
-        log.addHandler(handler)
+    """Make app.live and app.telemetry INFO lines (timings, warm-up, identity) visible under uvicorn,
+    which leaves app loggers silent."""
+    for name in ("app.live", "app.telemetry"):
+        log = logging.getLogger(name)
+        if log.level == logging.NOTSET or log.level > logging.INFO:
+            log.setLevel(logging.INFO)
+        if not log.handlers and not logging.getLogger().handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+            log.addHandler(handler)
 
 
 @asynccontextmanager
@@ -46,7 +48,7 @@ async def _lifespan(app: FastAPI):
     fake = getattr(app.state, "live_spacetime_transport", None)
     telemetry_transport = getattr(app.state, "telemetry_transport", None)
     if fake is None or telemetry_transport is not None:
-        telemetry.configure(app.state.settings, telemetry_transport)
+        telemetry.configure(app.state.settings, telemetry_transport, announce=True)
     try:
         # Shared APIs only coordinate; provider clients belong to the independently scaled workers.
         runtime.http(getattr(app.state, "live_spacetime_transport", None))
