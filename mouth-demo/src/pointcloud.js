@@ -115,7 +115,7 @@ const SHAPE = {
   toneWeight: 0.35, // dots per sample: toneWeight + tone, so darker samples carry more dots
   coverage: 0.72, // share of the picture's area the dots cover on average; sets their radius from their density
   minPx: 1.0, // device px: smallest dot drawn on the picture; smaller ones are drawn at this size, fainter
-  appearMs: 600 // the picture fades in when it is first shown
+  appearMs: 200 // the picture fades in when it is first shown (crossfading with the image it replaces)
 };
 const DISSOLVE = { spread: 0.6, random: 0.3, out: 0.07, outZ: 0.3, up: 0.16, curl: 0.035, fadeStart: 0.1, fadeEnd: 0.9, shrink: 0.45 };
 const REDUCED_FADE_MS = 300; // reduced motion: a plain crossfade, no travel

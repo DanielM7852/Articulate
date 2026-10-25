@@ -1,7 +1,7 @@
 /* ---------- Intro: landing overlay over the stage ----------
- * Once the guide is ready its dots draw the ribbon (data-dotted): the overlay turns see-through over a
- * paper-coloured stage and the picture steps aside. Begin fades the overlay while the ribbon morphs into
- * the head. It stacks above the guide (z 2) and below the floating access toggles (.ob-bar--float, z 3).
+ * Idle, it is the plain landing page. On Begin the guide's dots take the ribbon's place (data-dotted): the
+ * overlay turns see-through over a paper-coloured stage and the picture crossfades to the dots; then the
+ * overlay fades (data-gone) while the dotted ribbon morphs into the head. It stacks above the guide (z 2) and below the floating access toggles (.ob-bar--float, z 3).
  */
 .intro-landing {
   --gutter: clamp(24px, 5vw, 72px);
@@ -17,7 +17,7 @@
   font-family: var(--font-sans);
   transition:
     opacity 420ms var(--ease-out),
-    background-color 300ms ease;
+    background-color 200ms ease;
 }
 /* The stage's staggered entrance fills opacity, which would block the fade-out. */
 .ob-content.intro > .intro-landing {
@@ -99,7 +99,7 @@
   width: 87.57%; /* 740 / 845 */
   height: 122.56%; /* 440 / 359 */
   object-fit: cover;
-  transition: opacity 600ms ease; /* crossfades with the dots' own fade-in */
+  transition: opacity 200ms ease; /* crossfades with the dots' own fade-in */
 }
 .intro-landing__invite {
   grid-column: 1;

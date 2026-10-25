@@ -14,15 +14,16 @@ import sculpturalVoice from '../assets/landing/sculptural-voice.png';
 import '../styles/intro.css';
 
 /**
- * First screen: the landing page over the stage, with its ribbon drawn by the
- * guide's own dots, and a Begin button. The tap unlocks audio (browsers block
- * sound before it), the page fades, and the ribbon's dots morph into her head;
- * she introduces herself with a lip-synced voice and
+ * First screen: the landing page over the stage, with its ribbon picture and a
+ * Begin button. The tap unlocks audio (browsers block sound before it), the
+ * guide's dots take the ribbon's place, the page fades, and the dots morph into
+ * her head; she introduces herself with a lip-synced voice and
  * captions, and dissolves again on the way to the survey. The camera is asked
  * for on Begin so she looks at the learner; if that is denied she follows the
  * pointer instead. Returning learners get a shorter line and go to the lesson.
  */
-type Phase = 'idle' | 'assembling' | 'talking' | 'leaving';
+/** forming: Begin was tapped and the guide's dots are taking the ribbon picture's place. */
+type Phase = 'idle' | 'forming' | 'assembling' | 'talking' | 'leaving';
 type GuideState = 'loading' | 'ready' | 'error';
 
 const GREETING = [
@@ -35,10 +36,10 @@ const ASSEMBLE_MS = 1600;
 const DISPERSE_MS = 1100;
 /** The landing's paper colour (--color-cream): the stage takes it while the ribbon is drawn in dots. */
 const PAPER = '#faf9f6';
-/** After Begin the stage eases from the paper back to its own gradient. */
+/** As the morph starts the stage eases from the paper back to its own gradient. */
 const BACKDROP_MS = 700;
-/** Re-lay the dotted ribbon this long after the last resize or scroll. */
-const RELAYOUT_MS = 150;
+/** The dotted ribbon holds this long (its 200 ms crossfade with the picture included) before the morph. */
+const HOLD_MS = 300;
 /** Speech that has not started by now (no voice, blocked audio) falls back to reading time. */
 const START_TIMEOUT_MS = 6000;
 
@@ -172,9 +173,19 @@ export default function Intro() {
   const narration = useNarration();
   const play = useGuideVoice(guide, narration, audio);
   const sculpture = useRef<HTMLImageElement>(null);
-  const landing = useRef<HTMLElement>(null);
   // The ribbon is drawn by the guide's dots (the picture is hidden); false keeps the picture.
   const [dotted, setDotted] = useState(false);
+  // The landing page has left: it fades while the head is built.
+  const pageGone = phase !== 'idle' && phase !== 'forming';
+  const mounted = useRef(true);
+  const holdTimer = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false; // a shape that resolves after this is ignored
+      window.clearTimeout(holdTimer.current);
+    };
+  }, []);
 
   // Warm the voice connection while the learner is still looking at the Go button.
   useEffect(() => {
@@ -182,54 +193,40 @@ export default function Intro() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const begin = () => {
-    if (phase !== 'idle') return;
-    void unlockTeacherAudio(); // inside the tap, so the voice may play
+  // The overlay fades and the head is built (from the dotted ribbon when it formed, else the usual fly-in).
+  const assemble = () => {
     guide.current?.setBackdrop(null, { durationMs: BACKDROP_MS });
     setPhase('assembling');
   };
 
-  // While idle, the guide's dots draw the ribbon where the picture sits; Begin morphs them into her head.
-  // The stage takes the paper colour so the overlay can be see-through. If the guide is not the particle
-  // style or the image cannot be read, the picture simply stays.
-  useEffect(() => {
-    if (phase !== 'idle' || guideState !== 'ready') return;
-    const g = guide.current;
-    const img = sculpture.current;
-    if (!g || !img) return;
-    let live = true;
-    let timer = 0;
+  // Begin: the guide's dots take the ribbon picture's place (measured now, where it sits on screen), hold a
+  // moment, then morph into her head. The stage takes the paper colour so the overlay can turn see-through.
+  // Without a ready particle guide, or if the picture cannot be read, the overlay simply fades as before.
+  const begin = () => {
+    if (phase !== 'idle') return; // the overlay is also inert from here on
+    void unlockTeacherAudio(); // inside the tap, so the voice may play
+    const g = guideState === 'ready' ? guide.current : null;
+    const rect = sculpture.current?.getBoundingClientRect();
+    if (!g || !rect?.width || !rect.height) {
+      assemble();
+      return;
+    }
+    setPhase('forming');
     g.setBackdrop(PAPER);
-    const apply = () => {
-      const rect = img.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      // false also means a newer layout superseded this one, so it never hides dots already drawn
-      void g.setStartShapeFromImage({ src: sculpturalVoice, rect, fit: 'cover' }).then((ok) => {
-        if (live && ok) setDotted(true);
-      });
+    const settle = (ok: boolean) => {
+      if (!mounted.current) return;
+      if (!ok) {
+        g.setBackdrop(null); // still under the opaque overlay, so this is not seen
+        assemble();
+        return;
+      }
+      setDotted(true);
+      holdTimer.current = window.setTimeout(() => {
+        if (mounted.current) assemble();
+      }, HOLD_MS);
     };
-    const later = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(apply, RELAYOUT_MS);
-    };
-    apply();
-    let observed = false; // the observer's first report is the layout just applied
-    const ro = new ResizeObserver(() => {
-      if (observed) later();
-      observed = true;
-    });
-    ro.observe(img);
-    const scroller = landing.current;
-    window.addEventListener('resize', later);
-    scroller?.addEventListener('scroll', later, { passive: true });
-    return () => {
-      live = false;
-      window.clearTimeout(timer);
-      ro.disconnect();
-      window.removeEventListener('resize', later);
-      scroller?.removeEventListener('scroll', later);
-    };
-  }, [phase, guideState]);
+    g.setStartShapeFromImage({ src: sculpturalVoice, rect, fit: 'cover' }).then(settle, () => settle(false));
+  };
 
   // After Go (and once the guide has loaded or failed): build the head, then say hello.
   useEffect(() => {
@@ -292,7 +289,7 @@ export default function Intro() {
         onReady={() => setGuideState('ready')}
         onError={() => setGuideState('error')}
       />
-      {phase !== 'idle' && (
+      {pageGone && (
         <span className="lp-overlay lp-overlay--tl lp-pill intro-camera" aria-live="polite">
           {cameraLine.icon}
           {cameraLine.text}
@@ -300,9 +297,8 @@ export default function Intro() {
       )}
       <CaptionBar className="cap-card" text={narration.caption} paused={narration.paused} onToggle={narration.toggle} />
       <section
-        ref={landing}
         className="intro-landing"
-        data-gone={phase !== 'idle' || undefined}
+        data-gone={pageGone || undefined}
         data-dotted={dotted || undefined}
         {...(phase !== 'idle' ? { inert: '' } : {})} /* React 18 takes inert as an empty string */
         aria-label="Welcome"
