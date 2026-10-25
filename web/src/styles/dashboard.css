@@ -330,27 +330,14 @@
   font-weight: 600;
 }
 
-/* audio envelope */
-.dash-spark {
+/* audio waveform: a dot band drawn by WaveCanvas (waveCloud.ts), which sizes the bitmap for the device */
+.dash-wave {
   display: block;
   width: 100%;
-  height: 30px;
+  height: 36px;
   margin-bottom: 3px;
+  /* own layer: redrawing it while the wave eases must not repaint the whole stage */
   will-change: transform;
-}
-.dash-spark__bar,
-.dash-spark__level {
-  fill: var(--color-navy);
-  opacity: 0.85;
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  transition: transform 110ms linear;
-}
-.dash-spark__level {
-  opacity: 1;
-}
-.dash-spark__track {
-  fill: var(--color-navy-soft);
 }
 .dash-unit--inline {
   margin-left: -6px;
@@ -609,8 +596,6 @@
   .dash-ticker li {
     animation: dash-tick-out 1ms linear 4600ms forwards;
   }
-  .dash-spark__bar,
-  .dash-spark__level,
   .dash-bars i::before {
     transition: none;
   }

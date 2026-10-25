@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObjec
 import { subscribeTelemetry, type NodeId, type TelemetryEvent } from '../telemetry/client';
 import brandMark from '../assets/landing/brand-mark.svg';
 import { FACE_POINTS, canonicalFace, createDotFace, decodeFaceV2, decodeFaceV3 } from '../dashboard/dotFace';
+import { WAVE_SAMPLES, createWaveCloud, decodeWave, tonesFrom } from '../dashboard/waveCloud';
 import '../styles/dashboard.css';
 
 /**
@@ -13,7 +14,8 @@ import '../styles/dashboard.css';
  * transform). Animation state lives in refs; React only re-renders the cards, at most 10 times a second.
  * The perception streams (lip.mesh, audio.spectrum) are drawn by the same frame loop: the MediaPipe card's
  * face canvas (a dot face over the full mesh for v3 and v2 frames, the 81-point wireframe for v1), and the Audio
- * cluster as a radial equaliser on per-band springs.
+ * cluster as a radial equaliser on per-band springs. The Audio card's waveform band (waveCloud.ts) has its own
+ * small canvas and frame loop (WaveCanvas).
  *
  * Live events come from `subscribeTelemetry`. `?demo` (or `d`) replays /telemetry-demo.json through
  * the same path, and with no live event 15 s after connecting the replay starts on its own, tagged.
@@ -142,8 +144,8 @@ interface Model {
    * count the frame carried.
    */
   mesh: { v: 1; pts: number[]; n: number; at: number; sid: string | null } | { v: 2; xyz: Float32Array; n: number; at: number; sid: string | null } | null;
-  /** latest audio.spectrum, bins 0..1 */
-  spectrum: { bins: number[]; rms: number; at: number; sid: string | null } | null;
+  /** latest audio.spectrum, bins 0..1; `wave` the 128-sample waveform in -1..1 (null on payloads without one) */
+  spectrum: { bins: number[]; rms: number; wave: Float32Array | null; at: number; sid: string | null } | null;
   stt: { text: string; final: boolean } | null;
   tts: { chars: number; voice: string; ms: number | null } | null;
   pitch: { mean: number; min: number; max: number; voiced: number | null; latency: number | null } | null;
@@ -204,7 +206,7 @@ interface Snap {
   /** points in the latest mesh frame (81, 468 or 478) */
   meshPoints: number;
   /** only while the stream is live */
-  spectrum: { bins: number[]; rms: number } | null;
+  spectrum: { bins: number[]; rms: number; wave: Float32Array | null } | null;
   stt: Model['stt'];
   tts: Model['tts'];
   pitch: Model['pitch'];
@@ -244,7 +246,7 @@ function snapshot(m: Model, now: number): Snap {
     audio: m.audio,
     meshLive: meshLive(m, now),
     meshPoints: m.mesh ? m.mesh.n : FACE_POINTS,
-    spectrum: m.spectrum && specLive(m, now) ? { bins: m.spectrum.bins, rms: m.spectrum.rms } : null,
+    spectrum: m.spectrum && specLive(m, now) ? { bins: m.spectrum.bins, rms: m.spectrum.rms, wave: m.spectrum.wave } : null,
     stt: m.stt,
     tts: m.tts,
     pitch: m.pitch,
@@ -362,6 +364,7 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
       m.spectrum = {
         bins: p.bins.slice(0, SPEC_BINS).map((v) => clamp01((Number(v) || 0) / 255)),
         rms: clamp01(num(p.rms) ?? 0),
+        wave: decodeWave(p.wave),
         at: now,
         sid: psid,
       };
@@ -1284,40 +1287,117 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
 const hz = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v)}`);
 const fmt = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString('en-US'));
 
-/** 32 bars (the live spectrum, or the rms-ring envelope) and an rms level meter at the right. */
-function Spark({ bars, level }: { bars: number[]; level: number | null }) {
-  const list = bars.length ? bars : Array.from({ length: SPEC_BINS }, () => 0);
-  return (
-    <svg className="dash-spark" viewBox="0 0 140 30" preserveAspectRatio="none" aria-hidden="true">
-      {list.map((v, i) => (
-        <rect
-          key={i}
-          className="dash-spark__bar"
-          x={i * 4 + 0.5}
-          y={2}
-          width={2.6}
-          height={28}
-          rx={1}
-          style={{ transform: `scaleY(${Math.max(1 / 28, clamp01(v)).toFixed(3)})` }}
-        />
-      ))}
-      <rect className="dash-spark__track" x={133} y={2} width={6} height={28} rx={1.5} />
-      <rect
-        className="dash-spark__level"
-        x={133}
-        y={2}
-        width={6}
-        height={28}
-        rx={1.5}
-        style={{ transform: `scaleY(${clamp01(level ?? 0).toFixed(3)})` }}
-      />
-    </svg>
-  );
+/**
+ * The Audio card's waveform (waveCloud.ts) and its rms meter, on a canvas with its own frame loop: it reads the live
+ * model each frame (so no 10 Hz frame is missed between card renders), redraws only while something moves, and stops
+ * while the graph is hidden or paused or the document is hidden. Sized from its CSS box: the card's width x 36 design
+ * px, times the stage scale and devicePixelRatio.
+ */
+function WaveCanvas({ model, idle }: { model: RefObject<Model>; idle: boolean }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const idleRef = useRef(idle);
+  idleRef.current = idle;
+  const startRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    const el = ref.current;
+    const ctx = el?.getContext('2d');
+    if (!el || !ctx) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const css = getComputedStyle(el);
+    const cloud = createWaveCloud({
+      reduce,
+      rmsFull: RMS_FULL,
+      tones: tonesFrom(css.getPropertyValue('--color-navy'), css.getPropertyValue('--color-navy-mist')),
+    });
+    let raf = 0;
+    let prev = 0;
+    let seen: unknown = null;
+    let measuredAt = -1e9;
+    let w = 0;
+    let h = 0;
+    let k = 1;
+    let resized = true;
+
+    const measure = (now: number) => {
+      measuredAt = now;
+      w = el.offsetWidth;
+      h = el.offsetHeight;
+      if (!w || !h) return;
+      // offset* are design px (the stage transform does not change layout); the rect is on screen
+      const scale = el.getBoundingClientRect().width / w || 1;
+      k = scale * (window.devicePixelRatio || 1);
+      const pw = Math.max(1, Math.round(w * k));
+      const ph = Math.max(1, Math.round(h * k));
+      if (el.width !== pw || el.height !== ph) {
+        el.width = pw;
+        el.height = ph;
+        resized = true;
+      }
+    };
+
+    const frame = (now: number) => {
+      raf = 0;
+      if (idleRef.current || document.hidden) return;
+      raf = requestAnimationFrame(frame);
+      const dtMs = Math.min(100, Math.max(0, now - prev));
+      prev = now;
+      const m = model.current;
+      if (!m) return;
+      const sp = m.spectrum;
+      if (sp && sp !== seen) cloud.push(sp.wave, sp.rms, sp.at);
+      seen = sp;
+      const live = sp !== null && now - sp.at < PERCEPT_MS;
+      const rms = live ? sp.rms : m.audio ? m.audio.rms : 0;
+      cloud.meter(rms / RMS_FULL);
+      if (now - measuredAt > 500) measure(now);
+      const moved = cloud.step(now, dtMs, live);
+      if ((moved || resized) && w && h) {
+        cloud.draw(ctx, w, h, k);
+        resized = false;
+      }
+    };
+    const start = () => {
+      if (raf || idleRef.current || document.hidden) return;
+      prev = performance.now();
+      measuredAt = -1e9;
+      raf = requestAnimationFrame(frame);
+    };
+    startRef.current = start;
+    document.addEventListener('visibilitychange', start);
+    start();
+    return () => {
+      cancelAnimationFrame(raf);
+      raf = 0;
+      startRef.current = () => {};
+      document.removeEventListener('visibilitychange', start);
+    };
+  }, [model]);
+
+  useEffect(() => {
+    if (!idle) startRef.current();
+  }, [idle]);
+
+  return <canvas ref={ref} className="dash-wave" aria-hidden="true" />;
 }
 
 const SPARC_LABELS = ['tongue height', 'tongue front', 'jaw open', 'lip forward', 'lip aperture'];
 
-function Detail({ id, s, wireRef, scoped }: { id: NodeId; s: Snap; wireRef: RefObject<HTMLCanvasElement>; scoped: boolean }): ReactNode {
+function Detail({
+  id,
+  s,
+  wireRef,
+  model,
+  idle,
+  scoped,
+}: {
+  id: NodeId;
+  s: Snap;
+  wireRef: RefObject<HTMLCanvasElement>;
+  model: RefObject<Model>;
+  idle: boolean;
+  scoped: boolean;
+}): ReactNode {
   switch (id) {
     case 'camera':
       return <p className="dash-status" data-on={s.camera === true || undefined}>{s.camera === null ? 'waiting' : s.camera ? 'on' : 'off'}</p>;
@@ -1341,12 +1421,22 @@ function Detail({ id, s, wireRef, scoped }: { id: NodeId; s: Snap; wireRef: RefO
       const rms = s.spectrum ? s.spectrum.rms : s.audio ? s.audio.rms : null;
       return (
         <div className="dash-card">
-          <Spark bars={s.spectrum ? s.spectrum.bins : s.audio?.env ?? []} level={rms == null ? null : rms / RMS_FULL} />
+          {/* drawn by its own frame loop from the live model (waveCloud.ts) */}
+          <WaveCanvas model={model} idle={idle} />
           <p className="dash-readout">
             <span>F1 <b>{hz(s.audio?.f1)}</b></span>
             <span>F2 <b>{hz(s.audio?.f2)}</b></span>
             <span className="dash-unit dash-unit--inline">Hz</span>
             <span className="dash-rms">rms <b>{rms == null ? '—' : rms.toFixed(2)}</b></span>
+          </p>
+          <p className="dash-meta">
+            {s.spectrum
+              ? s.spectrum.wave
+                ? `waveform · ${WAVE_SAMPLES} samples`
+                : 'level only · no waveform'
+              : scoped
+                ? 'waiting for this learner’s microphone'
+                : 'no audio'}
           </p>
         </div>
       );
@@ -1786,7 +1876,7 @@ export default function Dashboard({
                 <span className="dash-node__loc">{titled?.loc ?? n.loc}</span>
               </h2>
               <p className="dash-node__cap">{n.caption}</p>
-              {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} scoped={scope !== ''} />}
+              {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} model={model} idle={hidden || paused} scoped={scope !== ''} />}
               {n.id === 'ui' && <Presence dots={snap.dots} />}
             </section>
           );

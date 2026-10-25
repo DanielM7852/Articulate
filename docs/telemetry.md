@@ -163,7 +163,7 @@ audio node. Both are throttled to 10 Hz per tab and stay well under the 2048-byt
 | kind           | source -> target  | payload (JSON)                                                              |
 |----------------|-------------------|-----------------------------------------------------------------------------|
 | lip.mesh       | mediapipe -> db   | `{sid, pts}` pts = flat int array `[x0,y0,x1,y1,...]`, 81 points, 0..255   |
-| audio.spectrum | audio -> db       | `{sid, bins, rms}` bins = 32 ints 0..255, rms 0..1                          |
+| audio.spectrum | audio -> db       | `{sid, bins, rms, wave}` bins = 32 ints 0..255, rms 0..1, wave = 128 uint8 samples, base64 (172 chars) |
 
 `lip.mesh` point order (MediaPipe FaceLandmarker indices):
 1. OUTER_LIP, 20 points: 61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185
@@ -180,6 +180,11 @@ accepted (a face was found), whether or not the LipFrame quality flags passed.
 `audio.spectrum` bins are 32 log-spaced bands from an AnalyserNode (fftSize 1024, smoothing 0.6)
 over `getByteFrequencyData`, covering roughly 80 Hz to 8 kHz. Emitted whenever a microphone
 stream is open, not only during recording attempts. `rms` is the time-domain RMS of the same block.
+`wave` is that block's waveform (`getByteTimeDomainData`, 1024 samples) decimated to 128 uint8
+samples, 128 = the zero crossing (0 and 255 are full scale), base64-encoded, sent with every frame
+at 10 Hz. Each output sample is the sample of largest magnitude in its window of 8 (sign kept), so
+clicks and plosive bursts survive the decimation. The whole payload is about 400 bytes. Older
+payloads without `wave` stay valid; the dashboard then draws a flat band sized by `rms`.
 
 ## Lesson correlation
 
