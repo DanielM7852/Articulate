@@ -2139,5 +2139,281 @@
         "end": 2.04
       }
     ]
+  },
+  "<<t|ɹ|æ>>": {
+    "file": "/voice/95f7a0dabb.wav",
+    "durationS": 0.657,
+    "words": [
+      {
+        "text": "tra",
+        "start": 0.02,
+        "end": 0.577
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "t",
+        "start": 0.02,
+        "end": 0.08
+      },
+      {
+        "p": "ɹ",
+        "start": 0.08,
+        "end": 0.328
+      },
+      {
+        "p": "æ",
+        "start": 0.328,
+        "end": 0.577
+      }
+    ]
+  },
+  "<<æ|t>>": {
+    "file": "/voice/15570590ad.wav",
+    "durationS": 0.27,
+    "words": [
+      {
+        "text": "a",
+        "start": 0.02,
+        "end": 0.19
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "æ",
+        "start": 0.02,
+        "end": 0.19
+      }
+    ]
+  },
+  "<<k|ʌ>>": {
+    "file": "/voice/3800659cb1.wav",
+    "durationS": 0.723,
+    "words": [
+      {
+        "text": "ck",
+        "start": 0.02,
+        "end": 0.643
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "k",
+        "start": 0.02,
+        "end": 0.08
+      },
+      {
+        "p": "ʌ",
+        "start": 0.08,
+        "end": 0.643
+      }
+    ]
+  },
+  "<<ʃ|ʃ|ʃ>>": {
+    "file": "/voice/4fa85a1227.wav",
+    "durationS": 0.53,
+    "words": [
+      {
+        "text": "sh",
+        "start": 0.02,
+        "end": 0.45
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "ʃ",
+        "start": 0.02,
+        "end": 0.163
+      },
+      {
+        "p": "ʃ",
+        "start": 0.163,
+        "end": 0.307
+      },
+      {
+        "p": "ʃ",
+        "start": 0.307,
+        "end": 0.45
+      }
+    ]
+  },
+  "eee": {
+    "file": "/voice/637a81ed8e.wav",
+    "durationS": 0.801,
+    "words": [
+      {
+        "text": "ee",
+        "start": 0.02,
+        "end": 0.721
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "iː",
+        "start": 0.041,
+        "end": 0.76
+      }
+    ]
+  },
+  "<<p|ʌ>>": {
+    "file": "/voice/3c20f05b61.wav",
+    "durationS": 0.696,
+    "words": [
+      {
+        "text": "p",
+        "start": 0.02,
+        "end": 0.616
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "p",
+        "start": 0.02,
+        "end": 0.08
+      },
+      {
+        "p": "ʌ",
+        "start": 0.08,
+        "end": 0.616
+      }
+    ]
+  },
+  "rrr": {
+    "file": "/voice/8578173555.wav",
+    "durationS": 1.157,
+    "words": [
+      {
+        "text": "r",
+        "start": 0.02,
+        "end": 1.077
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "ɹ",
+        "start": 0.02,
+        "end": 1.077
+      }
+    ]
+  },
+  "<<ɛ|ʔ>>": {
+    "file": "/voice/ce06a7f3ba.wav",
+    "durationS": 0.473,
+    "words": [
+      {
+        "text": "e",
+        "start": 0.02,
+        "end": 0.393
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "ɛ",
+        "start": 0.02,
+        "end": 0.333
+      },
+      {
+        "p": "ʔ",
+        "start": 0.333,
+        "end": 0.393
+      }
+    ]
+  },
+  "nt": {
+    "file": "/voice/76cd06466d.wav",
+    "durationS": 0.521,
+    "words": [
+      {
+        "text": "nt",
+        "start": 0.02,
+        "end": 0.441
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "n",
+        "start": 0.02,
+        "end": 0.381
+      },
+      {
+        "p": "t",
+        "start": 0.381,
+        "end": 0.441
+      }
+    ]
+  },
+  "<<b|ɹ|ʌ>>": {
+    "file": "/voice/07c7213972.wav",
+    "durationS": 0.56,
+    "words": [
+      {
+        "text": "br",
+        "start": 0.02,
+        "end": 0.48
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "b",
+        "start": 0.02,
+        "end": 0.08
+      },
+      {
+        "p": "ɹ",
+        "start": 0.08,
+        "end": 0.28
+      },
+      {
+        "p": "ʌ",
+        "start": 0.28,
+        "end": 0.48
+      }
+    ]
+  },
+  "<<e|ɪ>>": {
+    "file": "/voice/9d1a93f8ed.wav",
+    "durationS": 0.64,
+    "words": [
+      {
+        "text": "ai",
+        "start": 0.02,
+        "end": 0.56
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "e",
+        "start": 0.02,
+        "end": 0.29
+      },
+      {
+        "p": "ɪ",
+        "start": 0.29,
+        "end": 0.56
+      }
+    ]
+  },
+  "<<n|ɑ>>": {
+    "file": "/voice/cca9e4ff45.wav",
+    "durationS": 0.6,
+    "words": [
+      {
+        "text": "n",
+        "start": 0.02,
+        "end": 0.52
+      }
+    ],
+    "phonemes": [
+      {
+        "p": "n",
+        "start": 0.02,
+        "end": 0.27
+      },
+      {
+        "p": "ɑ",
+        "start": 0.27,
+        "end": 0.52
+      }
+    ]
   }
 }

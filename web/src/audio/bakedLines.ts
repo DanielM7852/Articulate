@@ -1,4 +1,5 @@
 import { THINKING_FILLERS } from '../realtime/fillers';
+import { PART_SOUND_LINES } from '../game/ghost/partSounds';
 
 // The fixed lines Ava speaks from app start through the survey. They are prebaked into /voice (see
 // scripts/bake_voice.ts) so playback costs no TTS credits. Any text not listed here still uses live Cartesia.
@@ -22,4 +23,4 @@ export const questionLine = (step: keyof typeof QUESTIONS): string => `${QUESTIO
 
 export const QUIZ_LINES: string[] = ([1, 2, 3] as const).map(questionLine);
 
-export const BAKED_LINES: string[] = [...GREETING, ...WELCOME_BACK, ...QUIZ_LINES, ...THINKING_FILLERS];
+export const BAKED_LINES: string[] = [...GREETING, ...WELCOME_BACK, ...QUIZ_LINES, ...THINKING_FILLERS, ...PART_SOUND_LINES];

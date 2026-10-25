@@ -16,9 +16,9 @@ import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
 import { MAX_CLIP_MS, useAttemptAudio, type AttemptAudio } from '../audio/attemptAudio';
 import { useVoiceFrames, type VoiceFrames } from '../audio/useVoiceFrames';
 import { useLipTracking, type LipTrackingStatus } from '../vision/useLipTracking';
-import { CUE_MIN_MS, useCoachSequence, type SequenceLine } from '../live/useCoachSequence';
+import { useCoachSequence, type SequenceLine } from '../live/useCoachSequence';
 import type { MouthCueId } from '@mouth-demo/src/mouth-demo.js';
-import { unitDemoCue, zoneDemoCue } from '../game/ghost/demoCues';
+import { stepPronounce, unitDemoCue, zoneDemoCue, type PartPronounce } from '../game/ghost/demoCues';
 import { usePhoneCursor } from '../live/usePhoneCursor';
 import { ASSUMED_END_LAG_MS, RESCUE_MIN_CLIP_MS, applyPhoneJudgement, canPhoneRescue, clipOffsetMs, isPhoneJudged, scorePhones, unitPhoneZones } from '../live/phoneJudge';
 import { isScored, requestWordAsk, requestWordCoach, scoreWord, wordFallbackLine } from '../live/wordCoach';
@@ -94,21 +94,17 @@ const LINES = {
   doneWord: (word: string) => `That's ${word}. Nice work.`,
 };
 
-/** Ava's scripted introduction of one step (the same lines the realtime path never needs: the script speaks these). */
-function introLine(spec: GhostWordSpec, step: LessonStep): { text: string; side: boolean; cueId: MouthCueId | null; hold?: boolean } {
+/** Ava's scripted introduction of one step, spoken in front view (the part's sound is pronounced right after it). */
+function introLine(spec: GhostWordSpec, step: LessonStep): string {
   const { label, zoneIds } = step.unit;
   if (step.kind === 'part') {
     if (!step.practisable) {
       const hint = spec.zones.find((z) => zoneIds.includes(z.id))?.hint ?? 'Watch the side view.';
-      return { text: `The ${label} is one to feel more than see. ${hint}`, side: true, cueId: unitDemoCue(zoneIds), hold: true };
+      return `The ${label} is one to feel more than see. ${hint}`;
     }
-    return { text: `Let's work on the ${label} in ${spec.word}. Watch the path.`, side: true, cueId: unitDemoCue(zoneIds), hold: true };
+    return `Let's work on the ${label} in ${spec.word}. Watch the path.`;
   }
-  return {
-    text: step.speedWatch < 1 ? `Now the whole word, slowly: ${spec.word}.` : `And at normal speed: ${spec.word}.`,
-    side: false,
-    cueId: null,
-  };
+  return step.speedWatch < 1 ? `Now the whole word, slowly: ${spec.word}.` : `And at normal speed: ${spec.word}.`;
 }
 
 /** Realtime Ava: how long to wait for her first sentence, for her to finish, and for start_practice to wait for her. */
@@ -502,10 +498,11 @@ export default function WordLesson() {
    */
   const mouthCueChoice = useCallback((): { line: SequenceLine | undefined } | null => {
     const last = lastSide.current;
+    const st = cur.current.plan[shownStep.current];
     const cueId = stepCue();
-    if (cueId) {
-      if (last?.cueId === cueId) return { line: undefined };
-      return { line: { text: `Watch my mouth for the ${cur.current.plan[shownStep.current].unit.label}.`, cueId, showSideView: true } };
+    if (cueId && st) {
+      const pr = stepPronounce(cur.current.spec, st.unit, null);
+      return { line: { text: `Watch my mouth for the ${st.unit.label}.`, cueId, showSideView: true, sound: pr?.sound ?? null } };
     }
     return last?.cueId ? { line: undefined } : null;
   }, [stepCue]);
@@ -550,12 +547,14 @@ export default function WordLesson() {
 
   /** One Ava line. With narration off the caption stays up for its reading time. False if superseded. */
   const line = useCallback(
-    async (text: string, side = false, cueId: MouthCueId | null = null, hold = false): Promise<boolean> => {
+    async (text: string, side = false, cueId: MouthCueId | null = null, pr: PartPronounce | null = null): Promise<boolean> => {
       const my = runId.current;
       const started = Date.now();
       takeFloor();
-      if (side) rememberSide({ text, cueId, showSideView: true });
-      await seq.speakLine({ text, cueId, showSideView: side, hold }, { narration: voiceOnRef.current });
+      // The line itself is always spoken in front view; a part sound (pr) is pronounced in side view right after it.
+      const sl: SequenceLine = { text, cueId: pr ? pr.cueId : cueId, showSideView: side, sound: pr?.sound ?? null };
+      if (side && sl.cueId) rememberSide(sl);
+      await seq.speakLine(sl, { narration: voiceOnRef.current });
       if (runId.current !== my) return false;
       if (!voiceOnRef.current) {
         const left = readingTime(text) - (Date.now() - started);
@@ -565,6 +564,36 @@ export default function WordLesson() {
     },
     [rememberSide, seq.speakLine, takeFloor],
   );
+
+  /**
+   * Pronounce one part sound (side view only while it plays). Realtime Ava's mic is gated while it plays so the sound never
+   * reaches her, and restored after if this call gated it. False if superseded.
+   */
+  const pronounceStep = useCallback(
+    async (pr: PartPronounce, reps: number, my: number): Promise<boolean> => {
+      if (pr.cueId) rememberSide({ text: pr.sound.caption, cueId: pr.cueId, showSideView: true, sound: pr.sound });
+      const session = avaRef.current.session();
+      const gated = realtimeActive() && !!session && !session.practiceMode;
+      if (gated) await avaRef.current.setPracticeMode(true).catch(() => undefined);
+      if (runId.current !== my) return false;
+      avaView.current = pr.cueId !== null;
+      try {
+        await seq.pronounce({ cueId: pr.cueId, sound: pr.sound, reps }, { narration: voiceOnRef.current });
+      } finally {
+        avaView.current = false;
+      }
+      if (gated && runId.current === my) await avaRef.current.setPracticeMode(false).catch(() => undefined);
+      return runId.current === my;
+    },
+    [realtimeActive, rememberSide, seq.pronounce],
+  );
+
+  /** The pronunciation for a coaching line that used the side view: the current part's sound, or for a whole-word step the focus part's. */
+  const coachPronounce = useCallback((focus: string | null, side: boolean): PartPronounce | null => {
+    if (!side) return null;
+    const st = cur.current.plan[shownStep.current];
+    return st ? stepPronounce(cur.current.spec, st.unit, focus) : null;
+  }, []);
 
   /** Gate the realtime mic (VAD off, mic disabled) so scripted lines and the board never feed Ava. False if superseded. */
   const gateAva = useCallback(
@@ -692,8 +721,9 @@ export default function WordLesson() {
         avaRef.current.sendAppMessage(stepMessage(word, step), false);
         sendScreen();
       }
-      const intro = introLine(word, step);
-      if (!(await line(intro.text, intro.side, intro.cueId, intro.hold))) return;
+      if (!(await line(introLine(word, step)))) return;
+      const pr = step.kind === 'part' ? stepPronounce(word, step.unit, null) : null;
+      if (pr && !(await pronounceStep(pr, 2, my))) return;
       newAttempt();
       setPhase('watch');
       await waitWatch(step);
@@ -706,7 +736,7 @@ export default function WordLesson() {
       }
       await goLive(LINES.yourTurn);
     },
-    [endWindow, gateAva, goLive, line, newAttempt, realtimeActive, sendScreen, setPhase, setWatchSpeed, takeFloor, waitWatch, wordDone],
+    [endWindow, gateAva, goLive, line, newAttempt, pronounceStep, realtimeActive, sendScreen, setPhase, setWatchSpeed, takeFloor, waitWatch, wordDone],
   );
 
   /** Start a word from its first step. Cancels whatever is running. */
@@ -808,19 +838,21 @@ export default function WordLesson() {
     takeFloor(true);
     if (!(await gateAva(my))) return;
     newAttempt();
-    const demoCue = step.kind === 'part' ? unitDemoCue(step.unit.zoneIds) : null;
-    if (demoCue) void seq.showHeldCue(demoCue).catch(() => undefined); // side-view demo alongside the ghost board
+    const pr = step.kind === 'part' ? stepPronounce(cur.current.spec, step.unit, null) : null;
+    if (pr) {
+      setPhase('intro'); // board idle while Ava says the sound (the sound must not reach the board)
+      if (!(await pronounceStep(pr, 2, my))) return;
+    }
     setPhase('watch');
     await waitWatch(step);
     if (runId.current !== my) return;
     setWatchSpeed(null);
-    if (demoCue) seq.cancel(false); // avatar back to front for the learner's turn
     if (step.practisable) await beginTurn(my, false);
     else {
       setPhase('cue'); // watch-only: the learner moves on with "Next part"
       sendScreen();
     }
-  }, [beginTurn, endWindow, gateAva, newAttempt, releaseWatch, sendScreen, seq.cancel, seq.showHeldCue, setPhase, setWatchSpeed, takeFloor, waitWatch]);
+  }, [beginTurn, endWindow, gateAva, newAttempt, pronounceStep, releaseWatch, sendScreen, seq.cancel, setPhase, setWatchSpeed, takeFloor, waitWatch]);
 
   /** "Next part": leave the current step without (or in the middle of) an attempt. */
   const nextPart = useCallback(async () => {
@@ -852,27 +884,13 @@ export default function WordLesson() {
     [startWord],
   );
 
-  /** Show the side view / cue for a coaching line. Resolves to when the cue appeared (0 if none or superseded). */
+  /** Note the coaching line's demo for the screen state / replay. The head stays in front view; the part sound is pronounced after the relay. */
   const startView = useCallback(async (side: boolean, cueId: MouthCueId | null, my: number, text = ''): Promise<number> => {
-    avaCue.current = side && cueId !== null;
-    avaCueId.current = side ? cueId : null;
-    if (side && text) rememberSide({ text, cueId, showSideView: true });
-    const av = mouthRef.current;
-    if (!side || !av?.ready) {
-      sendScreen();
-      return 0;
-    }
-    avaView.current = true;
-    try {
-      av.stop();
-      await av.setView('side');
-      if (runId.current !== my) return 0;
-      if (cueId) av.showCue(cueId);
-      sendScreen();
-      return Date.now();
-    } catch {
-      return 0; // presentation only
-    }
+    avaCue.current = false;
+    avaCueId.current = null;
+    if (side && cueId && text && runId.current === my) rememberSide({ text, cueId, showSideView: true });
+    sendScreen();
+    return 0;
   }, [rememberSide, sendScreen]);
 
   /**
@@ -894,7 +912,7 @@ export default function WordLesson() {
       } catch {
         relayed = false;
       }
-      const viewStart = await viewP;
+      await viewP;
       if (runId.current !== my) return 'aborted';
       if (relayed) {
         const until = Date.now() + AVA_START_MS;
@@ -915,15 +933,12 @@ export default function WordLesson() {
       }
       await a.waitForIdle(AVA_IDLE_MS);
       if (runId.current !== my) return 'aborted';
-      if (viewStart && p.cueId) {
-        const left = CUE_MIN_MS - (Date.now() - viewStart);
-        if (left > 0) await sleep(left);
-        if (runId.current !== my) return 'aborted';
-      }
-      quietAva(); // stops lip sync, clears the cue flag and returns the avatar to the front view
+      quietAva(); // stops lip sync and clears the cue flag
+      const pr = coachPronounce(p.focus, p.side);
+      if (pr && !(await pronounceStep(pr, 1, my))) return 'aborted';
       return 'spoken';
     },
-    [avaOpen, quietAva, startView],
+    [avaOpen, coachPronounce, pronounceStep, quietAva, startView],
   );
 
   /**
@@ -1010,7 +1025,7 @@ export default function WordLesson() {
         const p = w.pending;
         if (p) {
           // Ava relays the coaching the tool call returned; the board stays off until she is done.
-          const viewStart = await p.view;
+          await p.view;
           if (runId.current !== my) return;
           const until = Date.now() + AVA_START_MS;
           while (a.speechCount() === p.before && avaOpen() && Date.now() < until) {
@@ -1021,12 +1036,9 @@ export default function WordLesson() {
           if (spoken) {
             await a.waitForIdle(AVA_IDLE_MS);
             if (runId.current !== my) return;
-            if (viewStart && p.cueId) {
-              const left = CUE_MIN_MS - (Date.now() - viewStart);
-              if (left > 0) await sleep(left);
-              if (runId.current !== my) return;
-            }
-            quietAva(); // stops lip sync, clears the cue flag and returns the avatar to the front view
+            quietAva(); // stops lip sync and clears the cue flag
+            const pr = coachPronounce(p.focus, p.side);
+            if (pr && !(await pronounceStep(pr, 1, my))) return;
           } else {
             // She never started: the script speaks the caption itself.
             floor.current = 'script';
@@ -1034,7 +1046,7 @@ export default function WordLesson() {
             avaView.current = false;
             await a.setPracticeMode(true).catch(() => undefined);
             if (runId.current !== my) return;
-            if (!(await line(p.caption, p.side, p.cueId))) return;
+            if (!(await line(p.caption, p.side, p.cueId, coachPronounce(p.focus, p.side)))) return;
           }
           if (p.next === 'final') {
             endWindow();
@@ -1085,7 +1097,7 @@ export default function WordLesson() {
       endWindow();
       await beginTurn(my, false);
     },
-    [avaOpen, beginTurn, endWindow, line, newAttempt, quietAva, runStep, wordDone],
+    [avaOpen, beginTurn, coachPronounce, endWindow, line, newAttempt, pronounceStep, quietAva, runStep, wordDone],
   );
 
   /**
@@ -1172,10 +1184,10 @@ export default function WordLesson() {
         }
         // 'fallback': Ava is silenced and gated, the script has the floor; speak the line the scripted way below.
       }
-      if (!(await line(caption, side, cueId))) return;
+      if (!(await line(caption, side, cueId, coachPronounce(focus, side)))) return;
       await afterScript();
     },
-    [coachResult, coachWithAva, endWindow, giveFloorToAva, goLive, line, realtimeActive, runStep, seq.say, setPhase, takeFloor, talkWindow, wordDone],
+    [coachPronounce, coachResult, coachWithAva, endWindow, giveFloorToAva, goLive, line, realtimeActive, runStep, seq.say, setPhase, takeFloor, talkWindow, wordDone],
   );
 
   // ---- talk window: the board measures, Ava decides (learner_attempt scores a held result; anything else drops them)
@@ -1302,7 +1314,17 @@ export default function WordLesson() {
       takeFloor(true); // silences realtime Ava and returns her view to the front
       await gateAva(my); // mic gated so the replay audio never reaches her
       if (opts?.slow) setMouthSlow(true); // the mouth plays at half speed; her voice at 0.8
-      await seq.speakLine(l, opts?.slow ? { narration: true, speed: 0.8 } : { narration: true });
+      if (l.sound && l.cueId) {
+        // The replay is the part's pronunciation (side view only while it plays); baked clips only play at normal speed.
+        avaView.current = true;
+        try {
+          await seq.pronounce({ cueId: l.cueId, sound: l.sound, reps: 2 }, { narration: true });
+        } finally {
+          avaView.current = false;
+        }
+      } else {
+        await seq.speakLine(l, opts?.slow ? { narration: true, speed: 0.8 } : { narration: true });
+      }
     } catch {
       /* presentation only */
     } finally {
@@ -1323,7 +1345,7 @@ export default function WordLesson() {
         }
       }
     }
-  }, [endWindow, gateAva, goLive, quietAva, realtimeActive, rememberSide, seq.speakLine, setPhase, takeFloor, talkWindow]);
+  }, [endWindow, gateAva, goLive, quietAva, realtimeActive, rememberSide, seq.pronounce, seq.speakLine, setPhase, takeFloor, talkWindow]);
 
   function finish() {
     stopRun();

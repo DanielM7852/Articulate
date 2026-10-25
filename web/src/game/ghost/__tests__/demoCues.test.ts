@@ -1,5 +1,5 @@
 import { expect, test } from '../../__tests__/harness';
-import { unitDemoCue, zoneDemoCue } from '../demoCues';
+import { partForZone, partPronounce, stepPronounce, unitDemoCue, zoneDemoCue } from '../demoCues';
 import { GHOST_WORDS } from '../words';
 
 const partCues = (word: string) => GHOST_WORDS[word].parts.map((p) => unitDemoCue(p.zoneIds) ?? 'none').join(' ');
@@ -41,4 +41,20 @@ test('demoCues: zoneDemoCue', () => {
   expect(zoneDemoCue('ai')).toBe('glide-ey');
   expect(zoneDemoCue('f')).toBe(null);
   expect(zoneDemoCue(null)).toBe(null);
+});
+
+test('demoCues: partForZone and stepPronounce', () => {
+  const track = GHOST_WORDS.track;
+  expect(partForZone(track, 'k')?.id).toBe('ck');
+  expect(partForZone(track, 'r')?.id).toBe('tr');
+  expect(partForZone(track, null)).toBe(null);
+  expect(partForZone(track, 'zz')).toBe(null);
+  const part = stepPronounce(track, { id: 'a', partIds: ['a'] }, null);
+  expect(part?.cueId).toBe('open-jaw');
+  expect(part?.sound.caption).toBe('a');
+  const whole = stepPronounce(track, { id: 'chain-t-r-a-k', partIds: ['tr', 'a', 'ck'] }, 'k');
+  expect(whole?.part.id).toBe('ck');
+  expect(whole?.cueId).toBe('tongue-back');
+  expect(stepPronounce(track, { id: 'chain-t-r-a-k', partIds: ['tr', 'a', 'ck'] }, null)).toBe(null);
+  expect(partPronounce(GHOST_WORDS.sheep, GHOST_WORDS.sheep.parts[0])?.cueId).toBe(null);
 });
