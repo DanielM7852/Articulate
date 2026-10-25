@@ -404,6 +404,8 @@ export const begin_attempt = db.reducer(
   },
 );
 
+/* 2026-10-25: the same emit_telemetry block was declared twice and the module
+   would not publish. The copy that remains is the one before end_attempt.
 const telemetryNodes = [
   "camera", "mediapipe", "mic", "audio", "stt", "tts",
   "backend", "pitch", "sparc", "db", "claude", "ui",
@@ -443,6 +445,7 @@ export const emit_telemetry = db.reducer(
     for (const id of ids.slice(0, excess)) ctx.db.telemetryEvent.id.delete(id);
   },
 );
+*/
 
 export const push_metrics = db.reducer(
   {

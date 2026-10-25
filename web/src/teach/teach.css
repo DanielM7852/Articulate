@@ -39,6 +39,30 @@
   border-radius: var(--radius-card);
 }
 
+.teach-add {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+}
+
+.teach-add label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.teach-board .teach-add button {
+  display: inline-flex;
+  width: fit-content;
+  padding: 8px 14px;
+  text-align: center;
+  box-shadow: none;
+}
+
 .teach-board button {
   display: grid;
   gap: 6px;
@@ -266,5 +290,375 @@
   .teach-diff li,
   .teach-actions {
     grid-template-columns: 1fr;
+  }
+}
+
+.console {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-cream);
+  color: var(--color-ink);
+}
+
+.console-bar {
+  display: grid;
+  grid-template-columns: auto auto minmax(180px, 240px) minmax(180px, 1fr);
+  gap: 12px 20px;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-cream);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.console-brand,
+.console-tabs,
+.console-room,
+.console-identity,
+.console-mode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.console-brand__name,
+.teach-summary h1 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 400;
+  color: var(--color-navy);
+}
+
+.console-brand__label,
+.console-mode__label {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.console-tabs button,
+.console-room,
+.console-identity,
+.console-status,
+.console-mode,
+.console-bar .teach-alert {
+  grid-column: auto;
+}
+
+.console-tabs {
+  gap: 8px;
+}
+
+.console-tabs button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--color-navy);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-navy);
+  font: inherit;
+  cursor: pointer;
+}
+
+.console-tabs button[aria-current='page'] {
+  background: var(--color-navy);
+  color: var(--color-cream);
+}
+
+.console-room {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.console-room label,
+.live-toolbar label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.console-identity {
+  display: grid;
+  gap: 2px;
+}
+
+.console-mode {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.console-mode .btn {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  border-color: var(--color-navy);
+}
+
+.console-mode .btn[aria-pressed='true'] {
+  background: var(--color-navy);
+  border-color: var(--color-navy);
+  color: var(--color-cream);
+}
+
+.console-mode .fine {
+  flex: 1 1 160px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.console-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.console-main {
+  flex: 1;
+  min-height: 0;
+}
+
+.console-main[hidden] {
+  display: none;
+}
+
+.teach-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: baseline;
+  margin-bottom: 16px;
+}
+
+.console-tabs button:focus-visible,
+.teach-board button:focus-visible,
+.btn:focus-visible,
+.live-toolbar button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* 2026-10-25: the live graph sat in a short band under the console header.
+.console-main--live {
+  display: flex;
+  flex-direction: column;
+}
+
+.live-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 180px);
+  gap: 8px;
+  padding: 12px 16px 24px;
+}
+*/
+
+.console:has(.console-main--live:not([hidden])) {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.console-main--live {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.live-pane {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.live-toolbar,
+.live-context {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  max-width: calc(100% - 24px);
+}
+
+.live-toolbar {
+  top: 12px;
+  left: 12px;
+  right: 280px;
+  max-width: none;
+  padding: 6px 8px 6px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+}
+
+.live-toolbar .live-scope {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.live-scope select,
+.live-actions .btn {
+  height: 32px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+  background: var(--color-cream);
+  color: var(--color-navy);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.live-scope select {
+  padding: 0 28px 0 12px;
+  cursor: pointer;
+}
+
+.live-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.live-actions .btn {
+  padding: 0 12px;
+}
+
+.live-actions .btn[aria-pressed='true'] {
+  background: var(--color-navy);
+  border-color: var(--color-navy);
+  color: var(--color-cream);
+}
+
+.live-stream {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+.live-context {
+  top: 12px;
+  right: 12px;
+  left: auto;
+}
+
+/* 2026-10-25: the demo note was a separate warning chip over the graph.
+.live-demo {
+  position: absolute;
+  z-index: 2;
+  top: 96px;
+  left: 12px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-tile);
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+  font-weight: 700;
+}
+*/
+
+.live-stream[data-state='offline'],
+.live-stream[data-state='connecting'] {
+  color: var(--color-warn);
+}
+
+/* 2026-10-25: a 520px floor kept the graph from using the rest of the screen.
+.console-live__stage {
+  position: relative;
+  flex: 1;
+  min-height: 520px;
+}
+*/
+
+.console-live__stage {
+  position: absolute;
+  top: 68px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.live-inspector {
+  position: absolute;
+  z-index: 2;
+  left: 12px;
+  bottom: 10px;
+  width: min(440px, calc(100% - 24px));
+  max-height: 36vh;
+  overflow: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: 8px 14px;
+}
+
+/* 2026-10-25: the live header stacked the demo label, a wide button, and the caption.
+.console:has(.console-main--live:not([hidden])) .console-mode {
+  justify-self: start;
+  width: max-content;
+}
+
+.console:has(.console-main--live:not([hidden])) .console-mode .btn {
+  justify-self: start;
+  width: max-content;
+}
+*/
+
+.console:has(.console-main--live:not([hidden])) .console-mode {
+  display: none;
+}
+
+.live-stages,
+.live-events {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.live-stages li,
+.live-events li {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.live-events pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+
+@media (max-width: 800px) {
+  .console-bar {
+    grid-template-columns: 1fr;
+    position: static;
+  }
+
+  .console--detail .teach-board {
+    display: none;
+  }
+
+  .console--roster .teach-detail {
+    display: none;
   }
 }

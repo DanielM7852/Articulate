@@ -10,6 +10,21 @@ export type DevSession = {
 };
 
 const KEY = 'articulate.classroom.session';
+const NAME_KEY = 'articulate.learnerName';
+const NAME = /^[a-z0-9-]{1,24}$/;
+
+export function loadLearnerName(): string {
+  try {
+    const value = localStorage.getItem(NAME_KEY) ?? '';
+    return NAME.test(value) ? value : '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveLearnerName(name: string): void {
+  localStorage.setItem(NAME_KEY, name);
+}
 
 export function loadSession(): DevSession | null {
   try {

@@ -127,8 +127,8 @@ export function changedSettings(previous: LessonSettings | null, next: LessonSet
   if (!before || before.referenceReplay !== next.referenceReplay) {
     rows.push({
       label: 'Reference',
-      before: before ? (before.referenceReplay ? 'Hear it again' : 'No replay') : 'No replay',
-      after: next.referenceReplay ? 'Hear it again' : 'No replay',
+      before: before ? (before.referenceReplay ? 'Sonic reference' : 'No reference') : 'No reference',
+      after: next.referenceReplay ? 'Sonic reference' : 'No reference',
     });
   }
   if (!before || before.repetitions !== next.repetitions) {
@@ -145,15 +145,17 @@ export function changedSettings(previous: LessonSettings | null, next: LessonSet
 }
 
 export function learnerInstruction(settings: LessonSettings): string {
-  const replay = settings.referenceReplay ? 'The reference can be played again.' : 'No reference replay.';
+  const replay = settings.referenceReplay
+    ? 'A Sonic reference of this target is played and compared with the learner.'
+    : 'No Sonic reference.';
   const note = settings.note ? ` Note: ${settings.note}` : '';
   return `Practice ${exerciseName(settings.target)}. Format: ${formatName(settings.context)}. Support: ${supportName(settings.assistance)}. Cue: ${cueName(settings.cueId)}. ${replay} Repeat ${settings.repetitions} ${settings.repetitions === 1 ? 'time' : 'times'}.${note}`;
 }
 
 export function plainChange(visible: string): string {
   return visible
-    .replaceAll('Reference replay on', 'Reference on')
-    .replaceAll('Reference replay off', 'Reference off')
+    .replaceAll('Reference replay on', 'Sonic reference on')
+    .replaceAll('Reference replay off', 'Sonic reference off')
     .replaceAll('Target ', 'Practice sound ')
     .replaceAll('Context ', 'Practice format ')
     .replaceAll('Assistance ', 'Support ')

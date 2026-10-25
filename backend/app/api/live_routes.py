@@ -6,6 +6,7 @@ Provider failures never surface as 500s.
 
 import asyncio
 import logging
+import re
 import time
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
@@ -43,6 +44,9 @@ from app.live.shared_insight import SharedInsights
 router = APIRouter(prefix="/v1/live")
 logger = logging.getLogger(__name__)
 
+_WORD = re.compile(r"[a-z]{1,24}")
+_NO_REFERENCE = "The reference voice is not available, so this take was not compared with it."
+_CLOSE = "Compared with the reference {word}, this take is close enough that I would not change your mouth or tongue yet."
 ARTICULATION_MAX_BYTES = 1 << 20
 ARTICULATION_MIN_BYTES = 44
 _WAV_TYPES = ("audio/wav", "audio/x-wav")
@@ -250,7 +254,8 @@ async def _insight_lane(runtime, sink, history, settings, client, profile_id: st
 
 
 async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profile_id: str, sound: str,
-                            clock: tuple[float | None, float | None]) -> None:
+                            clock: tuple[float | None, float | None], reference: bool = False,
+                            word: str | None = None) -> None:
     """Collector -> features -> history -> insight line. Never raises."""
     runtime = get_runtime(request.app)
     try:
@@ -277,8 +282,35 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
                                 ("tongueHeight", "tongueFront", "jawOpen", "lipForward", "lipAperture")},
                              "latencyMs": round((time.perf_counter() - t0) * 1000)},
                         )
-                if state.settings.pitch_table_enabled:
-                    table = await asyncio.to_thread(compare_wav, state.settings, wav, sound)
+                if reference or state.settings.pitch_table_enabled:
+                    table = await asyncio.to_thread(
+                        compare_wav, state.settings, wav, sound, word if reference else None, reference,
+                    )
+                if reference and table is not None:
+                    features = {**features, "pitchTable": table} if features is not None else features_from_table(table)
+                    if features is not None:
+                        history = getattr(state, "live_history", None) or runtime.history(
+                            getattr(state, "live_spacetime_transport", None)
+                        )
+                        await history.record_articulation(profile_id, attempt_id, sound, features)
+                        runtime.remember_features(profile_id, attempt_id, features)
+                    spoken = word or table["word"]
+                    if table["reference"] is None:
+                        await sink.set(attempt_id, profile_id, sound, "ready", _NO_REFERENCE, "fallback")
+                        return
+                    cue = table.get("cue")
+                    if not cue:
+                        await sink.set(attempt_id, profile_id, sound, "ready", _CLOSE.format(word=spoken), "fallback")
+                        return
+                    repeats = 0
+                    counter = getattr(history, "same_pitch_cue_count", None) if history is not None else None
+                    if counter is not None:
+                        repeats = await counter(profile_id, attempt_id, table["word"], cue)
+                    injected = getattr(state, "live_openai_client" if llm.is_openai(state.settings) else "live_client", None)
+                    model_client = injected or runtime.model_client()
+                    say, source = await phrase_cue(state.settings, model_client, table["word"], cue, repeats)
+                    await sink.set(attempt_id, profile_id, sound, "ready", say, source)
+                    return
                 if table is not None:
                     features = {**features, "pitchTable": table} if features is not None else features_from_table(table)
                 if features is not None:
@@ -340,6 +372,8 @@ async def live_articulation(
     sound: SoundId,
     captureStartMonotonicMs: float | None = None,
     timeOriginUnixMs: float | None = None,
+    reference: bool = False,
+    word: str | None = None,
 ):
     """Accept an attempt WAV; analysis runs in the background and is stored with the learner's history."""
     if request.headers.get("content-type", "").split(";")[0].strip().lower() not in _WAV_TYPES:
@@ -360,7 +394,9 @@ async def live_articulation(
     state = request.app.state
     runtime = get_runtime(request.app)
     collector = state.settings.articulation_configured or getattr(state, "live_articulation", None) is not None
-    if not collector and not state.settings.pitch_table_enabled:
+    if word is not None and not _WORD.fullmatch(word):
+        word = None
+    if not collector and not state.settings.pitch_table_enabled and not reference:
         telemetry.emit("backend", "sparc", "sparc.skipped", "SPARC skipped: disabled", {"reason": "disabled"})
         return JSONResponse({"accepted": False, "reason": "disabled"})
     if not runtime.reserve_articulation():
@@ -378,6 +414,6 @@ async def live_articulation(
         runtime.set_insight(attemptId, profileId, sound, "pending")
     background.add_task(
         _articulation_job, request, b"".join(chunks), attemptId, profileId, sound,
-        (captureStartMonotonicMs, timeOriginUnixMs),
+        (captureStartMonotonicMs, timeOriginUnixMs), reference, word if reference else None,
     )
     return JSONResponse({"accepted": True}, status_code=202, background=background)

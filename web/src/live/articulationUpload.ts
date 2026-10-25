@@ -44,6 +44,10 @@ export interface ArticulationUploadArgs {
   captureStartMonotonicMs: number;
   /** performance.timeOrigin. */
   timeOriginUnixMs: number;
+  /** Teacher asked for a Sonic reference of this word. */
+  reference?: boolean;
+  /** Word the Sonic reference speaks. Letters only, matching the backend limit. */
+  word?: string;
   signal?: AbortSignal;
 }
 
@@ -69,6 +73,10 @@ export async function uploadArticulation(args: ArticulationUploadArgs): Promise<
       captureStartMonotonicMs: String(startMs),
       timeOriginUnixMs: String(args.timeOriginUnixMs),
     });
+    if (args.reference && args.word && /^[a-z]{1,24}$/.test(args.word)) {
+      q.set('reference', 'true');
+      q.set('word', args.word);
+    }
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
     const onAbort = () => ctl.abort();

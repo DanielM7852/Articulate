@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     max_sample_rate_hz: int = 48_000
     analysis_version: str = "pitch-v1"
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    # The deployed console proxies this same host to the classroom database.
+    # Local sign-in leaves this off and keeps the database URI from the owner file.
+    classroom_public_from_host: bool = False
     # Built web/dist to serve at / (single-container hosting). Blank or a missing directory keeps the API-only app.
     static_dir: str = ""
 

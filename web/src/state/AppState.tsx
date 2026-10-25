@@ -27,6 +27,8 @@ interface AppState {
   lessonTarget: string | null;
   lessonCue: string | null;
   lessonRepetitions: number;
+  /** Teacher turned on a Sonic reference for this lesson. */
+  lessonReference: boolean;
 }
 
 interface AppActions {
@@ -49,7 +51,10 @@ interface AppActions {
     cue: string;
     repetitions: number;
     note: string;
+    reference: boolean;
   }) => void;
+  /** A classroom sign-in uses the teacher lesson, so the survey is not required. */
+  skipClassroomSurvey: () => void;
   addAttempt: (attempt: Attempt) => void;
   updateAttempt: (attemptId: string, patch: Partial<Attempt>) => void;
   clearAttempts: () => void;
@@ -85,6 +90,7 @@ const defaultState: AppState = {
     lessonTarget: null,
     lessonCue: null,
     lessonRepetitions: 1,
+    lessonReference: false,
   };
 
 /** Session-only fields: never restored from storage. */
@@ -128,6 +134,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     () => ({
       completeQuiz: () => patch({ quizDone: true }),
       completeOnboarding: () => patch({ onboarded: true }),
+      skipClassroomSurvey: () => patch({ quizDone: true, onboarded: true }),
       reset: () => setState(defaultState),
       setCaptions: (on) => patch({ captions: on }),
       // The header speaker toggle is the only audio control, so narration follows it both ways.
@@ -144,6 +151,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           lessonTarget: patch.target,
           lessonCue: patch.cue || null,
           lessonRepetitions: patch.repetitions,
+          lessonReference: patch.reference,
           plan: {
             ...s.plan,
             assistance: patch.assistance,

@@ -48,6 +48,14 @@ import { FormantDebug } from '../components/FormantDebug';
 type Phase = 'ready' | 'recording' | 'analyzing' | 'feedback';
 type View = 'graph' | 'guide' | 'mirror';
 
+/** The same word Cartesia Sonic speaks for the comparison reference. */
+function sonicReferenceWord(target: string | null, sound: string): string {
+  if (target === 'head') return 'head';
+  if (target === 'u' || sound === 'u') return 'food';
+  if (target === 'a' || sound === 'a') return 'father';
+  return 'heed';
+}
+
 /** Keeps the sheet mounted long enough for its own exit motion to finish. */
 const SHEET_EXIT_MS = 260;
 
@@ -103,7 +111,7 @@ export default function PracticeStudio() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration: voiceOn, captions, preferences, lessonTarget, lessonCue, lessonRevision, lessonRepetitions } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, updateAttempt, camera, setCamera, narration: voiceOn, captions, preferences, lessonTarget, lessonCue, lessonRevision, lessonRepetitions, lessonReference } = useAppState();
   const profileId = useMemo(() => learnerProfileId(), []);
   const [liveResp, setLiveResp] = useState<LiveCoachResponse | null>(null);
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
@@ -329,6 +337,8 @@ export default function PracticeStudio() {
         pcm: attemptPcm.pcm,
         captureStartMonotonicMs: attemptPcm.startMs,
         timeOriginUnixMs: performance.timeOrigin,
+        reference: lessonReference,
+        word: lessonReference ? sonicReferenceWord(lessonTarget, attempt.sound) : undefined,
       });
     }
     try {
@@ -440,10 +450,13 @@ export default function PracticeStudio() {
 
   // One voice: before the session the guide reads the instruction; once it starts Ava does the talking.
   const narration = useNarration(speech);
+  const practiceLine = lessonTarget === 'head'
+    ? 'Say “head”. Hold it, then press Begin session.'
+    : `Say “${s.spelled}” as in “${s.example}”. Hold it for about 3 seconds, then press Begin session.`;
   useEffect(() => {
     if (sessionBusy) narration.show(null);
-    else narration.say(`Say “${s.spelled}” as in “${s.example}”. Hold it for about 3 seconds, then press Begin session.`);
-  }, [sessionBusy, s.spelled, s.example, narration.say, narration.show]);
+    else narration.say(practiceLine);
+  }, [sessionBusy, practiceLine, narration.say, narration.show]);
 
   function readFeedback() {
     if (liveResp) void seq.run(liveResp, { narration: true });
@@ -452,6 +465,10 @@ export default function PracticeStudio() {
 
   function playReference() {
     setReferencePlaying(true);
+    if (lessonReference) {
+      speech.speak(sonicReferenceWord(lessonTarget, s.id), { force: true });
+      return;
+    }
     speech.speak(`${s.spelled}. ${s.spelled}. As in, ${s.example}.`, { force: true, rate: 0.8 });
   }
 
@@ -656,7 +673,7 @@ export default function PracticeStudio() {
           <>
             <button type="button" className="ob-text-btn lp-listen" onClick={playReference} disabled={director.state === 'starting'}>
               <Volume2 size={18} aria-hidden="true" />
-              {referencePlaying ? 'Playing…' : 'Hear example'}
+              {referencePlaying ? 'Playing…' : lessonReference ? 'Hear Sonic reference' : 'Hear example'}
             </button>
             <div className="lp-meter sd-begin-note">
               {micWarning ? (

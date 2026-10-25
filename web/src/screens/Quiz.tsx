@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { QUESTIONS, questionLine } from '../audio/bakedLines';
+import { loadSession } from '../classroom/session';
 import {
   AudioLines,
   CalendarDays,
@@ -72,15 +73,21 @@ export default function Quiz() {
   const { step: raw } = useParams();
   const step = Number(raw);
   const go = useStepNav();
-  const { preferences, updatePreferences, updatePlan, completeQuiz, plan } = useAppState();
+  const { preferences, updatePreferences, updatePlan, completeQuiz, plan, skipClassroomSurvey } = useAppState();
   const narration = useNarration();
   const [saving, setSaving] = useState(false);
+  const classroomLearner = loadSession()?.role === 'learner';
+
+  useEffect(() => {
+    if (classroomLearner) skipClassroomSurvey();
+  }, [classroomLearner, skipClassroomSurvey]);
 
   useEffect(() => {
     if (!isStep(step)) return;
     narration.say(questionLine(step));
   }, [step, narration.say]);
 
+  if (classroomLearner) return <Navigate to="/practice" replace />;
   if (!isStep(step)) return <Navigate to="/quiz/1" replace />;
 
   const answered =

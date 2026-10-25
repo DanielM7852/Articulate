@@ -16,13 +16,35 @@
   display: block;
   pointer-events: none;
 }
+
+/* The labels live in the same 1600 x 900 space as the canvas. Scale them from the
+   top-left so a short, wide console does not slide the right-hand nodes off screen. */
 .dash-stage {
   position: absolute;
-  left: 0;
   top: 0;
+  left: 0;
   width: 1600px;
   height: 900px;
   transform-origin: 0 0;
+}
+.dash--embedded {
+  position: absolute;
+  inset: 0;
+}
+
+/* 2026-10-25: the embedded graph kept its own header, which repeated the console and shortened the drawing.
+.dash--embedded .dash-brand img,
+.dash--embedded .dash-brand h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+*/
+
+.dash--embedded .dash-head {
+  display: none;
 }
 
 /* ---------- Header ---------- */

@@ -1,20 +1,35 @@
 import { useState, type FormEvent } from 'react';
-import { saveSession, type DevSession } from './session';
+import { saveSession, saveLearnerName, loadLearnerName, type DevSession } from './session';
+
+const NAME = /^[a-z0-9-]{1,24}$/;
 
 export function IdentityForm({
   role,
   onReady,
+  compact = false,
+  onBegin,
 }: {
   role: 'teacher' | 'learner';
   onReady: (session: DevSession) => void;
+  /** Landing page: name alone begins, name plus classroom joins the class. */
+  compact?: boolean;
+  onBegin?: () => void;
 }) {
-  const [name, setName] = useState(role === 'teacher' ? 'ada' : 'lea');
-  const [classroom, setClassroom] = useState('room-1');
+  const [name, setName] = useState(compact ? loadLearnerName() : role === 'teacher' ? 'ada' : 'lea');
+  const [classroom, setClassroom] = useState(compact ? '' : 'room-1');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (compact && !classroom.trim()) {
+      setError('Enter a classroom to join a class.');
+      return;
+    }
+    if (!NAME.test(name)) {
+      setError('Use a short name made of letters, numbers, or hyphens.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -30,6 +45,7 @@ export function IdentityForm({
       const body = (await response.json()) as DevSession;
       const session = { ...body, role, name, label: body.label || 'development identity' };
       saveSession(session);
+      window.dispatchEvent(new Event('articulate-classroom-session'));
       onReady(session);
     } catch {
       setError('The backend is not reachable.');
@@ -38,8 +54,17 @@ export function IdentityForm({
     }
   }
 
+  function beginWithName() {
+    if (!NAME.test(name)) {
+      setError('Use a short name made of letters, numbers, or hyphens.');
+      return;
+    }
+    saveLearnerName(name);
+    onBegin?.();
+  }
+
   return (
-    <form className="classroom-id" onSubmit={submit}>
+    <form className={compact ? 'classroom-id classroom-id--inline' : 'classroom-id'} onSubmit={submit}>
       <p className="classroom-id__label">Development identity. A name here is not an account.</p>
       <label>
         Name
@@ -47,9 +72,19 @@ export function IdentityForm({
       </label>
       <label>
         Classroom
-        <input value={classroom} onChange={(event) => setClassroom(event.target.value)} pattern="[a-z0-9-]{1,24}" required />
+        <input
+          value={classroom}
+          onChange={(event) => setClassroom(event.target.value)}
+          pattern="[a-z0-9-]{1,24}"
+          required={!compact}
+        />
       </label>
-      <button type="submit" className="btn btn--primary" disabled={busy}>{busy ? 'Opening' : role === 'teacher' ? 'Open dashboard' : 'Join as learner'}</button>
+      {compact && (
+        <button type="button" className="intro-landing__begin" onClick={beginWithName}>
+          Begin
+        </button>
+      )}
+      <button type="submit" className="btn btn--primary" disabled={busy}>{busy ? 'Opening' : role === 'teacher' ? 'Open dashboard' : compact ? 'Join class' : 'Join as learner'}</button>
       {error && <p role="alert">{error}</p>}
     </form>
   );

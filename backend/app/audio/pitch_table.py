@@ -148,8 +148,14 @@ def cue_line(word: str, cue: str) -> str:
     return _CUES[cue].format(word=word)
 
 
-def compare_wav(settings: Settings, wav: bytes, sound: str, word: str | None = None) -> dict[str, Any] | None:
-    """Learner table plus the Cartesia reference table for this word, when a key is configured."""
+def compare_wav(
+    settings: Settings,
+    wav: bytes,
+    sound: str,
+    word: str | None = None,
+    use_reference: bool = True,
+) -> dict[str, Any] | None:
+    """Learner table plus the Cartesia Sonic reference for this word, when a key is configured and asked for."""
     try:
         samples, rate = read_pcm16(wav)
         learner = extract_table(samples, rate)
@@ -159,7 +165,7 @@ def compare_wav(settings: Settings, wav: bytes, sound: str, word: str | None = N
     if learner is None:
         return None
     word = word or REFERENCE_WORDS.get(sound, sound)
-    reference = _reference_table(settings, word)
+    reference = _reference_table(settings, word) if use_reference else None
     cue = choose_cue(learner, reference)
     return {
         "source": "parselmouth",

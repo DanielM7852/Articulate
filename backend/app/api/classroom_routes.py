@@ -5,12 +5,24 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.classroom.owner import dev_classroom_enabled, load_owner
+from app.classroom.owner import browser_database_uri, dev_classroom_enabled, load_owner
 from uuid import uuid4
 
 from app.classroom.provision import ClassroomError, commit_verified_summary, open_dev_session
 
 router = APIRouter()
+
+
+def _visible_uri(request: Request, owner_uri: str) -> str:
+    settings = request.app.state.settings
+    return browser_database_uri(
+        owner_uri,
+        enabled=bool(settings.classroom_public_from_host),
+        host=request.headers.get("host", ""),
+        forwarded_proto=request.headers.get("x-forwarded-proto", ""),
+        forwarded_host=request.headers.get("x-forwarded-host", ""),
+        origin=request.headers.get("origin", ""),
+    )
 
 
 class DevSessionRequest(BaseModel):
@@ -27,7 +39,7 @@ def classroom_status(request: Request) -> dict:
     return {
         "configured": True,
         "database": owner["database"],
-        "uri": owner["uri"],
+        "uri": _visible_uri(request, owner["uri"]),
         "label": "development identity",
     }
 
@@ -38,7 +50,9 @@ async def classroom_session(body: DevSessionRequest, request: Request) -> dict:
     if owner is None or not dev_classroom_enabled(owner):
         raise HTTPException(404, "development classroom identity is local only")
     try:
-        return await open_dev_session(request.app.state.settings, body.role, body.name, body.classroom)
+        session = await open_dev_session(request.app.state.settings, body.role, body.name, body.classroom)
+        session["uri"] = _visible_uri(request, session["uri"])
+        return session
     except ClassroomError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
 

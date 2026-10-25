@@ -14,9 +14,14 @@ import {
   wsUri,
   type DevSession,
 } from './session';
+import { emit } from '../telemetry/client';
 import { useAppState } from '../state/AppState';
 import './classroom.css';
 import type { Assistance } from '../state/types';
+
+function landingHash(hash: string) {
+  return hash === '' || hash === '#' || hash === '#/';
+}
 
 let shownNotice: { profileId: string; revision: number; text: string } | null = null;
 
@@ -36,11 +41,22 @@ export function LessonSync() {
   const [link, setLink] = useState<string | null>(null);
   const [meta, setMeta] = useState<LessonMeta | null>(null);
   const [onQuiz, setOnQuiz] = useState(() => window.location.hash.startsWith('#/quiz') || window.location.hash.startsWith('#/dashboard'));
+  const [onLanding, setOnLanding] = useState(() => landingHash(window.location.hash));
 
   useEffect(() => {
-    const read = () => setOnQuiz(window.location.hash.startsWith('#/quiz') || window.location.hash.startsWith('#/dashboard'));
+    const read = () => {
+      const hash = window.location.hash;
+      setOnQuiz(hash.startsWith('#/quiz') || hash.startsWith('#/dashboard'));
+      setOnLanding(landingHash(hash));
+    };
     window.addEventListener('hashchange', read);
     return () => window.removeEventListener('hashchange', read);
+  }, []);
+
+  useEffect(() => {
+    const sync = () => setSession(loadSession());
+    window.addEventListener('articulate-classroom-session', sync);
+    return () => window.removeEventListener('articulate-classroom-session', sync);
   }, []);
 
   useEffect(() => {
@@ -55,7 +71,11 @@ export function LessonSync() {
       const key = `${lesson.revision}:${phase}:${lesson.commandId}`;
       if (acked.has(key) || !conn) return;
       acked.add(key);
-      void conn.reducers.ackLesson({ revision: lesson.revision, phase, commandId: lesson.commandId }).catch(() => {
+      void conn.reducers.ackLesson({ revision: lesson.revision, phase, commandId: lesson.commandId }).then(() => {
+        const kind = phase === 'received' ? 'lesson.received' : phase === 'applied' ? 'lesson.applied' : 'lesson.failed';
+        const label = phase === 'received' ? 'Lesson received' : phase === 'applied' ? 'Lesson applied' : 'Lesson failed';
+        emit('ui', 'db', kind, label, { commandId: lesson.commandId, revision: lesson.revision });
+      }, () => {
         acked.delete(key);
       });
     };
@@ -79,6 +99,7 @@ export function LessonSync() {
         cue: settings.cueId,
         repetitions: settings.repetitions,
         note: settings.note,
+        reference: settings.referenceReplay,
       });
       applied = lesson.revision;
       storeAppliedRevision(session.profileId, lesson.revision, lesson.commandId);
@@ -115,6 +136,7 @@ export function LessonSync() {
             cue: settings.cueId,
             repetitions: settings.repetitions,
             note: settings.note,
+            reference: settings.referenceReplay,
           });
         } catch {
           setLink('The latest lesson could not be read on this device.');
@@ -190,7 +212,8 @@ export function LessonSync() {
     };
   }, [session, applyTeacherLesson]);
 
-  if (onQuiz) return null;
+  // 2026-10-24: the landing page places Join beside Begin, so this banner stays off that screen.
+  if (onQuiz || onLanding) return null;
 
   if (!session || session.role !== 'learner') {
     return (

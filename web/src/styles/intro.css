@@ -38,7 +38,7 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  height: 108px;
+  height: 76px;
   padding: 0 var(--gutter);
 }
 .intro-landing__head img {
@@ -58,7 +58,7 @@
   grid-template-rows: auto 1fr;
   column-gap: 26px;
   margin: 0 var(--gutter);
-  padding-top: 50px;
+  padding-top: 24px;
   border-top: 1px solid #cdd3d8;
   min-height: 0;
 }
@@ -82,6 +82,7 @@
   max-width: 845px;
   aspect-ratio: 845 / 359;
   margin-top: 12%;
+  overflow: hidden;
 }
 .intro-landing__art img {
   position: absolute;
@@ -108,8 +109,8 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 30px;
-  padding-bottom: 24px;
+  gap: 16px;
+  padding-bottom: 8px;
   position: relative;
   z-index: 2;
 }
@@ -119,8 +120,50 @@
   line-height: 1.65;
   color: #606a70;
 }
-.intro-landing__begin {
+.intro-landing__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 168px) minmax(0, 168px);
+  grid-template-areas:
+    "name room"
+    "begin join";
+  gap: 8px;
+  width: min(100%, 348px);
+  align-items: end;
+}
+.intro-landing .classroom-id--inline input {
+  height: 36px;
+}
+.intro-landing__actions:not(:has(.classroom-id--inline)) {
+  display: flex;
+  width: auto;
+}
+.intro-landing__actions:not(:has(.classroom-id--inline)) .intro-landing__begin {
   width: 192px;
+}
+.intro-landing .classroom-id--inline {
+  display: contents;
+}
+.intro-landing .classroom-id--inline .classroom-id__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+.intro-landing .classroom-id--inline label:first-of-type { grid-area: name; }
+.intro-landing .classroom-id--inline label:last-of-type { grid-area: room; }
+.intro-landing .classroom-id--inline [role="alert"] { grid-column: 1 / -1; }
+.intro-landing .classroom-id--inline button.btn--primary {
+  grid-area: join;
+  width: 100%;
+  height: 60px;
+}
+.intro-landing__begin {
+  grid-area: begin;
+  width: 100%;
   height: 60px;
   border: 0;
   border-radius: var(--radius-control);
@@ -152,11 +195,11 @@
   width: calc(100% - 2 * var(--gutter));
   max-width: 1296px;
   height: auto;
-  margin: 0 var(--gutter) 32px;
+  margin: 0 var(--gutter) 12px;
 }
 @media (max-width: 860px) {
   .intro-landing__head {
-    height: 84px;
+    height: 64px;
   }
   .intro-landing__body {
     display: flex;
