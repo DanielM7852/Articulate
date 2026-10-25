@@ -1,4 +1,6 @@
 import type { MouthCueId } from '@mouth-demo/src/mouth-demo.js';
+import type { GhostPartSpec, GhostWordSpec } from './words';
+import { partSound, type PartSound } from './partSounds';
 
 /**
  * Presentation-only mapping from zone ids to the mouth-demo cue that shows the target. It is separate from
@@ -46,4 +48,39 @@ export function zoneDemoCue(zoneId: string | null): MouthCueId | null {
     default:
       return null;
   }
+}
+
+/** The lesson part that contains a zone (a coaching focus zone), or null. */
+export function partForZone(spec: GhostWordSpec, zoneId: string | null): GhostPartSpec | null {
+  if (!zoneId) return null;
+  return spec.parts.find((p) => p.zoneIds.includes(zoneId)) ?? null;
+}
+
+/** What Ava pronounces for one lesson part: its prebaked sound and the side cue that shows it. */
+export interface PartPronounce {
+  part: GhostPartSpec;
+  sound: PartSound;
+  cueId: MouthCueId | null;
+}
+
+/** The part's pronunciation (sound plus cue), or null when the part has no sound. */
+export function partPronounce(spec: GhostWordSpec, part: GhostPartSpec | null): PartPronounce | null {
+  if (!part) return null;
+  const sound = partSound(spec.word, part.id);
+  return sound ? { part, sound, cueId: unitDemoCue(part.zoneIds) } : null;
+}
+
+/**
+ * The pronunciation for a lesson unit: a part step (single part id) uses that part; a whole-word step maps the
+ * focus zone to the part containing it. Null when there is nothing to pronounce.
+ */
+export function stepPronounce(
+  spec: GhostWordSpec,
+  unit: { id: string; partIds: readonly string[] },
+  focusZoneId: string | null,
+): PartPronounce | null {
+  const id = unit.partIds.length === 1 ? unit.partIds[0] : unit.id;
+  const own = spec.parts.find((p) => p.id === id);
+  if (own) return partPronounce(spec, own);
+  return partPronounce(spec, partForZone(spec, focusZoneId));
 }
