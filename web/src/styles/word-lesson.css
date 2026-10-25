@@ -135,10 +135,6 @@ button.wl-pill {
   font-size: 13px;
   text-transform: capitalize;
 }
-.wl-redo {
-  height: 36px;
-  font-size: 13px;
-}
 @media (max-width: 720px) {
   .wl-words {
     order: 5;

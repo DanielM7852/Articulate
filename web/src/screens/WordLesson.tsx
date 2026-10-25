@@ -7,7 +7,7 @@ import { CameraTile } from '../components/practice';
 import { GhostBoard } from '../components/GhostBoard';
 import { MouthReference, type MouthReferenceHandle } from '../components/MouthReference';
 import { TeacherCaptions } from '../components/TeacherCaptions';
-import { VoiceCheck, readStoredVoice, storeVoice, type StoredVoice } from '../components/VoiceCheck';
+import { readStoredVoice, type StoredVoice } from '../components/VoiceCheck';
 import { onTeacherFallback, prepareTeacher, unlockTeacherAudio } from '../audio/teacher';
 import { ACTION_UNAVAILABLE, useAvaRealtime, type ActionResult, type AvaCoaching, type DemoKind, type DemoSpeed, type LessonAction } from '../realtime/useAvaRealtime';
 import { screenStateMessage, type ScreenState } from '../realtime/screenState';
@@ -38,7 +38,7 @@ import '../conversation/director/director.css';
 import '../styles/word-lesson.css';
 
 /**
- * Word lesson (ghost paths): the learner picks one of four words, does a short voice check once, and Ava coaches
+ * Word lesson (ghost paths): the learner picks one of four words, and Ava coaches
  * the word one part at a time. The ghost board is the live visual; Ava, the 3D model and cues are the advice.
  *
  *   plan  = lessonPlan(word): each part on its own, then the whole word twice
@@ -46,7 +46,6 @@ import '../styles/word-lesson.css';
  *
  * Phases:
  *   setup    -> waiting for the microphone (and a tap, if the browser has not had one yet)
- *   voice    -> voice check (hold "uh", pick a voice group); skipped when a voice is stored
  *   intro    -> Ava introduces the step (side view / cue for a part)
  *   watch    -> the board plays the ghost for the step's unit
  *   cue      -> "Your turn" / "Again when you're ready."
@@ -62,7 +61,7 @@ import '../styles/word-lesson.css';
  *
  * Cue-only steps (a lone sh or n) are watch-only: they never go live. Progression is nextStep() in plan.ts.
  */
-type Phase = 'setup' | 'voice' | 'intro' | 'watch' | 'cue' | 'live' | 'thinking' | 'coaching' | 'ready' | 'done';
+type Phase = 'setup' | 'intro' | 'watch' | 'cue' | 'live' | 'thinking' | 'coaching' | 'ready' | 'done';
 
 const WORD_KEYS = Object.keys(GHOST_WORDS);
 const DEFAULT_WORD = 'track';
@@ -92,7 +91,6 @@ const DEFAULT_SOUND_MS = 650;
 const LINES = {
   yourTurn: 'Your turn.',
   ready: `Try again when you're ready.`,
-  voice: 'First, a quick voice check so the ghost fits your voice.',
   moveOn: `Let's move on. We'll come back to it.`,
   doneWord: (word: string) => `That's ${word}. Nice work.`,
 };
@@ -230,10 +228,8 @@ export default function WordLesson() {
   const [wordKey, setWordKey] = useState(DEFAULT_WORD);
   const cur = useRef<WordData>(wordData(DEFAULT_WORD));
   const { spec, plan } = wordData(wordKey);
-  // The learner's voice size: stored once, redone on request.
-  const [learner, setLearner] = useState<StoredVoice | null>(() => readStoredVoice());
-  const learnerRef = useRef(learner);
-  learnerRef.current = learner;
+  // The learner's voice size, if one is already stored (read silently; no voice check is run here).
+  const [learner] = useState<StoredVoice | null>(() => readStoredVoice());
   const learnerFactor = learner?.factor ?? DEFAULT_FACTOR;
   // One model feeds both the board's drawing and its GhostAttempt scoring (GhostBoard sizes it once).
   const learnerVowels = learner?.vowels;
@@ -244,7 +240,6 @@ export default function WordLesson() {
   const modelRef = useRef(model);
   modelRef.current = model;
   const targets = useMemo(() => targetsFor(learner), [learner]);
-  const [voiceListening, setVoiceListening] = useState(false);
 
   const [phase, setPhaseState] = useState<Phase>('setup');
   const phaseRef = useRef<Phase>('setup');
@@ -538,7 +533,7 @@ export default function WordLesson() {
     const ph = phaseRef.current;
     const idx = Math.min(shownStep.current, steps.length - 1);
     const st = steps[idx];
-    const started = ph !== 'setup' && ph !== 'voice';
+    const started = ph !== 'setup';
     const done = ph === 'done';
     const running = started && !done;
     const demoOk = started && demoPhaseOk(ph);
@@ -659,7 +654,7 @@ export default function WordLesson() {
     const { spec: word, plan: steps } = cur.current;
     a.sendAppMessage(lessonContext(word.word), false);
     const step = steps[shownStep.current];
-    if (step && phaseRef.current !== 'setup' && phaseRef.current !== 'voice' && phaseRef.current !== 'done') a.sendAppMessage(stepMessage(word, step), false);
+    if (step && phaseRef.current !== 'setup' && phaseRef.current !== 'done') a.sendAppMessage(stepMessage(word, step), false);
   }, []);
 
   /** Wait for the board's watch to end (onWatchEnd), or give up a little after its own length. */
@@ -824,37 +819,9 @@ export default function WordLesson() {
     floor.current = 'script';
     endWindow();
     if (voiceOnRef.current) void connectAva(); // user gesture; the intro does not wait for it
-    if (!learnerRef.current) {
-      // First visit: size the ghost to the learner's voice before the first word.
-      setPhase('voice');
-      setVoiceListening(false);
-      if (!(await line(LINES.voice))) return;
-      setVoiceListening(true);
-      return;
-    }
     if (runId.current !== my) return;
     await startWord(cur.current.key);
-  }, [connectAva, endWindow, line, narration.show, setPhase, startWord]);
-
-  /** The voice check finished (or was skipped): keep the voice and start the word. */
-  const voiceDone = (v: StoredVoice, stored: boolean) => {
-    if (stored) storeVoice(v);
-    setLearner(v);
-    learnerRef.current = v;
-    setVoiceListening(false);
-    void startWord(cur.current.key).catch(() => undefined);
-  };
-
-  /** Header control: run the voice check again (the stored voice is kept until the new one is measured). */
-  const redoVoice = () => {
-    stopRun();
-    setFeedback(false);
-    quietAva(true);
-    setPhase('voice');
-    setFocusZoneId(null);
-    setVoiceListening(true);
-    if (realtimeActive()) void gateAva(runId.current);
-  };
+  }, [connectAva, endWindow, narration.show, startWord]);
 
   /** Mouse path: skip whatever Ava is saying and start a new attempt now. */
   const skipToTurn = useCallback(async () => {
@@ -924,7 +891,7 @@ export default function WordLesson() {
   const switchWord = useCallback(
     (key: string) => {
       if (key === cur.current.key) return;
-      if (phaseRef.current === 'setup' || phaseRef.current === 'voice') {
+      if (phaseRef.current === 'setup') {
         cur.current = wordData(key);
         setWordKey(cur.current.key);
         progress.current = startProgress();
@@ -1276,7 +1243,7 @@ export default function WordLesson() {
     else if (mic.status === 'unsupported') narration.show('This browser cannot share a microphone. Try a recent Chrome, Edge or Safari.');
     else
       narration.show(
-        `${learner ? '' : 'First a quick voice check. '}Then we'll work on the word ${spec.word}, one part at a time. Press Begin when you're ready.`,
+        `We'll work on the word ${spec.word}, one part at a time. Press Begin when you're ready.`,
       );
   }, [phase, mic.status, narration.show, spec.word, learner]);
 
@@ -1361,7 +1328,7 @@ export default function WordLesson() {
   actionEvents.current = {
     demo: async (what, speed) => {
       const ph = phaseRef.current;
-      if (ph === 'setup' || ph === 'voice') return NOT_STARTED;
+      if (ph === 'setup') return NOT_STARTED;
       if (tryInProgress()) return BUSY;
       if (replayingRef.current) return { ok: false, reason: 'already_playing', instructions: 'Say you will show it again in a moment.' };
       const slow = speed === 'slow';
@@ -1391,7 +1358,7 @@ export default function WordLesson() {
     },
     control: async (action) => {
       const ph = phaseRef.current;
-      if (ph === 'setup' || ph === 'voice') return NOT_STARTED;
+      if (ph === 'setup') return NOT_STARTED;
       if (tryInProgress()) return BUSY;
       const st = cur.current.plan[shownStep.current];
       const done = ph === 'done';
@@ -1428,7 +1395,7 @@ export default function WordLesson() {
   };
 
   /** Phases where the toggle is offered: not before the lesson, not while the board records or an attempt is being coached. */
-  const feedbackPhaseOk = (ph: Phase) => ph !== 'setup' && ph !== 'voice' && ph !== 'live' && ph !== 'thinking' && ph !== 'coaching';
+  const feedbackPhaseOk = (ph: Phase) => ph !== 'setup' && ph !== 'live' && ph !== 'thinking' && ph !== 'coaching';
 
   /**
    * "Give feedback" toggle. ON: the learner talks to realtime Ava (floor to her, mic open); it never records or scores an
@@ -1513,19 +1480,17 @@ export default function WordLesson() {
   const where = stepLabel(plan, stepIdx);
   const ask = step.kind === 'part' ? partPrompt(spec, step.unit) : { label: spec.word, lead: '', tail: null, spoken: `Say ${spec.word}.` };
   const statusText =
-    phase === 'voice'
-      ? 'Voice check'
-      : phase === 'ready'
-        ? `${where} · ready when you are`
-        : phase === 'live'
-          ? `Your turn · ${where}`
-          : phase === 'done'
-            ? `${cap(spec.word)} complete`
-            : phase === 'setup'
-              ? null
-              : tries > 0
-                ? `${where} · try ${tries + 1} of ${MAX_TRIES}`
-                : where;
+    phase === 'ready'
+      ? `${where} · ready when you are`
+      : phase === 'live'
+        ? `Your turn · ${where}`
+        : phase === 'done'
+          ? `${cap(spec.word)} complete`
+          : phase === 'setup'
+            ? null
+            : tries > 0
+              ? `${where} · try ${tries + 1} of ${MAX_TRIES}`
+              : where;
 
   // "Give feedback": talk to Ava with the board off (hidden when her live voice is not connected).
   const feedbackBtn = realtimeOn && (
@@ -1550,8 +1515,6 @@ export default function WordLesson() {
         {mic.status === 'requesting' ? 'Starting…' : 'Begin'}
       </button>
     );
-  } else if (phase === 'voice') {
-    cta = null;
   } else if (phase === 'done') {
     cta = nextWord ? (
       <div className="wl-ctas">
@@ -1657,11 +1620,6 @@ export default function WordLesson() {
           onChange={switchWord}
           options={WORD_KEYS.map((key) => ({ id: key, label: key }))}
         />
-        {phase !== 'setup' && phase !== 'voice' && (
-          <button type="button" className="ob-text-btn wl-redo" onClick={redoVoice}>
-            Redo voice check
-          </button>
-        )}
         <AccessToggles />
       </div>
 
@@ -1710,30 +1668,26 @@ export default function WordLesson() {
           </div>
         </section>
         <section className="lp-pane wl-board" aria-label={`The word ${spec.word}`}>
-          {phase === 'voice' ? (
-            <VoiceCheck frames={voice} ready={micReady && voiceListening} onDone={voiceDone} />
-          ) : (
-            <GhostBoard
-              spec={spec}
-              model={model}
-              learnerFactor={learnerFactor}
-              targets={targets}
-              unit={step.unit}
-              mode={boardMode}
-              speed={watchSpeed ?? step.speedWatch}
-              frames={voice}
-              lip={lipFrame}
-              attemptId={attemptId}
-              onWatchEnd={() => watchDone.current?.()}
-              onAttemptEnd={onAttemptEnd}
-              judge={isPhoneJudged(spec.word) ? judgeAttempt : undefined}
-              phoneCursor={isPhoneJudged(spec.word) ? phoneCursor : undefined}
-              focusZoneId={focusZoneId}
-              demoRun={demoRun}
-              demoMs={demoMs}
-              success={boardSuccess}
-            />
-          )}
+          <GhostBoard
+            spec={spec}
+            model={model}
+            learnerFactor={learnerFactor}
+            targets={targets}
+            unit={step.unit}
+            mode={boardMode}
+            speed={watchSpeed ?? step.speedWatch}
+            frames={voice}
+            lip={lipFrame}
+            attemptId={attemptId}
+            onWatchEnd={() => watchDone.current?.()}
+            onAttemptEnd={onAttemptEnd}
+            judge={isPhoneJudged(spec.word) ? judgeAttempt : undefined}
+            phoneCursor={isPhoneJudged(spec.word) ? phoneCursor : undefined}
+            focusZoneId={focusZoneId}
+            demoRun={demoRun}
+            demoMs={demoMs}
+            success={boardSuccess}
+          />
         </section>
         <FormantDebug frames={voice} voice={learner} />
         {/* Lip tracking needs a playing video element; the board shows the lips as the cursor ring. */}
