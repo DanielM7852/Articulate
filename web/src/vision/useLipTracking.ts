@@ -70,6 +70,8 @@ export function useLipTracking(video: HTMLVideoElement | null, enabled: boolean)
           if (w.length > WINDOW_CAP) w.shift();
         }
         subs.current.forEach((fn) => fn(f));
+        const mesh: number[] | undefined = d.mesh;
+        if (mesh) throttledEmit('lip.mesh', 100, 'mediapipe', 'db', 'lip.mesh', 'face mesh', { pts: mesh });
         throttledEmit('lip.frame', 200, 'mediapipe', 'db', 'lip.frame', 'lip frame', {
           ok: f.ok,
           opening: f.lipOpening,
