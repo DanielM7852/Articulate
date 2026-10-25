@@ -66,9 +66,9 @@ _HISTORY_REF = re.compile(
     r"\b(?:last time|like before|than before|earlier tr(?:y|ies)|your last (?:try|tries|go|attempt))\b", re.IGNORECASE
 )
 _PERSISTENT_REF = re.compile(
-    r"\b(?:again and again|keeps (?:going|slipping|dropping|getting|coming|missing)"
-    r"|kept (?:going|slipping|dropping|missing)|most of your|recent tries|lately"
-    r"|(?:missing|slipped|dropped|hard|off|weak|quiet) again|(?:has|have) been (?:hard|tricky|weak|difficult|missing))\b",
+    r"\b(?:again and again|keeps (?:going|slipping|dropping|coming|missing)"
+    r"|kept (?:going|slipping|dropping|missing)|recent tries|lately"
+    r"|(?:missing|slipped|dropped|hard|weak|quiet) again|(?:has|have) been (?:hard|tricky|weak|difficult|missing))\b",
     re.IGNORECASE,
 )
 
@@ -295,6 +295,19 @@ def normalize_word_cue(decision: CoachDecision) -> CoachDecision:
     return decision.model_copy(update={"cueId": cue})
 
 
+def _named_zone_ids(text: str, word: WordAttempt) -> list[str]:
+    """Zones of `word` the text names as "the <label>" (quotes allowed); longer labels match first."""
+    labelled = [(info.label, z.zoneId) for z in word.zones if (info := zone_info(word, z.zoneId)) is not None and info.label]
+    found: list[str] = []
+    rest = text
+    for label, zone_id in sorted(labelled, key=lambda p: -len(p[0])):
+        pattern = re.compile(rf"\bthe\s+[\"'\u2018\u201c]?{re.escape(label)}[\"'\u2019\u201d]?(?!\w)", re.IGNORECASE)
+        if pattern.search(rest):
+            found.append(zone_id)
+            rest = pattern.sub(" ", rest)
+    return found
+
+
 def validate_word_decision(
     decision: CoachDecision,
     word: WordAttempt,
@@ -341,10 +354,21 @@ def validate_word_decision(
     if _LISTEN.search(text):
         raise DecisionError("listening_language")
     entries = (history or {}).get("thisWord") or []
-    scoped = [e for e in entries if e.get("zoneId") == focus] if focus is not None else entries
+    named = _named_zone_ids(text, word)
+    if named:
+        scoped = [e for e in entries if e.get("zoneId") in named]
+    else:
+        scoped = [e for e in entries if e.get("zoneId") == focus] if focus is not None else entries
+
+    def backs(entry: dict[str, Any] | None, kind: str) -> bool:
+        if entry is None:
+            return False
+        return bool(entry.get("persistent")) if kind == "persistent" else entry.get("usable", 0) >= 1
 
     def entry_ok(kind: str) -> bool:
-        return any(e.get("persistent") for e in scoped) if kind == "persistent" else any(e.get("usable", 0) >= 1 for e in scoped)
+        if named:  # a line naming parts is backed only if every named part's own history backs it
+            return all(any(backs(e, kind) for e in scoped if e.get("zoneId") == z) for z in named)
+        return any(backs(e, kind) for e in scoped)
 
     _check_history(text, entry_ok)
     focus_zone = next((z for z in word.zones if z.zoneId == focus), None)

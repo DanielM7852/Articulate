@@ -20,7 +20,7 @@ from app.live import talk_prompts as tp
 from app.live.decision import _OBSERVED, _SHAMING, _sentences
 from app.live.decision import body_claim as _body_claim
 from app.live.history import LearnerContext
-from app.live.notes import miss_counts
+from app.live.notes import practice_miss_counts
 from app.live.orchestrator import LiveDeps
 from app.live.schemas import (
     AnalysisReadyEvent,
@@ -172,7 +172,7 @@ def first_name(display_name: str) -> str:
 def build_plan(requested: list[str] | None, context: LearnerContext) -> list[str]:
     if requested:
         return list(dict.fromkeys(requested))
-    counts = miss_counts(context.attempts)
+    counts = practice_miss_counts(context)
     return sorted(DEFAULT_ORDER, key=lambda s: (-counts.get(s, (0, None))[0], DEFAULT_ORDER.index(s)))
 
 
@@ -311,7 +311,7 @@ async def start_session(
     )
     therapist = deps.settings.live_therapist_name
     say, source = tp.intro_line(state.first_name, therapist, state.plan), "fallback"
-    struggles = [{"sound": s, "misses": c} for s, (c, _) in miss_counts(context.attempts).items()]
+    struggles = [{"sound": s, "misses": c} for s, (c, _) in practice_miss_counts(context).items()]
     draft, llm_ms = await _ask(deps, _payload(state, "intro", deps, struggles=struggles))
     if draft is not None:
         try:

@@ -62,6 +62,8 @@ export interface UseAvaRealtimeOptions {
   /** Ava called lesson_control: do what the matching button does. Resolve once started. */
   onLessonControl?: (action: LessonAction) => Promise<ActionResult>;
   sessionOptions?: RealtimeSessionOptions;
+  /** Learner profile, sent with the session request so Ava can remember them. */
+  profileId?: string;
   speed?: number;
   /** Stop Ava when the learner starts speaking. Default true. */
   bargeIn?: boolean;
@@ -395,7 +397,7 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
     setError(null);
     awaitingSince.current = 0;
     learnerSpeaking.current = false;
-    const session = new RealtimeSession(opts.current.sessionOptions);
+    const session = new RealtimeSession({ ...opts.current.sessionOptions, profileId: opts.current.profileId ?? opts.current.sessionOptions?.profileId });
     sessionRef.current = session;
     session.on('state', setState);
     session.on('error', (m) => setError(m));

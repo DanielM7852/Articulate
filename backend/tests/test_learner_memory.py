@@ -151,7 +151,7 @@ def test_ordinary_instructions_are_not_history_claims(tmp_path):
 
 
 def test_went_missing_again_needs_a_persistent_history(tmp_path):
-    line = "The ck went missing again. Back of the tongue up, then release."
+    line = "In track, the ck went missing again. Back of the tongue up, then release."
     c = openai_client(tmp_path, FakeOpenAI(word_decision(caption=line)))
     assert post(c).json()["source"] == "fallback"
     post(c)
@@ -171,3 +171,50 @@ def test_insight_lookup_finds_word_attempts():
 
     items, match = asyncio.run(_find_attempt(H(), "p", "w1", 5))
     assert match is not None and match["attemptId"] == "w1"
+
+
+def test_ordinary_coaching_lines_are_not_persistence_claims():
+    from app.live.decision import _PERSISTENT_REF
+
+    for line in ("Push most of your air through your lips", "Keeps getting closer, nice!",
+                 "Let the ck pop off again at the end"):
+        assert not _PERSISTENT_REF.search(line), line
+    assert _PERSISTENT_REF.search("the ck went missing again")
+
+
+def _check_named(caption, focus, persistent):
+    from app.live.decision import validate_word_decision, word_evidence_candidates
+    from app.live.scoring import score_word
+    from tests.test_live_word import attempt
+
+    a = attempt(**MISSING_CK)
+    s = score_word(a)
+    history = {"thisWord": [{"zoneId": z, "phoneme": z, "persistent": z in persistent, "usable": 2} for z in ("t", "r", "a", "k")
+                            if z == "k" or z in persistent]}
+    d = word_decision(caption=caption, focusZoneId=focus)
+    return validate_word_decision(d, a, s, word_evidence_candidates(a, s), None, history)
+
+
+def _rejected(*args):
+    from app.live.decision import DecisionError
+
+    try:
+        _check_named(*args)
+    except DecisionError as e:
+        assert str(e) == "history_not_grounded" or e.args[0] == "history_not_grounded"
+        return True
+    return False
+
+
+def test_history_claim_is_checked_against_the_named_part():
+    assert _rejected("In track, the t keeps slipping. Tongue tip up, then release.", "k", {"k"}) is True
+    assert _rejected("In track, the t keeps slipping. Tongue tip up.", "k", {"k"}) is True
+    assert _rejected("In track, the ck has been hard lately. Back of the tongue up, then release.", "a", {"k"}) is False
+
+
+def test_named_part_is_the_one_that_must_be_persistent():
+    line = "In track, the ck went missing again. Back of the tongue up, then release."
+    assert _rejected(line, "k", {"k"}) is False
+    assert _rejected(line, "k", set()) is True
+    assert _rejected("In track, the t and the ck keeps slipping. Tongue tip up, then release.", "k", {"k"}) is True
+    assert _rejected("Nice, the t popped in track. Back of the tongue up, then release.", "k", set()) is False

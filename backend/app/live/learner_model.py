@@ -4,7 +4,10 @@ Units are word-zone phonemes (shared across words) and "vowel:<sound>" practice 
 count; unclear captures are neither a miss nor a break in a run of misses.
 """
 
+import re
 from typing import Any
+
+from app.live.words import word_info
 
 STRUGGLE_STREAK = 2  # agreed with the user: 2 clear misses in a row
 RECENT_OUTCOMES = 5
@@ -23,10 +26,15 @@ def _unit_turns(timeline: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]
     """Per unit, its turns newest first: {usable, outcome, coached, cueId, caption, word}."""
     units: dict[str, list[dict[str, Any]]] = {}
     for turn in timeline:
+        if not isinstance(turn, dict):
+            continue
         if turn.get("kind") == "word":
             usable = turn.get("quality") == "usable"
-            for z in turn.get("zones") or []:
-                if z.get("advisory") or not z.get("inScope", True):
+            zones = turn.get("zones")
+            for z in zones if isinstance(zones, list) else []:
+                if not isinstance(z, dict) or z.get("advisory") or not z.get("inScope", True):
+                    continue
+                if not isinstance(z.get("phoneme"), str) or not z["phoneme"]:
                     continue
                 units.setdefault(z["phoneme"], []).append({
                     "usable": usable,
@@ -90,6 +98,17 @@ def _stats(unit: dict[str, Any]) -> dict[str, Any]:
     return {k: unit[k] for k in _STAT_KEYS}
 
 
+def persistent_units(
+    model: dict[str, dict[str, Any]], exclude: Any = (), limit: int = 3
+) -> list[tuple[str, dict[str, Any]]]:
+    """Persistent units not in `exclude`, worst first, at most `limit`."""
+    ranked = sorted(
+        ((k, u) for k, u in model.items() if u["persistent"] and k not in exclude),
+        key=lambda ku: (-ku[1]["missStreak"], -ku[1]["misses"]),
+    )
+    return ranked[:limit]
+
+
 def prompt_view(
     model: dict[str, dict[str, Any]], *, word: Any = None, sound: str | None = None, limit: int = 3
 ) -> dict[str, Any]:
@@ -108,12 +127,58 @@ def prompt_view(
         key = f"vowel:{sound}"
         current.add(key)
         view["thisSound"] = _stats(model[key]) if key in model else None
-    others = sorted(
-        ((k, u) for k, u in model.items() if u["persistent"] and k not in current),
-        key=lambda ku: (-ku[1]["missStreak"], -ku[1]["misses"]),
-    )
     view["otherStruggles"] = [
         {"unit": k, "words": u.get("words", []), "missStreak": u["missStreak"], "misses": u["misses"], "usable": u["usable"]}
-        for k, u in others[:limit]
+        for k, u in persistent_units(model, exclude=current, limit=limit)
     ]
     return view
+
+
+_LEAK = re.compile(r"\b(coach\w*|claude|gpt|relay\w*|supervisor)\b", re.I)
+_ADVICE_MAX = 160
+_MEMORY_HEAD = (
+    "# What you remember about this learner\n"
+    "These are your own notes from their earlier practice. Mention at most one, warmly, when it fits. "
+    "Never quote numbers or say where the notes came from. When a sound below is still hard, explain the same "
+    "movement another way (a new image or way to think about it) instead of repeating what you said before."
+)
+
+
+_VOWEL_SOUND = re.compile(r"^[a-z]{1,4}$")
+
+
+def _memory_name(key: str, unit: dict[str, Any]) -> str | None:
+    """Readable name for a unit, or None when no known word names it (stored keys and words are free text)."""
+    if key.startswith("vowel:"):
+        return f'the "{key[len("vowel:"):]}" sound'
+    # Name the sound by the label the learner sees in each word ("ck", "a"), not the phoneme key ("k", "ae").
+    # Only words the app knows are named: stored words are free text and this goes into a model prompt.
+    by_label: dict[str, list[str]] = {}
+    for w in (w for w in unit.get("words", []) if isinstance(w, str) and w):
+        info = word_info(w)
+        if info is None:
+            continue
+        label = next((z.label for z in info.zones if z.phoneme == key), None)
+        if label is not None:
+            by_label.setdefault(label, []).append(w)
+    if not by_label:
+        return None
+    return " and ".join(f'the "{label}" in ' + ", ".join(f'"{w}"' for w in ws) for label, ws in by_label.items())
+
+
+def memory_brief(model: dict[str, dict[str, Any]], limit: int = 3) -> str | None:
+    """First-person notes for Ava's session instructions: persistent struggles and the last advice given."""
+    lines = [_MEMORY_HEAD, ""]
+    for k, u in persistent_units(model, limit=limit):
+        if k.startswith("vowel:"):
+            if not _VOWEL_SOUND.match(k[len("vowel:"):]):
+                continue
+        name = _memory_name(k, u)
+        if name is None:
+            continue
+        line = f"- {name}: hard lately"
+        advice = " ".join(str(u.get("lastAdvice") or "").split())
+        if advice and not _LEAK.search(advice) and len(advice) <= _ADVICE_MAX:
+            line += f'; last time you said: "{advice}"'
+        lines.append(line)
+    return "\n".join(lines) if len(lines) > 2 else None

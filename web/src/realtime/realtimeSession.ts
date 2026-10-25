@@ -66,6 +66,8 @@ type Handlers = { [K in keyof RealtimeEvents]: Set<RealtimeEvents[K]> };
 export interface RealtimeSessionOptions {
   /** Backend route that mints the ephemeral secret. */
   sessionUrl?: string;
+  /** Learner profile; sent so the backend can add what Ava remembers about them to her instructions. */
+  profileId?: string;
   /** Mic stream to send. Defaults to the echo-cancelled mic from micAec (so Ava's Cartesia voice is suppressed). */
   micStream?: MediaStream;
   /** Turn detection restored when practice mode ends; must match what the backend baked into the secret. */
@@ -120,12 +122,13 @@ export class RealtimeSession {
   /** First assistant message item of each response, and each item's previous_item_id (for history repair). */
   private assistantItems = new Map<string, string>();
   private itemPrev = new Map<string, string | null>();
-  private readonly opts: Required<Omit<RealtimeSessionOptions, 'micStream'>> & { micStream?: MediaStream };
+  private readonly opts: Required<Omit<RealtimeSessionOptions, 'micStream' | 'profileId'>> & { micStream?: MediaStream; profileId?: string };
   model: string | null = null;
 
   constructor(options: RealtimeSessionOptions = {}) {
     this.opts = {
       sessionUrl: options.sessionUrl ?? '/v1/realtime/session',
+      profileId: options.profileId,
       micStream: options.micStream,
       turnDetection: options.turnDetection ?? DEFAULT_TURN_DETECTION,
       updateTimeoutMs: options.updateTimeoutMs ?? 5000,
@@ -249,7 +252,12 @@ export class RealtimeSession {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), SECRET_TIMEOUT_MS);
     try {
-      const res = await fetch(this.opts.sessionUrl, { method: 'POST', signal: ctl.signal });
+      const init: RequestInit = { method: 'POST', signal: ctl.signal };
+      if (this.opts.profileId) {
+        init.headers = { 'Content-Type': 'application/json' };
+        init.body = JSON.stringify({ profileId: this.opts.profileId });
+      }
+      const res = await fetch(this.opts.sessionUrl, init);
       if (!res.ok) throw new Error(`Realtime session request failed (${res.status}).`);
       const j = (await res.json()) as RealtimeSecret;
       if (!j || typeof j.client_secret !== 'string' || !j.client_secret || typeof j.calls_url !== 'string') {

@@ -1,11 +1,13 @@
 """Realtime persona: session config payload and the client-secret route (no network)."""
 
 import json
+from types import SimpleNamespace
 
 import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.live.history import LearnerContext
 from app.realtime.persona import CLIENT_TOOLS, TOOLS, instructions
 from app.realtime.routes import get_realtime_http, router
 from app.realtime.session_config import CLIENT_SECRETS_URL, client_secret_request, session_config
@@ -135,3 +137,66 @@ def test_instructions_generalise_to_any_word_and_part():
     assert "teaches one word, track" not in text
     for token in ("one word at a time", "one part of it at a time", "ship for sheep", "truck or trek for track"):
         assert token in text, token
+
+
+def _memory_app(history, local=True):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"value": "ek_test", "expires_at": 1, "session": {"id": "s"}})
+
+    client = _app(_settings(), handler)
+    client.app.state.settings = SimpleNamespace(live_coordination="local" if local else "shared", live_history_limit=12)
+    client.app.state.live_history = history
+    return client, seen
+
+
+class _Hist:
+    def __init__(self, timeline=None, exc=None):
+        self.timeline, self.exc = timeline or [], exc
+
+    async def load(self, profile_id, limit):
+        if self.exc:
+            raise self.exc
+        return LearnerContext(timeline=self.timeline)
+
+
+def _miss(caption):
+    return {"kind": "word", "attemptId": caption, "word": "track", "quality": "usable", "verdict": None,
+            "zones": [{"id": "r", "phoneme": "r", "kind": "liquid", "verdict": "miss", "advisory": False}],
+            "focusZoneId": "r", "cueId": None, "nextAction": "retry", "caption": caption}
+
+
+def test_route_with_profile_appends_memory_section():
+    client, seen = _memory_app(_Hist([_miss("Round the lips"), _miss("Round the lips")]))
+    assert client.post("/v1/realtime/session", json={"profileId": "p1"}).status_code == 200
+    text = seen["body"]["session"]["instructions"]
+    assert text.startswith(instructions("Ava"))
+    assert "\n\n# What you remember about this learner\n" in text
+    assert text.endswith('last time you said: "Round the lips"')
+
+
+def test_route_without_persistent_unit_is_unchanged():
+    client, seen = _memory_app(_Hist([_miss("a")]))
+    client.post("/v1/realtime/session", json={"profileId": "p1"})
+    assert seen["body"]["session"]["instructions"] == instructions("Ava")
+
+
+def test_route_memory_failures_still_mint():
+    client, seen = _memory_app(_Hist(exc=RuntimeError("boom")))
+    assert client.post("/v1/realtime/session", json={"profileId": "p1"}).status_code == 200
+    assert seen["body"]["session"]["instructions"] == instructions("Ava")
+    client, seen = _memory_app(_Hist([_miss("a"), _miss("a")]), local=False)  # no identity cookie: 401
+    assert client.post("/v1/realtime/session", json={"profileId": "p1"}).status_code == 200
+    assert seen["body"]["session"]["instructions"] == instructions("Ava")
+
+
+def test_route_without_injected_history_resolves_via_runtime_and_still_mints(monkeypatch):
+    import app.api.live_routes as live_routes
+
+    monkeypatch.setattr(live_routes, "_deps", lambda request: (_ for _ in ()).throw(AssertionError("builds LLM clients")))
+    client, seen = _memory_app(_Hist())
+    del client.app.state.live_history
+    assert client.post("/v1/realtime/session", json={"profileId": "p1"}).status_code == 200
+    assert seen["body"]["session"]["instructions"] == instructions("Ava")
