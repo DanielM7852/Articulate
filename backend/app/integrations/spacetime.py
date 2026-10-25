@@ -19,7 +19,9 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-_FROM = re.compile(r"\bfrom\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+_IDENT = r'(?:"(?:[^"]|"")+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][A-Za-z0-9_]*)'
+_FROM = re.compile(rf"\bfrom\s+({_IDENT}(?:\s*\.\s*{_IDENT})*)", re.IGNORECASE)
+_STRING = re.compile(r"'(?:[^']|'')*'")
 _PROFILE = re.compile(r"^[A-Za-z0-9_.:@-]{1,64}$")
 
 
@@ -44,6 +46,22 @@ def profile_literal(value: str) -> str:
     if not _PROFILE.fullmatch(value):
         raise SpacetimeError("invalid profile id")
     return sql_literal(value)
+
+
+def table_of(query: str) -> str:
+    """Table of the first FROM in a SQL string: literals ignored, quotes and schema prefix dropped."""
+    try:
+        match = _FROM.search(_STRING.sub("''", query))
+        if not match:
+            return "unknown"
+        name = re.findall(_IDENT, match.group(1))[-1]
+        if name[:1] == '"':
+            name = name[1:-1].replace('""', '"')
+        elif name[:1] in ("`", "["):
+            name = name[1:-1]
+        return name or "unknown"
+    except Exception:  # noqa: BLE001 - only labels a telemetry event
+        return "unknown"
 
 
 def unwrap(value: Any) -> Any:
@@ -138,8 +156,7 @@ class SpacetimeClient:
             rows = rows_as_dicts(response.json())
         except ValueError as exc:
             raise SpacetimeError("sql returned invalid JSON") from exc
-        match = _FROM.search(query)
-        table = match.group(1) if match else "unknown"
+        table = table_of(query)
         telemetry.emit("backend", "db", "db.read", f"read {table}", {"table": table, "rows": len(rows)})
         return rows
 
