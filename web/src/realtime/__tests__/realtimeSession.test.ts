@@ -89,3 +89,36 @@ test('delete-only re-points followers to the deleted item predecessor', () => {
   expect(sent[1].type).toBe('conversation.item.delete');
   expect(sent[2].previous_item_id).toBe('u1');
 });
+
+async function postedInit(profileId?: string): Promise<RequestInit> {
+  const calls: RequestInit[] = [];
+  const g = globalThis as unknown as { fetch: unknown };
+  const orig = g.fetch;
+  g.fetch = async (_url: string, init: RequestInit) => {
+    calls.push(init);
+    return { ok: false, status: 500 };
+  };
+  try {
+    const s = new RealtimeSession({ profileId });
+    await (s as unknown as { fetchSecret(): Promise<unknown> }).fetchSecret().catch(() => undefined);
+  } finally {
+    g.fetch = orig;
+  }
+  return calls[0];
+}
+
+// The harness runs tests synchronously, so the fetches happen at module load (top-level await).
+const withProfile = await postedInit('p_abc');
+const withoutProfile = await postedInit();
+
+test('session request sends {profileId} as JSON when set', () => {
+  const init = withProfile;
+  expect(init.body).toBe(JSON.stringify({ profileId: 'p_abc' }));
+  expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+});
+
+test('session request has no body when profileId is unset', () => {
+  const init = withoutProfile;
+  expect(init.body).toBe(undefined);
+  expect(init.headers).toBe(undefined);
+});

@@ -61,6 +61,24 @@ _TONGUE_CLAIM = re.compile(
     re.IGNORECASE,
 )
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
+# Lines about the learner's history must be backed by the code-computed learner model.
+_HISTORY_REF = re.compile(
+    r"\b(?:last time|like before|than before|earlier tr(?:y|ies)|your last (?:try|tries|go|attempt))\b", re.IGNORECASE
+)
+_PERSISTENT_REF = re.compile(
+    r"\b(?:again and again|keeps (?:going|slipping|dropping|coming|missing)"
+    r"|kept (?:going|slipping|dropping|missing)|recent tries|lately"
+    r"|(?:missing|slipped|dropped|hard|weak|quiet) again|(?:has|have) been (?:hard|tricky|weak|difficult|missing))\b",
+    re.IGNORECASE,
+)
+
+
+def _check_history(text: str, entry_ok: Any) -> None:
+    """Raise unless the history view backs what `text` claims; `entry_ok(kind)` answers for the relevant entries."""
+    if _PERSISTENT_REF.search(text) and not entry_ok("persistent"):
+        raise DecisionError("history_not_grounded")
+    if _HISTORY_REF.search(text) and not entry_ok("usable"):
+        raise DecisionError("history_not_grounded")
 
 
 def evidence_candidates(audio: AudioScore, video: VideoScore | None, client: ClientSummary) -> dict[str, float | str]:
@@ -114,6 +132,7 @@ def validate_decision(
     audio: AudioScore,
     video: VideoScore | None,
     candidates: dict[str, float | str],
+    history: dict[str, Any] | None = None,
 ) -> list[EvidenceItem]:
     """Raise DecisionError on any rule violation; otherwise return server-built evidence."""
     if decision.cueId not in (None, SOUND_CUE[sound]):
@@ -141,6 +160,8 @@ def validate_decision(
         raise DecisionError("body_claim_without_video")
     if _TONGUE.search(text) and (decision.cueId is None or _TONGUE_CLAIM.search(text)):
         raise DecisionError("tongue_claim")
+    sound_stats = (history or {}).get("thisSound") or {}
+    _check_history(text, lambda kind: bool(sound_stats.get("persistent")) if kind == "persistent" else sound_stats.get("usable", 0) >= 1)
     return [EvidenceItem(field=f, value=candidates[f]) for f in fields]
 
 
@@ -274,16 +295,31 @@ def normalize_word_cue(decision: CoachDecision) -> CoachDecision:
     return decision.model_copy(update={"cueId": cue})
 
 
+def _named_zone_ids(text: str, word: WordAttempt) -> list[str]:
+    """Zones of `word` the text names as "the <label>" (quotes allowed); longer labels match first."""
+    labelled = [(info.label, z.zoneId) for z in word.zones if (info := zone_info(word, z.zoneId)) is not None and info.label]
+    found: list[str] = []
+    rest = text
+    for label, zone_id in sorted(labelled, key=lambda p: -len(p[0])):
+        pattern = re.compile(rf"\bthe\s+[\"'\u2018\u201c]?{re.escape(label)}[\"'\u2019\u201d]?(?!\w)", re.IGNORECASE)
+        if pattern.search(rest):
+            found.append(zone_id)
+            rest = pattern.sub(" ", rest)
+    return found
+
+
 def validate_word_decision(
     decision: CoachDecision,
     word: WordAttempt,
     score: WordScore,
     candidates: dict[str, float | str],
     practice: list[str] | None = None,
+    history: dict[str, Any] | None = None,
 ) -> list[EvidenceItem]:
     """Every vowel-mode rule that applies to words, plus the word rules. Raises DecisionError on any violation.
 
     `practice` (practiceZoneIds): the focus zone must come from that list.
+    `history` (prompt_view output): lines about earlier tries or a pattern must be backed by it.
     """
     zone_ids = set(practice_scope(word, practice))
     focus = decision.focusZoneId
@@ -317,6 +353,24 @@ def validate_word_decision(
         raise DecisionError("tongue_claim")
     if _LISTEN.search(text):
         raise DecisionError("listening_language")
+    entries = (history or {}).get("thisWord") or []
+    named = _named_zone_ids(text, word)
+    if named:
+        scoped = [e for e in entries if e.get("zoneId") in named]
+    else:
+        scoped = [e for e in entries if e.get("zoneId") == focus] if focus is not None else entries
+
+    def backs(entry: dict[str, Any] | None, kind: str) -> bool:
+        if entry is None:
+            return False
+        return bool(entry.get("persistent")) if kind == "persistent" else entry.get("usable", 0) >= 1
+
+    def entry_ok(kind: str) -> bool:
+        if named:  # a line naming parts is backed only if every named part's own history backs it
+            return all(any(backs(e, kind) for e in scoped if e.get("zoneId") == z) for z in named)
+        return any(backs(e, kind) for e in scoped)
+
+    _check_history(text, entry_ok)
     focus_zone = next((z for z in word.zones if z.zoneId == focus), None)
     if focus_zone is not None and focus_zone.is_advisory and (_JUDGE.search(text) or _PRAISE.search(text)):
         raise DecisionError("judged_advisory_zone")

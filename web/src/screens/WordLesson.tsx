@@ -331,6 +331,7 @@ export default function WordLesson() {
   const [talking, setTalking] = useState(false);
   const [voiceFallback, setVoiceFallback] = useState(false); // a line fell back to the browser voice (sticky)
   const ava = useAvaRealtime({
+    profileId,
     getCoaching: async (id) => {
       const hit = coachCache.current.get(id === 'latest' ? (lastCoachId.current ?? '') : id);
       if (!hit) throw new Error('No coaching for that attempt.');
