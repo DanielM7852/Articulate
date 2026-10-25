@@ -34,6 +34,13 @@ const CUE_NAME: Record<MouthCueId, string> = {
   'tongue-tip-r': 'tongue tip into the r side view',
   'tongue-r': 'r tongue side view',
   'tongue-back': 'back-of-the-tongue side view',
+  'tongue-tip-n': 'tongue tip for the n side view',
+  'tongue-sh': 'sh tongue side view',
+  'lips-close': 'closed-lips side view',
+  'lips-close-voiced': 'closed-lips with voice side view',
+  'lips-close-r': 'closed lips into the r side view',
+  'mid-jaw': 'half-open jaw side view',
+  'glide-ey': 'ay glide side view',
 };
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 

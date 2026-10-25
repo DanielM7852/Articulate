@@ -177,69 +177,111 @@ const PROVENANCE =
   '70 ms smooth log-Hz blends; timings are typical natural durations, not measured.';
 
 /**
- * "track" timed from human recordings (median of 10 speakers, CTC forced alignment): phone spans and peaks are
+ * Words timed from human recordings (median of 10 speakers, CTC forced alignment): phone spans and peaks are
  * fractions of the word. Peaks are CTC spikes (stop peaks are about the burst); spans are spike midpoints, so
- * the part edges are approximate. The F1/F2 path stays the synthetic r -> ae trajectory, only retimed.
+ * the part edges are approximate. The F1/F2 path stays the synthetic vowel trajectory, only retimed.
+ * Used by track, sheep, rent and brain.
  */
-function recordedTrack(): WordTimeline {
-  const rec = recordedTiming.words.track;
+function recordedPhones(word: string) {
+  const rec = recordedTiming.words[word as keyof typeof recordedTiming.words];
   const D = rec.durationMs;
   const ph = (p: string) => {
     const hit = rec.phones.find((x) => x.p === p);
-    if (!hit) throw new Error(`recorded-timing.json: track has no phone ${p}`);
+    if (!hit) throw new Error(`recorded-timing.json: ${word} has no phone ${p}`);
     return hit;
   };
-  const [t, r, a, k] = [ph('t'), ph('ɹ'), ph('æ'), ph('k')];
   const ms = (f: number) => round(f * D, 1);
-  // The r span (spike midpoints) is only ~60 ms; the voiced r really starts a little earlier, and the "tr" unit needs a
-  // voiced stretch of at least FOLLOW.minVoicedSpanMs (80 ms) to be followable at all, so start r early enough for 90.
+  return { D, ph, ms };
+}
+
+const recordedProvenance = () =>
+  `Recorded timing (${recordedTiming.provenance}; model ${recordedTiming.model}) on the synthetic vowel path: ${PROVENANCE}`;
+
+/**
+ * The voiced r starts a little before its span (spike midpoints, ~60-100 ms): the "tr" unit needs a voiced stretch of
+ * at least FOLLOW.minVoicedSpanMs (80 ms) to be followable at all, so start r early enough for 90 ms before the vowel.
+ */
+const rStart = (rStartMs: number, vowelStartMs: number) => Math.max(0, Math.min(rStartMs, vowelStartMs - 90));
+
+function recordedTrack(): WordTimeline {
+  const { D, ph, ms } = recordedPhones('track');
+  const [t, r, a, k] = [ph('t'), ph('ɹ'), ph('æ'), ph('k')];
   // glideMs 40: r peaks only ~17 ms before the vowel starts, so the r -> ae blend is shorter than the 70 ms default.
-  const rFrom = Math.max(0, Math.min(ms(r.t0), ms(a.t0) - 90));
+  const rFrom = rStart(ms(r.t0), ms(a.t0));
   return {
     durationMs: D,
     stretches: [[{ target: 'r', from: rFrom, to: ms(r.t1), glideMs: 40 }, { target: 'ae', from: ms(a.t0), to: ms(a.t1) }]],
     markers: [{ zoneId: 't', ms: ms(t.peak) }, { zoneId: 'r', ms: ms(r.peak) }, { zoneId: 'k', ms: ms(k.peak) }],
     boundaries: [ms(a.t0), ms(k.t0)],
-    provenance: `Recorded timing (${recordedTiming.provenance}; model ${recordedTiming.model}) on the synthetic vowel path: ${PROVENANCE}`,
+    provenance: recordedProvenance(),
     source: 'recorded',
   };
 }
 
-const TIMELINES: Record<string, WordTimeline> = {
-  // t burst, aspiration, r -> ae, k closure and burst. Recorded timing (see recordedTrack).
-  track: recordedTrack(),
-  // sh hiss (unvoiced, no path), long ee, p burst.
-  sheep: {
-    durationMs: 480,
-    stretches: [[{ target: 'iy', from: 175, to: 360 }]],
-    markers: [{ zoneId: 'sh', ms: 85 }, { zoneId: 'p', ms: 430 }],
-    boundaries: [175, 360],
-    provenance: PROVENANCE,
-  },
-  // r -> eh, then the nasal breaks the voiced path, t burst.
-  rent: {
-    durationMs: 540,
-    stretches: [[{ target: 'r', from: 20, to: 110 }, { target: 'eh', from: 110, to: 300 }]],
-    markers: [{ zoneId: 'r', ms: 65 }, { zoneId: 'n', ms: 340 }, { zoneId: 't', ms: 450 }],
-    boundaries: [110, 300],
-    provenance: PROVENANCE,
-  },
-  // b burst, r -> eh -> iy glide (ey), nasal tail.
-  brain: {
-    durationMs: 600,
+function recordedSheep(): WordTimeline {
+  const { D, ph, ms } = recordedPhones('sheep');
+  const [sh, ee, p] = [ph('ʃ'), ph('i'), ph('p')];
+  return {
+    durationMs: D,
+    stretches: [[{ target: 'iy', from: ms(ee.t0), to: ms(ee.t1) }]],
+    markers: [{ zoneId: 'sh', ms: ms(sh.peak) }, { zoneId: 'p', ms: ms(p.peak) }],
+    boundaries: [ms(ee.t0), ms(p.t0)],
+    provenance: recordedProvenance(),
+    source: 'recorded',
+  };
+}
+
+function recordedRent(): WordTimeline {
+  const { D, ph, ms } = recordedPhones('rent');
+  const [r, e, n, t] = [ph('ɹ'), ph('ɛ'), ph('n'), ph('t')];
+  const rFrom = rStart(ms(r.t0), ms(e.t0));
+  return {
+    durationMs: D,
+    stretches: [[{ target: 'r', from: rFrom, to: ms(r.t1), glideMs: 40 }, { target: 'eh', from: ms(e.t0), to: ms(e.t1) }]],
+    markers: [{ zoneId: 'r', ms: ms(r.peak) }, { zoneId: 'n', ms: ms(n.peak) }, { zoneId: 't', ms: ms(t.peak) }],
+    boundaries: [ms(e.t0), ms(n.t0)],
+    provenance: recordedProvenance(),
+    source: 'recorded',
+  };
+}
+
+function recordedBrain(): WordTimeline {
+  const { D, ph, ms } = recordedPhones('brain');
+  const [b, r, ey, n] = [ph('b'), ph('ɹ'), ph('eɪ'), ph('n')];
+  const rFrom = rStart(ms(r.t0), ms(ey.t0));
+  // ey is a glide: eh -> iy, the eɪ span split at its midpoint. Each half is ~78 ms (>= 70). The eh -> iy blend must sit
+  // inside the two keys and clear of the r -> eh blend (40 ms, so 20 ms into eh): at most 2 * (eh length - 20).
+  const eyFrom = ms(ey.t0);
+  const eyTo = ms(ey.t1);
+  const mid = round((eyFrom + eyTo) / 2, 1);
+  const glideMs = Math.min(140, Math.round(eyTo - eyFrom), Math.floor(2 * (mid - eyFrom - 20)));
+  return {
+    durationMs: D,
     stretches: [
       [
-        { target: 'r', from: 60, to: 150 },
-        { target: 'eh', from: 150, to: 290, glideMs: 140 },
-        { target: 'iy', from: 290, to: 430 },
+        { target: 'r', from: rFrom, to: ms(r.t1), glideMs: 40 },
+        { target: 'eh', from: eyFrom, to: mid, glideMs },
+        { target: 'iy', from: mid, to: eyTo },
       ],
     ],
-    markers: [{ zoneId: 'b', ms: 50 }, { zoneId: 'r', ms: 105 }, { zoneId: 'n', ms: 485 }],
-    boundaries: [150, 430],
-    provenance: PROVENANCE,
-  },
-};
+    markers: [{ zoneId: 'b', ms: ms(b.peak) }, { zoneId: 'r', ms: ms(r.peak) }, { zoneId: 'n', ms: ms(n.peak) }],
+    boundaries: [eyFrom, ms(n.t0)],
+    provenance: recordedProvenance(),
+    source: 'recorded',
+  };
+}
 
+// All four words are timed from recordings (see recordedPhones); the F1/F2 path is still the synthetic vowel trajectory.
+const TIMELINES: Record<string, WordTimeline> = {
+  // t burst, aspiration, r -> ae, k closure and burst.
+  track: recordedTrack(),
+  // sh hiss (unvoiced, no path), long ee, p burst.
+  sheep: recordedSheep(),
+  // r -> eh, then the nasal breaks the voiced path, t burst.
+  rent: recordedRent(),
+  // b burst, r -> eh -> iy glide (ey), nasal tail.
+  brain: recordedBrain(),
+};
 // ---------------------------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------------------------

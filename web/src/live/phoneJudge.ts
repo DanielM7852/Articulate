@@ -13,10 +13,11 @@ export const ZONE_PHONES: Record<string, Record<string, string>> = {
   track: { t: 't', r: 'ɹ', a: 'æ', k: 'k' },
   sheep: { sh: 'ʃ', ee: 'i', p: 'p' },
   rent: { r: 'ɹ', e: 'ɛ', n: 'n', t: 't' },
+  brain: { b: 'b', r: 'ɹ', ai: 'eɪ', n: 'n' },
 };
 
-/** Words whose verdicts are judged by phones (explicit allow-list; the maps above may be wider). */
-export const PHONE_JUDGED_WORDS: ReadonlySet<string> = new Set(['track']);
+/** Words whose verdicts are judged by phones and drawn on the phone map (explicit allow-list; the maps above may be wider). */
+export const PHONE_JUDGED_WORDS: ReadonlySet<string> = new Set(['track', 'sheep', 'rent', 'brain']);
 
 /** Calibrated on 10 real speakers plus a "tack" near-miss: posterior and goodness-of-pronunciation (log-ratio) cut-offs. */
 export const PHONE_HIT_POST = 0.4;

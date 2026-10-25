@@ -42,6 +42,53 @@ export const CUES = {
     cutawayPose: "velar", marker: "velum",
     label: "Back of the tongue up",
   },
+  "tongue-tip-n": {
+    sound: "n", caption: "Tongue tip on the ridge behind the teeth, voice through the nose.",
+    shapes: { jawOpen: 0.18, mouthLowerDownLeft: 0.08, mouthLowerDownRight: 0.08 },
+    cutawayPose: "tongueTip", marker: "ridge",
+    label: "Tip on the ridge, hum through the nose",
+  },
+  "tongue-sh": {
+    sound: "sh", caption: "Lips pushed forward, tongue close to the roof, a wide soft hiss.",
+    shapes: { jawOpen: 0.15, mouthPucker: 0.5, mouthFunnel: 0.5 },
+    cutawayPose: "sh",
+    label: "Lips forward, tongue near the roof, soft hiss",
+  },
+  // mouthClose only shuts the lips when it equals jawOpen (see lipsync.js).
+  "lips-close": {
+    sound: "p", caption: "Close both lips, then pop them open.",
+    shapes: { jawOpen: 0.02, mouthClose: 0.02, mouthPressLeft: 0.6, mouthPressRight: 0.6 },
+    cutawayPose: "lipsClosed", marker: "lips",
+    label: "Lips closed, then pop them open",
+  },
+  "lips-close-voiced": {
+    sound: "b", caption: "Close both lips with voice on, then open them.",
+    shapes: { jawOpen: 0.02, mouthClose: 0.02, mouthPressLeft: 0.6, mouthPressRight: 0.6 },
+    cutawayPose: "lipsClosed", marker: "lips",
+    label: "Lips closed, voice on",
+  },
+  "lips-close-r": {
+    sound: "br", caption: "Close both lips with voice on, then pull the tongue back for the r.",
+    shapes: { jawOpen: 0.02, mouthClose: 0.02, mouthPressLeft: 0.6, mouthPressRight: 0.6 },
+    thenShapes: { jawOpen: 0.15, mouthPucker: 0.3, mouthFunnel: 0.2 },
+    cutawayPose: "lipsClosed", then: "r", marker: "lips",
+    label: "Close both lips, voice on",
+    labels: ["Close both lips, voice on", "Then pull the tongue back for the r"],
+  },
+  "mid-jaw": {
+    sound: "eh", caption: "Jaw half open, tongue mid and forward, like “bed”.",
+    shapes: { jawOpen: 0.32, mouthStretchLeft: 0.22, mouthStretchRight: 0.22, mouthSmileLeft: 0.1, mouthSmileRight: 0.1, mouthLowerDownLeft: 0.12, mouthLowerDownRight: 0.12 },
+    cutawayPose: "eh",
+    label: "Jaw half open, tongue mid and forward",
+  },
+  "glide-ey": {
+    sound: "ay", caption: "Start with the jaw half open, then glide the tongue up and forward, like “rain”.",
+    shapes: { jawOpen: 0.32, mouthStretchLeft: 0.22, mouthStretchRight: 0.22, mouthSmileLeft: 0.1, mouthSmileRight: 0.1, mouthLowerDownLeft: 0.12, mouthLowerDownRight: 0.12 },
+    thenShapes: { mouthSmileLeft: 0.45, mouthSmileRight: 0.45, mouthStretchLeft: 0.35, mouthStretchRight: 0.35, jawOpen: 0.1 },
+    cutawayPose: "eh", then: "ee",
+    label: "Jaw half open, tongue mid",
+    labels: ["Jaw half open, tongue mid", "Then glide the tongue up and forward"],
+  },
 };
 
-export const CUE_SHAPE_NAMES = ["jawOpen", "mouthPucker", "mouthFunnel", "mouthSmileLeft", "mouthSmileRight", "mouthStretchLeft", "mouthStretchRight", "mouthLowerDownLeft", "mouthLowerDownRight", "mouthUpperUpLeft", "mouthUpperUpRight"];
+export const CUE_SHAPE_NAMES = ["jawOpen", "mouthPucker", "mouthFunnel", "mouthSmileLeft", "mouthSmileRight", "mouthStretchLeft", "mouthStretchRight", "mouthLowerDownLeft", "mouthLowerDownRight", "mouthUpperUpLeft", "mouthUpperUpRight", "mouthClose", "mouthPressLeft", "mouthPressRight"];

@@ -32,7 +32,7 @@ The container needs a height (the component fills it). It builds its own layout:
 
 | Member | Description |
 |---|---|
-| `showCue(id)` | Demonstrate a cue (`round-lips`, `spread-lips`, `open-jaw`, `tongue-tip` t, `tongue-tip-r` tr, `tongue-r` r, `tongue-back` k) and keep looping it. Switching cues eases the old shapes out first. |
+| `showCue(id)` | Demonstrate a cue (`round-lips`, `spread-lips`, `open-jaw`, `tongue-tip` t, `tongue-tip-r` tr, `tongue-r` r, `tongue-back` k, `tongue-tip-n` n, `tongue-sh` sh, `lips-close` p, `lips-close-voiced` b, `lips-close-r` br, `mid-jaw` eh, `glide-ey` ay) and keep looping it. Switching cues eases the old shapes out first. |
 | `replay()` | Restart the current cue for the current view. |
 | `setSpeed(0.5 \| 1)` | Slow-mo on or off; applies immediately to face, camera, cutaway and effects. |
 | `setView("front" \| "side")` | Animated camera swing; side view shows the cutaway. Returns a promise that resolves `true` when the swing ends, `false` if interrupted. |
@@ -68,7 +68,7 @@ speech.stop();                           // or release now (eases to rest)
 - Phonemes: IPA or ARPAbet symbols, case and stress digits ignored, unknown symbols get a neutral half-open mouth. Groups: open (aa ae ah), mid (eh ey), spread (iy ih), round (ao ow), pucker (uw w), bilabial (p b m: lips close, jaw shuts), labiodental (f v), postalveolar (sh zh ch jh), sibilant (s z), tongue (t d n l th), velar (k g ng h), r. Non-bilabial jaw never drops below about 0.06. Short gaps inside speech hold the neighbouring shape.
 - Words only (no phonemes covering the moment): one open/close per estimated syllable across each word, closed between words.
 - Motion is a critically damped spring (about 60 ms) per blend shape, so shapes blend into each other.
-- Cue data (`src/cues.js`): every cue has a short on-diagram `label`. Optional: `then` (second cutaway pose), `labels` ([A, B] for two-pose cues) and `marker` (`ridge` or `velum`, shown as a pulsing dot while pose A is held). In side view a cue shows its label over the cutaway; two-pose cues (`tongue-tip-r`) hold A (1000 ms), glide to B (600 ms), then hold B (600 ms). Cutaway poses: neutral, oo, ee, ah, tongueTip, velar, r. The cutaway also exposes `setMarker(where, strength)` and `setCueLabel(text|null)`, used by the choreography.
+- Cue data (`src/cues.js`): every cue has a short on-diagram `label`. Optional: `then` (second cutaway pose), `thenShapes` (face blend shapes for pose B: the 3D face glides from `shapes` to `thenShapes` together with the cutaway), `labels` ([A, B] for two-pose cues) and `marker` (`ridge`, `velum` or `lips`, shown as a pulsing dot while pose A is held). In side view a cue shows its label over the cutaway; two-pose cues (`tongue-tip-r`, `lips-close-r`, `glide-ey`) hold A (1000 ms), glide to B (600 ms), then hold B (600 ms). Cutaway poses: neutral, oo, ee, ah, tongueTip, velar, r, lipsClosed, sh, eh (lip sync uses lipsClosed for p b m, sh for sh zh ch jh and eh for eh ey). The cutaway also exposes `setMarker(where, strength)` and `setCueLabel(text|null)`, used by the choreography.
 - Priority: a cue owns the mouth. While a cue is chosen (`cueId` set) or its shapes are still easing out after `stop()`, speech runs its clock and events but writes no shapes; it eases in from rest afterwards. Calling `speak()` again stops the previous handle.
 - Dev only: press `L` on the harness page to play a canned timeline against a `performance.now()` clock (it calls `stop()` first so no cue is active).
 

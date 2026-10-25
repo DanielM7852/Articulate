@@ -254,6 +254,16 @@ export async function createMouthDemo(container, options = {}) {
 
   // Choreography
   const BLEND_KEY = Object.fromEntries(Object.entries(BLEND_POSES).map(([k, pose]) => [pose, k]));
+  // Every blend shape a cue writes: shapes, plus thenShapes for two-pose cues that move the face too.
+  const shapeNameCache = new WeakMap();
+  const cueShapeNames = (c) => {
+    let names = shapeNameCache.get(c);
+    if (!names) {
+      names = [...new Set([...Object.keys(c.shapes), ...Object.keys(c.thenShapes ?? {})])];
+      shapeNameCache.set(c, names);
+    }
+    return names;
+  };
   const showTarget = () => (view === "side" ? 1 : 0);
 
   const emit = (phase) => {
@@ -263,7 +273,15 @@ export async function createMouthDemo(container, options = {}) {
   const paint = (c) => {
     if (c) {
       driven = c;
-      for (const [name, value] of Object.entries(c.shapes)) driver.setShape(name, value * S.w);
+      if (c.thenShapes) {
+        // two-pose cue: the face glides from shapes to thenShapes together with the cutaway (S.ab)
+        for (const name of cueShapeNames(c)) {
+          const v = (c.shapes[name] ?? 0) * (1 - S.ab) + (c.thenShapes[name] ?? 0) * S.ab;
+          driver.setShape(name, v * S.w);
+        }
+      } else {
+        for (const [name, value] of Object.entries(c.shapes)) driver.setShape(name, value * S.w);
+      }
       if (view === "side" || S.show > 0) {
         if (c.then) {
           // two-pose cue: neutral -> A, then A -> B, through the weighted blend
@@ -280,7 +298,7 @@ export async function createMouthDemo(container, options = {}) {
 
   const release = (c) => {
     if (!c) return;
-    driver.releaseShapes(Object.keys(c.shapes));
+    driver.releaseShapes(cueShapeNames(c));
     if (driven === c) driven = null;
   };
 

@@ -123,7 +123,8 @@ test('only the unit zones change and advisory/kind are kept', () => {
   expect(JSON.stringify(r.zones.find((z) => z.zoneId === 'a'))).toBe(JSON.stringify(result().zones[2]));
   expect(JSON.stringify(r.zones.find((z) => z.zoneId === 'k'))).toBe(JSON.stringify(result().zones[3]));
   expect(unitPhoneZones('track', unit('tr', ['t', 'r'])).map((z) => z.phone).join()).toBe('t,ɹ');
-  expect(unitPhoneZones('sheep', unit('p', ['p'])).length).toBe(0);
+  expect(unitPhoneZones('sheep', unit('p', ['p'])).map((z) => z.phone).join()).toBe('p');
+  expect(unitPhoneZones('nope', unit('p', ['p'])).length).toBe(0);
 });
 
 test('unclear results are returned unchanged', () => {

@@ -19,7 +19,7 @@ const INDEX = Object.fromEntries(CHANNELS.map((n, i) => [n, i]));
 
 // Side-cutaway weights (cutaway.setBlend), carried as extra lanes after the blend shapes so the
 // same spring smooths them. Only the CHANNELS lanes are ever written to the driver.
-const CUT_KEYS = ["ah", "oo", "ee", "tongue", "velar", "r"];
+const CUT_KEYS = ["ah", "oo", "ee", "tongue", "velar", "r", "lips", "sh", "eh"];
 const N_SHAPES = CHANNELS.length;
 const LANES = N_SHAPES + CUT_KEYS.length;
 const CUT = Object.fromEntries(CUT_KEYS.map((k, i) => [k, N_SHAPES + i]));
@@ -41,19 +41,19 @@ function viseme(spec, cut = {}) {
 }
 
 // Jaw floors at 0.06 for everything but bilabials, so the mouth never shuts mid-word.
-// Bilabials and labiodentals keep the cutaway neutral: the tongue rests and the lips do the work.
+// Bilabials close the cutaway lips (tongue at rest); labiodentals keep the cutaway neutral.
 // ARKit's mouthClose lifts the lower lip by as much as jawOpen drops it, so it only shuts the lips when
 // it equals jawOpen; above that the lower lip passes over the upper one (also clamped in update()).
 const V = {
   rest: viseme({}),
   open: viseme({ jawOpen: 0.5, lower: 0.25, upper: 0.1 }, { ah: 1 }), // ah, a, ae, schwa
-  mid: viseme({ jawOpen: 0.32, stretch: 0.22, smile: 0.1, lower: 0.12 }, { ah: 0.5, ee: 0.3 }), // eh, ey
+  mid: viseme({ jawOpen: 0.32, stretch: 0.22, smile: 0.1, lower: 0.12 }, { eh: 1 }), // eh, ey
   spread: viseme({ jawOpen: 0.14, smile: 0.4, stretch: 0.3 }, { ee: 1 }), // ee, ih, y
   round: viseme({ jawOpen: 0.35, mouthFunnel: 0.55, mouthPucker: 0.35 }, { oo: 0.7, ah: 0.3 }), // aw, o
   pucker: viseme({ jawOpen: 0.12, mouthPucker: 0.85, mouthFunnel: 0.6 }, { oo: 1 }), // oo, w
-  bilabial: viseme({ jawOpen: 0.1, mouthClose: 0.1, press: 0.4 }), // p b m
+  bilabial: viseme({ jawOpen: 0.1, mouthClose: 0.1, press: 0.4 }, { lips: 1 }), // p b m
   labiodental: viseme({ jawOpen: 0.1, mouthRollLower: 0.6, upper: 0.2 }), // f v
-  postalv: viseme({ jawOpen: 0.15, mouthPucker: 0.5, mouthFunnel: 0.5 }, { oo: 0.5, tongue: 0.3 }), // sh zh ch j
+  postalv: viseme({ jawOpen: 0.15, mouthPucker: 0.5, mouthFunnel: 0.5 }, { sh: 0.8, oo: 0.2 }), // sh zh ch j
   sibilant: viseme({ jawOpen: 0.06, smile: 0.25, stretch: 0.2 }, { ee: 0.5, tongue: 0.4 }), // s z
   tongue: viseme({ jawOpen: 0.18, lower: 0.08 }, { tongue: 1 }), // t d n l th
   velar: viseme({ jawOpen: 0.2, lower: 0.06 }, { velar: 1 }), // k g ng h
@@ -121,7 +121,7 @@ export function createLipSync({ driver, isBlocked = () => false, emit = () => {}
   const values = new Float32Array(LANES);
   const vel = new Float32Array(LANES);
   const target = new Float32Array(LANES);
-  const poseOut = { ah: 0, oo: 0, ee: 0, tongue: 0, velar: 0, r: 0 }; // reused by pose(), no per-frame garbage
+  const poseOut = { ah: 0, oo: 0, ee: 0, tongue: 0, velar: 0, r: 0, lips: 0, sh: 0, eh: 0 }; // reused by pose(), no per-frame garbage
   let session = null;
   let owning = false; // we have written shapes the driver still holds
 
