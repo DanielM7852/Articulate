@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from app import telemetry
 from app.config import Settings
 from app.integrations.spacetime import SpacetimeClient, unwrap, uuid_literal
 from app.live import llm
@@ -246,6 +247,7 @@ async def _decide(
                 max_tokens=6000,
                 model=deps.settings.live_coach_model,
                 thinking=deps.settings.live_coach_thinking,
+                purpose="decide",
             )
             t1 = time.perf_counter()
             timings["llm"] = _ms(t0, t1)
@@ -288,6 +290,7 @@ async def _decide_word(
                 max_tokens=6000,
                 model=deps.settings.live_coach_model,
                 thinking=deps.settings.live_coach_thinking,
+                purpose="word",
             )
             t1 = time.perf_counter()
             timings["llm"] = _ms(t0, t1)
@@ -312,6 +315,8 @@ async def coach_attempt(
     """Coach one attempt. Persistence runs after the response via `schedule` (inline when None)."""
     started = time.perf_counter()
     timings: dict[str, int] = {}
+    mode = "word" if body.word is not None else "vowel"
+    telemetry.emit("ui", "backend", "coach.request", f"coach {body.sound} ({mode})", {"sound": body.sound, "mode": mode})
     history = deps.get_history()
     # Frame read and history load are independent: run them concurrently.
     ((audio_frames, lip_frames, metrics_source), timings["frames"]), (context, timings["history"]) = await asyncio.gather(
@@ -321,6 +326,9 @@ async def coach_attempt(
     audio = score_audio(body.sound, audio_frames)
     video = score_video(body.sound, lip_frames)
     timings["scoring"] = _ms(t, time.perf_counter())
+    if video is not None:
+        telemetry.emit("backend", "ui", "video.score", f"video {video.verdict}",
+                       {"verdict": video.verdict, "okFrames": video.usableFrames})
     # The current attempt may already be stored (for example a retried request); never show it as history.
     context.attempts = [a for a in context.attempts if a.get("attemptId") != body.attemptId]
 
@@ -333,6 +341,8 @@ async def coach_attempt(
         source, decision, evidence = await _decide(deps, body, audio, video, context, timings)
         focus = None
         side = show_side_view(decision.cueId, decision.nextAction)
+    telemetry.emit("backend", "ui", "coach.decision", f"{decision.nextAction}: {decision.caption.strip()}",
+                   {"verdict": word_score.verdict if word_score is not None else audio.verdict, "cue": decision.cueId})
     response = LiveCoachResponse(
         attemptId=body.attemptId,
         source=source,

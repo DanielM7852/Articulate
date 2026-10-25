@@ -19,6 +19,7 @@ from app.config import Settings, get_settings
 from app.live.runtime import get_runtime
 from app.live.identity import read_identity
 from app.runtime import build_orchestrator
+from app import telemetry
 
 
 def _ensure_live_logging() -> None:
@@ -36,6 +37,11 @@ def _ensure_live_logging() -> None:
 async def _lifespan(app: FastAPI):
     _ensure_live_logging()
     runtime = get_runtime(app)
+    # Tests that inject a fake SpacetimeDB transport must not see extra telemetry traffic or reach the network.
+    fake = getattr(app.state, "live_spacetime_transport", None)
+    telemetry_transport = getattr(app.state, "telemetry_transport", None)
+    if fake is None or telemetry_transport is not None:
+        telemetry.configure(app.state.settings, telemetry_transport)
     try:
         # Shared APIs only coordinate; provider clients belong to the independently scaled workers.
         runtime.http(getattr(app.state, "live_spacetime_transport", None))
@@ -47,6 +53,7 @@ async def _lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await telemetry.aclose()
         await runtime.aclose()
 
 

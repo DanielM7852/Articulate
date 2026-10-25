@@ -6,10 +6,12 @@ Provider failures never surface as 500s.
 
 import asyncio
 import logging
+import time
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
+from app import telemetry
 from app.integrations.spacetime import SpacetimeError
 from app.live import insight
 from app.live.articulation import annotate_attempts, extract_features
@@ -251,10 +253,18 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
             if ok:
                 client = getattr(state, "live_articulation", None) or runtime.articulation()
                 if client is not None:
+                    t0 = time.perf_counter()
                     bundle = await client.analyze(
                         wav, attempt_id=attempt_id, capture_start_monotonic_ms=clock[0], time_origin_unix_ms=clock[1]
                     )
                     features = extract_features(bundle) if bundle is not None else None
+                    if features is not None:
+                        telemetry.emit(
+                            "sparc", "backend", "sparc.features", "SPARC features",
+                            {**{k: features.get(k) for k in
+                                ("tongueHeight", "tongueFront", "jawOpen", "lipForward", "lipAperture")},
+                             "latencyMs": round((time.perf_counter() - t0) * 1000)},
+                        )
                 if features is not None:
                     history = getattr(state, "live_history", None) or runtime.history(
                         getattr(state, "live_spacetime_transport", None)
@@ -320,8 +330,10 @@ async def live_articulation(
     state = request.app.state
     runtime = get_runtime(request.app)
     if not state.settings.articulation_configured and getattr(state, "live_articulation", None) is None:
+        telemetry.emit("backend", "sparc", "sparc.skipped", "SPARC skipped: disabled", {"reason": "disabled"})
         return JSONResponse({"accepted": False, "reason": "disabled"})
     if not runtime.reserve_articulation():
+        telemetry.emit("backend", "sparc", "sparc.skipped", "SPARC skipped: busy", {"reason": "busy"})
         return JSONResponse({"accepted": False, "reason": "busy"})
     if _is_shared(request):
         try:
@@ -329,6 +341,7 @@ async def live_articulation(
             await sink.shared.set(attemptId, profileId, sound, "pending")
         except (HTTPException, SpacetimeError):
             runtime.release_articulation()
+            telemetry.emit("backend", "sparc", "sparc.skipped", "SPARC skipped: unavailable", {"reason": "unavailable"})
             return JSONResponse({"accepted": False, "reason": "unavailable"})
     else:
         runtime.set_insight(attemptId, profileId, sound, "pending")

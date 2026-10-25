@@ -1,16 +1,27 @@
 """Client for the local articulation collector (services/articulation). Optional; failures return None."""
 
 import asyncio
+import io
 import logging
+import wave
 
 import httpx
 
+from app import telemetry
 from app.config import Settings
 
 logger = logging.getLogger(__name__)
 
 SCHEMA = "articulate.articulation/1"
 MAX_RETRY_WAIT_S = 5.0
+
+
+def _wav_seconds(wav: bytes) -> float | None:
+    try:
+        with wave.open(io.BytesIO(wav)) as handle:
+            return round(handle.getnframes() / float(handle.getframerate()), 2)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 class ArticulationClient:
@@ -43,6 +54,7 @@ class ArticulationClient:
         if capture_start_monotonic_ms is not None and time_origin_unix_ms is not None:
             params["capture_start_monotonic_ms"] = capture_start_monotonic_ms
             params["time_origin_unix_ms"] = time_origin_unix_ms
+        telemetry.emit("backend", "sparc", "sparc.request", "SPARC analysis requested", {"seconds": _wav_seconds(wav)})
         owned = self._http is None
         client = self._http or httpx.AsyncClient(transport=self._transport, timeout=self._timeout)
         try:

@@ -11,10 +11,12 @@ Invalid frames keep their timestamps and are published with null F0 so callers
 cannot treat them as measurements.
 """
 
+import time
 from dataclasses import dataclass
 
 import numpy as np
 
+from app import telemetry
 from app.config import Settings
 from app.schemas import PitchContour, PitchFrame
 
@@ -118,12 +120,30 @@ def frames_from_f0_track(
     return frames, None if median_f0 is None else round(median_f0, 5)
 
 
+def _emit_pitch_result(f0: np.ndarray, elapsed_s: float) -> None:
+    try:
+        voiced = f0[np.isfinite(f0)]
+        payload = {
+            "f0Mean": round(float(voiced.mean()), 1) if voiced.size else None,
+            "f0Min": round(float(voiced.min()), 1) if voiced.size else None,
+            "f0Max": round(float(voiced.max()), 1) if voiced.size else None,
+            "voicedPct": round(100.0 * voiced.size / f0.size, 1) if f0.size else 0.0,
+            "latencyMs": round(elapsed_s * 1000),
+        }
+        telemetry.emit("pitch", "backend", "pitch.result", "pitch extracted", payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def extract_pitch(samples: np.ndarray, sample_rate: int, settings: Settings) -> PitchContour:
     """Estimate F0 with librosa.pyin and drop frames that fail the usable-frame checks."""
 
     import librosa
 
     frame_length, hop_length = frame_settings(sample_rate)
+    seconds = round(len(samples) / float(sample_rate), 2) if sample_rate else None
+    telemetry.emit("backend", "pitch", "pitch.extract", "extract pitch", {"seconds": seconds})
+    started = time.perf_counter()
     f0, voiced_flag, voiced_probability = librosa.pyin(
         np.asarray(samples, dtype=np.float64),
         fmin=settings.f0_min_hz,
@@ -134,6 +154,7 @@ def extract_pitch(samples: np.ndarray, sample_rate: int, settings: Settings) -> 
         fill_na=np.nan,
         center=True,
     )
+    _emit_pitch_result(np.asarray(f0, dtype=np.float64), time.perf_counter() - started)
     times = librosa.times_like(np.asarray(f0), sr=sample_rate, hop_length=hop_length)
     frames, median_f0 = frames_from_f0_track(
         times,
