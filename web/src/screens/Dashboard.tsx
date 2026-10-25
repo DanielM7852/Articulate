@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject, type CSSProperties } from 'react';
-import { subscribeTelemetry, type NodeId, type TelemetryEvent } from '../telemetry/client';
+import { subscribeTelemetry, type TelemetryEvent } from '../telemetry/client';
 import brandMark from '../assets/landing/brand-mark.svg';
 import { FACE_POINTS, canonicalFace, createDotFace, decodeFaceV2, decodeFaceV3 } from '../dashboard/dotFace';
 import { WAVE_SAMPLES, createWaveCloud, decodeWave, tonesFrom } from '../dashboard/waveCloud';
+import { routeOf, sttNodeOf, type GraphId, type SttNode } from '../dashboard/route';
+import { EDGES, H, NODE, NODES, W, makeCurve, pointOn, type Curve, type Loc, type NodeDef } from '../dashboard/layout';
 import '../styles/dashboard.css';
 
 /**
  * Backend dashboard for a second screen: the whole system as a live graph drawn in the guide's
- * own visual language. Each subsystem is a breathing cluster of navy dots lit from the upper left;
- * every telemetry event (docs/telemetry.md) sends a packet of dots along its edge and the target
- * ripples. One 2D canvas draws all the dots; the labels and live detail cards are HTML laid out in
- * a fixed 1600 x 900 design space that is scaled to fit the viewport (the canvas uses the same
- * transform). Animation state lives in refs; React only re-renders the cards, at most 10 times a second.
+ * own visual language. Each part the app runs is a breathing cluster of navy dots lit from the upper left;
+ * every telemetry event (docs/telemetry.md) sends a packet of dots along its route and the target ripples.
+ * The deployed reducer only knows twelve source / target ids, so the parts it has no id for (OpenAI Realtime, the
+ * phone model, Azure, the classroom database, Ava's head) are routed by event kind and payload (dashboard/route.ts).
+ * The layout (dashboard/layout.ts) is a fixed 1600 x 900 design space scaled to fit the viewport; one 2D canvas
+ * draws all the dots and the HTML labels and live detail cards share its transform. Animation state lives in refs;
+ * React only re-renders the cards, at most 10 times a second.
  * The perception streams (lip.mesh, audio.spectrum) are drawn by the same frame loop: the MediaPipe card's
  * face canvas (a dot face over the full mesh for v3 and v2 frames, the 81-point wireframe for v1), and the Audio
  * cluster as a radial equaliser on per-band springs. The Audio card's waveform band (waveCloud.ts) has its own
@@ -21,74 +25,41 @@ import '../styles/dashboard.css';
  * the same path, and with no live event 15 s after connecting the replay starts on its own, tagged.
  */
 
-const W = 1600;
-const H = 900;
-
-type Loc = 'browser' | 'server' | 'Cartesia' | 'Anthropic' | 'maincloud';
-
-interface NodeDef {
-  id: NodeId;
-  name: string;
-  caption: string;
-  loc: Loc;
-  x: number;
-  y: number;
-  r: number;
-  /** dots in the cluster */
-  n: number;
-  /** annotation block (label + card): top-left corner and width, design px */
-  ann: [number, number, number];
-  /** which edge of the annotation lines up with the cluster */
-  align?: 'left' | 'right';
-}
-
-const NODES: NodeDef[] = [
-  { id: 'camera', name: 'Camera', caption: 'webcam capture', loc: 'browser', x: 404, y: 112, r: 28, n: 150, ann: [446, 92, 140] },
-  { id: 'mediapipe', name: 'MediaPipe', caption: 'FaceLandmarker → LipFrame', loc: 'browser', x: 404, y: 262, r: 40, n: 230, ann: [44, 76, 306], align: 'right' },
-  { id: 'mic', name: 'Microphone', caption: 'microphone capture', loc: 'browser', x: 84, y: 540, r: 28, n: 150, ann: [52, 580, 170] },
-  { id: 'audio', name: 'Audio', caption: 'formant / loudness analysis (vowel-mapper worklet)', loc: 'browser', x: 300, y: 568, r: 40, n: 230, ann: [96, 652, 214], align: 'right' },
-  { id: 'stt', name: 'Ink', caption: 'Cartesia Ink speech to text', loc: 'Cartesia', x: 664, y: 176, r: 40, n: 220, ann: [660, 228, 214] },
-  { id: 'tts', name: 'Sonic', caption: 'Cartesia Sonic text to speech (Ava’s voice)', loc: 'Cartesia', x: 930, y: 176, r: 40, n: 220, ann: [930, 228, 196] },
-  { id: 'backend', name: 'Backend', caption: 'FastAPI app', loc: 'server', x: 790, y: 488, r: 52, n: 320, ann: [566, 404, 160], align: 'right' },
-  { id: 'pitch', name: 'Pitch', caption: 'librosa F0 extraction', loc: 'server', x: 566, y: 762, r: 34, n: 190, ann: [322, 742, 198], align: 'right' },
-  { id: 'sparc', name: 'SPARC', caption: 'articulatory model service', loc: 'server', x: 1010, y: 650, r: 38, n: 210, ann: [1058, 606, 184] },
-  { id: 'db', name: 'SpacetimeDB', caption: 'live tables, subscriptions', loc: 'maincloud', x: 790, y: 768, r: 44, n: 260, ann: [846, 736, 170] },
-  { id: 'claude', name: 'Model', caption: 'coach decisions, when a model is called', loc: 'Anthropic', x: 1212, y: 470, r: 112, n: 760, ann: [1262, 612, 312] },
-  { id: 'ui', name: 'Learner', caption: 'the learner’s screen', loc: 'browser', x: 1478, y: 196, r: 44, n: 260, ann: [1416, 250, 170] },
-];
-const NODE = Object.fromEntries(NODES.map((n) => [n.id, n])) as Record<NodeId, NodeDef>;
-
-/** Edges drawn on the paper: every source -> target pair in the contract, plus mic -> audio. Bend is a fraction of the length. */
-const EDGES: [NodeId, NodeId, number][] = [
-  ['camera', 'mediapipe', 0.06],
-  ['mic', 'audio', 0.06],
-  ['mic', 'stt', 0.28], // bowed clear of the MediaPipe card
-  ['mediapipe', 'db', 0.12],
-  ['audio', 'db', 0.06],
-  ['stt', 'ui', -0.11],
-  ['ui', 'tts', 0.12],
-  ['tts', 'ui', 0.12],
-  ['backend', 'tts', 0.12],
-  ['ui', 'backend', 0.06],
-  ['backend', 'ui', 0.06],
-  ['backend', 'claude', 0.1],
-  ['claude', 'backend', 0.1],
-  ['backend', 'pitch', 0.16],
-  ['pitch', 'backend', 0.16],
-  ['backend', 'sparc', 0.16],
-  ['sparc', 'backend', 0.16],
-  ['backend', 'db', 0.05],
-];
-
 /** Perception streams (10 Hz): they drive the wireframe and the audio equaliser in place, no packets. */
 const PERCEPT = new Set(['lip.mesh', 'audio.spectrum']);
 /**
- * Kinds that feed the learner's own perception cards (camera, mic, MediaPipe, Audio). With a `learner` prop these
- * are taken only from tabs whose sid announced that profile id; stt.transcript is gated for the mic state only.
+ * Kinds that feed the learner's own cards (camera, mic, MediaPipe, Audio, the speech-to-text state, the phone model
+ * and Ava's head). With a `learner` prop these are taken only from tabs whose sid announced that profile id;
+ * stt.transcript is gated for the mic state only.
  */
-const SCOPED = new Set(['camera.on', 'camera.off', 'stt.open', 'stt.close', 'lip.frame', 'audio.frame', 'lip.mesh', 'audio.spectrum']);
+const SCOPED = new Set([
+  'camera.on',
+  'camera.off',
+  'stt.open',
+  'stt.close',
+  'lip.frame',
+  'audio.frame',
+  'lip.mesh',
+  'audio.spectrum',
+  'phones.open',
+  'phones.close',
+  'phones.frame',
+  'phones.score',
+  'head.ready',
+  'head.speak',
+]);
+/** The ticker names a route by its nodes as the graph labels them, not by the reducer's ids. */
+const TICK_NAME: Partial<Record<GraphId, string>> = {
+  stt: 'ink',
+  tts: 'sonic',
+  ui: 'learner',
+  claude: 'coach',
+  pitch: 'acoustics',
+  db: 'spacetimedb',
+  mic: 'microphone',
+};
 /** High-rate kinds: they animate but stay out of the ticker. */
-const QUIET = new Set(['lip.frame', 'audio.frame', 'lip.batch', 'audio.batch', ...PERCEPT]);
+const QUIET = new Set(['lip.frame', 'audio.frame', 'lip.batch', 'audio.batch', 'ui.ping', 'phones.frame', ...PERCEPT]);
 
 const PACKET_MS = 600;
 const RIPPLE_MS = 760;
@@ -103,6 +74,16 @@ const FADE_MS = 500;
 const MAX_DOTS = 24;
 /** A perception stream with no frame for this long reads as gone (wireframe fades, equaliser relaxes). */
 const PERCEPT_MS = 1500;
+/** The camera reads "on" only while camera.on was seen and a lip.frame or lip.mesh arrived this recently. */
+const FACE_MS = 5000;
+/** A microphone stream with no spectrum for this long reads as closed. */
+const MIC_QUIET_MS = 3000;
+/** sparc.features are EMA units; the bars span -SPARC_RANGE..+SPARC_RANGE around a centre line. */
+const SPARC_RANGE = 2;
+/** The phone model reads "not running" after this long without a phones.* row. */
+const PHONES_IDLE_MS = 60000;
+/** phones.frame counts are summed over this window for frames / s. */
+const PHONES_RATE_MS = 5000;
 /** lip.mesh v1: 81 points as flat x, y pairs (docs/telemetry.md, "Perception streams"). */
 const MESH_LEN = 162;
 const MESH_LERP_MS = 80;
@@ -121,6 +102,7 @@ const RMS_FULL = 0.3;
 const TONES = ['#203e68', '#3b5884', '#8fa5c3', '#c2cedd'];
 const TONE_ALPHA = [0.94, 0.9, 1, 1];
 
+
 // ---------- live model (cards) ----------
 
 interface TickItem {
@@ -131,13 +113,51 @@ interface TickItem {
   at: number;
 }
 
+type CoachProvider = 'openai' | 'anthropic';
+type CameraState = 'waiting' | 'on' | 'off';
+type MicState = 'waiting' | 'listening' | 'closed';
+/** MediaPipe card: a live mesh, lip.frame tracking without a mesh, or no face */
+type FaceState = 'mesh' | 'tracking' | 'none';
+/** waiting: watched for less than PHONES_IDLE_MS with no evidence; not running: no phones.* row in that long */
+type PhonesState = 'waiting' | 'connected' | 'closed' | 'not running';
+type HeadState = 'waiting' | 'speaking' | 'idle';
+
+const PROVIDER_TAG: Record<CoachProvider, { name: string; loc: Loc }> = {
+  openai: { name: 'GPT', loc: 'OpenAI' },
+  anthropic: { name: 'Claude', loc: 'Anthropic' },
+};
+
+/** backend.up: the server's live configuration. null fields were not in the row (an older backend). */
+interface BackendUp {
+  provider: CoachProvider | null;
+  model: string | null;
+  sparc: boolean | null;
+  azure: boolean | null;
+  classroom: boolean | null;
+  praat: boolean | null;
+}
+
+/** One speech-to-text service: open is null until a stt.open / stt.close from it arrives. */
+interface SttCard {
+  open: boolean | null;
+  model: string | null;
+  text: string | null;
+  final: boolean;
+}
+
 interface Model {
   count: number;
   stamps: number[];
-  camera: boolean | null;
-  micOpen: boolean | null;
-  lip: { ok: boolean; opening: number; width: number; rounding: number } | null;
-  audio: { f1: number; f2: number; rms: number; env: number[] } | null;
+  /** the latest camera.on / camera.off and the tab that sent it */
+  camera: { on: boolean; sid: string | null } | null;
+  /** any microphone evidence yet: audio.spectrum or an stt.* event */
+  micSeen: boolean;
+  /** performance.now() of the newest sign of an open stream (audio.spectrum, stt.open) */
+  micAt: number | null;
+  /** latest lip.frame; `at` is its arrival in performance.now() time (backfill lands in the past) */
+  lip: { ok: boolean; opening: number; width: number; rounding: number; at: number; sid: string | null } | null;
+  /** f1 / f2 stay null when the frame had none (outside practice attempts) */
+  audio: { f1: number | null; f2: number | null; rms: number; env: number[] } | null;
   /**
    * latest lip.mesh; `at` is performance.now() on arrival. v1: `pts` 81 points 0..255. v2: `xyz` the full mesh,
    * decoded once on arrival (dotFace.ts frame) from a wire v2 (replay) or v3 (live) payload; `n` is the point
@@ -146,14 +166,59 @@ interface Model {
   mesh: { v: 1; pts: number[]; n: number; at: number; sid: string | null } | { v: 2; xyz: Float32Array; n: number; at: number; sid: string | null } | null;
   /** latest audio.spectrum, bins 0..1; `wave` the 128-sample waveform in -1..1 (null on payloads without one) */
   spectrum: { bins: number[]; rms: number; wave: Float32Array | null; at: number; sid: string | null } | null;
-  stt: { text: string; final: boolean } | null;
+  /** Realtime (OpenAI) and Ink (Cartesia), told apart by the rows' `provider` */
+  stt: Record<SttNode, SttCard>;
   tts: { chars: number; voice: string; ms: number | null } | null;
-  pitch: { mean: number; min: number; max: number; voiced: number | null; latency: number | null } | null;
-  sparc: { feats: number[] | null; latency: number | null; skipped: string | null };
+  /** voiced is 0..100; f1 / f2 (Hz) only when the backend measured formants */
+  pitch: {
+    mean: number | null;
+    min: number | null;
+    max: number | null;
+    voiced: number | null;
+    latency: number | null;
+    method: string | null;
+    f1: number | null;
+    f2: number | null;
+  } | null;
+  /** method named by the latest pitch.extract or pitch.result */
+  pitchMethod: string | null;
+  /** feats are signed EMA units (null when the row carried none); seen is true once any sparc.* event arrived */
+  sparc: { feats: number[] | null; n: number | null; latency: number | null; skipped: string | null; seen: boolean };
+  /** times are arrival in performance.now(); frames are phones.frame `n` counts for the rate */
+  phones: {
+    host: string | null;
+    openAt: number | null;
+    closedAt: number | null;
+    lastAt: number | null;
+    frames: { at: number; n: number }[];
+    score: { word: string; ok: boolean | null; ms: number | null } | null;
+  };
+  azure: {
+    status: 'requested' | 'result' | 'error' | 'skipped' | null;
+    word: string | null;
+    accuracy: number | null;
+    ms: number | null;
+    note: string | null;
+  };
+  classroom: {
+    stage: string | null;
+    revision: number | null;
+    sessions: number;
+    role: string | null;
+    verified: boolean | null;
+    scaleRooms: number | null;
+    probe: { rooms: number | null; updates: number | null } | null;
+    seen: boolean;
+  };
+  /** speakingUntil is performance.now() */
+  head: { driver: string | null; speakingUntil: number; seen: boolean };
   dbReads: number[];
   dbWrites: number[];
   dbTable: string | null;
-  claude: { provider: string | null; model: string; purpose: string; latency: number | null; inTok: number | null; outTok: number | null; error: string | null } | null;
+  claude: { model: string; purpose: string; latency: number | null; inTok: number | null; outTok: number | null; error: string | null } | null;
+  /** who answered the latest claude.* event (or a newer backend.up); `at` is its event time */
+  coachProvider: { provider: CoachProvider; at: number } | null;
+  backendUp: BackendUp | null;
   claudeCalls: number;
   claudeLine: string;
   backendReqs: number[];
@@ -165,25 +230,38 @@ interface Model {
   presence: Map<string, { seen: number; leftAt: number | null }>;
   /** sid -> classroom profile id, from the `pid` a learner tab puts on ui.join / ui.ping */
   pidBySid: Map<string, string>;
+  /** performance.now() when this model started: "not running" needs a full PHONES_IDLE_MS of watching */
+  since: number;
 }
+
+const freshStt = (): SttCard => ({ open: null, model: null, text: null, final: false });
+const freshPhones = (): Model['phones'] => ({ host: null, openAt: null, closedAt: null, lastAt: null, frames: [], score: null });
 
 const freshModel = (): Model => ({
   count: 0,
   stamps: [],
   camera: null,
-  micOpen: null,
+  micSeen: false,
+  micAt: null,
   lip: null,
   audio: null,
   mesh: null,
   spectrum: null,
-  stt: null,
+  stt: { realtime: freshStt(), stt: freshStt() },
   tts: null,
   pitch: null,
-  sparc: { feats: null, latency: null, skipped: null },
+  pitchMethod: null,
+  sparc: { feats: null, n: null, latency: null, skipped: null, seen: false },
+  phones: freshPhones(),
+  azure: { status: null, word: null, accuracy: null, ms: null, note: null },
+  classroom: { stage: null, revision: null, sessions: 0, role: null, verified: null, scaleRooms: null, probe: null, seen: false },
+  head: { driver: null, speakingUntil: -1e9, seen: false },
   dbReads: [],
   dbWrites: [],
   dbTable: null,
   claude: null,
+  coachProvider: null,
+  backendUp: null,
   claudeCalls: 0,
   claudeLine: '',
   backendReqs: [],
@@ -193,13 +271,15 @@ const freshModel = (): Model => ({
   lastAt: {},
   presence: new Map(),
   pidBySid: new Map(),
+  since: performance.now(),
 });
 
 interface Snap {
   count: number;
   rate: number;
-  camera: boolean | null;
-  micOpen: boolean | null;
+  cameraState: CameraState;
+  micState: MicState;
+  faceState: FaceState;
   lip: Model['lip'];
   audio: Model['audio'];
   meshLive: boolean;
@@ -210,11 +290,19 @@ interface Snap {
   stt: Model['stt'];
   tts: Model['tts'];
   pitch: Model['pitch'];
+  pitchMethod: string | null;
   sparc: Model['sparc'];
+  phones: { state: PhonesState; host: string | null; fps: number; score: Model['phones']['score'] };
+  azure: Model['azure'];
+  classroom: Model['classroom'];
+  head: { state: HeadState; driver: string | null };
   dbReads: number;
   dbWrites: number;
   dbTable: string | null;
   claude: Model['claude'];
+  /** the latest provider evidence, else backend.up's idle default; null before either */
+  coachProvider: CoachProvider | null;
+  backendUp: BackendUp | null;
   claudeCalls: number;
   backendRpm: number;
   backendOut: number;
@@ -222,11 +310,16 @@ interface Snap {
   ticker: TickItem[];
   learners: number;
   dots: { sid: string; leaving: boolean }[];
+  /** nodes the backend reported switched off (or, for Phones, silent for a minute): drawn pale */
+  standby: GraphId[];
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null);
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+/** Voice and model ids can be UUIDs; a card shows the first 8 characters of anything longer than 12. */
+const shortId = (v: string | null) => (v && v.length > 12 ? `${v.slice(0, 8)}…` : v);
 
 function within(list: number[], now: number, ms: number) {
   while (list.length && now - list[0] > ms) list.shift();
@@ -236,25 +329,96 @@ function within(list: number[], now: number, ms: number) {
 const meshLive = (m: Model, now: number) => m.mesh !== null && now - m.mesh.at < PERCEPT_MS;
 const specLive = (m: Model, now: number) => m.spectrum !== null && now - m.spectrum.at < PERCEPT_MS;
 
+/** 'openai' | 'anthropic' from a payload's `provider`, else inferred from its model (rows without one). */
+function coachProviderOf(p: Record<string, unknown>): CoachProvider | null {
+  const v = str(p.provider)?.toLowerCase();
+  if (v === 'openai' || v === 'anthropic') return v;
+  const model = str(p.model)?.toLowerCase() ?? '';
+  if (model.startsWith('gpt-')) return 'openai';
+  if (model.startsWith('claude-')) return 'anthropic';
+  return null;
+}
+
+function phonesState(m: Model, now: number): PhonesState {
+  const ph = m.phones;
+  if (ph.lastAt === null || now - ph.lastAt > PHONES_IDLE_MS) return now - m.since >= PHONES_IDLE_MS ? 'not running' : 'waiting';
+  return ph.closedAt !== null && (ph.openAt === null || ph.closedAt >= ph.openAt) ? 'closed' : 'connected';
+}
+
+function phonesFps(m: Model, now: number) {
+  const list = m.phones.frames;
+  while (list.length && now - list[0].at > PHONES_RATE_MS) list.shift();
+  let n = 0;
+  for (const f of list) n += f.n;
+  return Math.round(n / (PHONES_RATE_MS / 1000));
+}
+
+/** States derived from stream liveness and time; they change with time alone, so the card loop re-renders on `key`. */
+function derive(m: Model, now: number) {
+  const ml = meshLive(m, now);
+  const sl = specLive(m, now);
+  const faceAt = Math.max(m.lip?.at ?? -Infinity, m.mesh?.at ?? -Infinity);
+  const cameraState: CameraState =
+    m.camera?.on === true && now - faceAt < FACE_MS ? 'on' : m.camera === null && faceAt === -Infinity ? 'waiting' : 'off';
+  // stt.close never closes the mic on its own: the spectrum decides, with a grace of MIC_QUIET_MS
+  const micState: MicState = sl || (m.micAt !== null && now - m.micAt <= MIC_QUIET_MS) ? 'listening' : m.micSeen ? 'closed' : 'waiting';
+  const lipLive = m.lip !== null && m.lip.ok && now - m.lip.at < PERCEPT_MS;
+  const faceState: FaceState = ml ? 'mesh' : lipLive ? 'tracking' : 'none';
+  const phones = phonesState(m, now);
+  const fps = phonesFps(m, now);
+  const head: HeadState = !m.head.seen ? 'waiting' : now < m.head.speakingUntil ? 'speaking' : 'idle';
+  return {
+    ml,
+    sl,
+    cameraState,
+    micState,
+    faceState,
+    phones,
+    fps,
+    head,
+    key: `${ml}|${sl}|${cameraState}|${micState}|${faceState}|${phones}|${fps}|${head}`,
+  };
+}
+
+/** Nodes with evidence that they are off: the backend said so and nothing from them has arrived since. */
+function standbyOf(m: Model, phones: PhonesState): GraphId[] {
+  const up = m.backendUp;
+  const out: GraphId[] = [];
+  if (up?.sparc === false && !m.sparc.seen) out.push('sparc');
+  if (up?.azure === false && m.azure.status === null) out.push('azure');
+  if (up?.classroom === false && !m.classroom.seen) out.push('classroom');
+  if (phones === 'not running') out.push('phones');
+  return out;
+}
+
 function snapshot(m: Model, now: number): Snap {
+  const d = derive(m, now);
   return {
     count: m.count,
     rate: within(m.stamps, now, 10000) / 10,
-    camera: m.camera,
-    micOpen: m.micOpen,
+    cameraState: d.cameraState,
+    micState: d.micState,
+    faceState: d.faceState,
     lip: m.lip,
     audio: m.audio,
-    meshLive: meshLive(m, now),
+    meshLive: d.ml,
     meshPoints: m.mesh ? m.mesh.n : FACE_POINTS,
-    spectrum: m.spectrum && specLive(m, now) ? { bins: m.spectrum.bins, rms: m.spectrum.rms, wave: m.spectrum.wave } : null,
+    spectrum: m.spectrum && d.sl ? { bins: m.spectrum.bins, rms: m.spectrum.rms, wave: m.spectrum.wave } : null,
     stt: m.stt,
     tts: m.tts,
     pitch: m.pitch,
+    pitchMethod: m.pitch?.method ?? m.pitchMethod,
     sparc: m.sparc,
+    phones: { state: d.phones, host: m.phones.host, fps: d.fps, score: m.phones.score },
+    azure: m.azure,
+    classroom: m.classroom,
+    head: { state: d.head, driver: m.head.driver },
     dbReads: within(m.dbReads, now, 60000),
     dbWrites: within(m.dbWrites, now, 60000),
     dbTable: m.dbTable,
     claude: m.claude,
+    coachProvider: m.coachProvider?.provider ?? m.backendUp?.provider ?? null,
+    backendUp: m.backendUp,
     claudeCalls: m.claudeCalls,
     backendRpm: within(m.backendReqs, now, 60000),
     backendOut: within(m.backendOut, now, 60000),
@@ -262,6 +426,7 @@ function snapshot(m: Model, now: number): Snap {
     ticker: m.ticker.filter((t) => now - t.at < TICK_MS),
     learners: [...m.presence.values()].filter((v) => v.leftAt === null).length,
     dots: [...m.presence].map(([sid, v]) => ({ sid, leaving: v.leftAt !== null })),
+    standby: standbyOf(m, d.phones),
   };
 }
 
@@ -285,8 +450,9 @@ function prunePresence(m: Model): boolean {
 }
 
 /**
- * Folds one event into the card model. Older events (backfill) never overwrite newer state of the same kind.
- * `learner` (a classroom profile id, '' for the whole stream) limits the perception cards to that learner's tabs.
+ * Folds one event into the card model. Older events (backfill) never overwrite newer state of the same kind (per
+ * speech-to-text service for stt.*). `learner` (a classroom profile id, '' for the whole stream) limits the
+ * perception cards to that learner's tabs.
  */
 function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner = '') {
   m.count += 1;
@@ -305,27 +471,47 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
     }
   }
   if (live) m.stamps.push(now);
+  const counted = live ? now : now - 1; // backfill still counts toward the rolling minute
+  const [from, to] = routeOf(e);
+  // The browser's request carries a sid; the backend logs a duplicate without one, which is not a request.
+  if (from === 'ui' && to === 'backend' && psid) m.backendReqs.push(counted);
+  if (from === 'backend') m.backendOut.push(counted);
   // Per-learner view: other tabs still count as traffic and presence (above), but never reach the perception cards.
   // Filtered here, at apply time, so a tab is picked up as soon as its ui.join / ui.ping names the learner.
   const mine = !learner || (psid !== null && m.pidBySid.get(psid) === learner);
   if (!mine && SCOPED.has(e.kind)) return;
-  const prev = m.lastAt[e.kind];
-  if (prev !== undefined && e.at < prev) return;
-  m.lastAt[e.kind] = e.at;
   const p = e.payload ?? {};
-  const counted = live ? now : now - 1; // backfill still counts toward the rolling minute
+  const sttNode = sttNodeOf(p);
+  const lastKey = e.kind.startsWith('stt.') ? `${e.kind}:${sttNode}` : e.kind;
+  const prev = m.lastAt[lastKey];
+  if (prev !== undefined && e.at < prev) return;
+  m.lastAt[lastKey] = e.at;
+  // arrival in performance.now() time: backfill lands as far in the past as the row is old, so it never reads live
+  const arrived = live ? now : now - Math.max(0, Date.now() - e.at);
+  const noteCoach = () => {
+    const provider = coachProviderOf(p);
+    if (provider && (!m.coachProvider || e.at >= m.coachProvider.at)) m.coachProvider = { provider, at: e.at };
+  };
+  const stt = m.stt[sttNode];
   switch (e.kind) {
     case 'camera.on':
-      m.camera = true;
+      m.camera = { on: true, sid: psid };
       break;
     case 'camera.off':
-      m.camera = false;
+      m.camera = { on: false, sid: psid };
       break;
     case 'stt.open':
-      m.micOpen = true;
+      m.micSeen = true;
+      m.micAt = Math.max(m.micAt ?? -Infinity, arrived);
+      m.stt[sttNode] = { ...stt, open: true, model: str(p.model) ?? stt.model };
       break;
     case 'stt.close':
-      m.micOpen = false;
+      m.micSeen = true;
+      m.stt[sttNode] = { ...stt, open: false, model: str(p.model) ?? stt.model };
+      break;
+    case 'stt.transcript':
+      m.stt[sttNode] = { ...stt, model: str(p.model) ?? stt.model, text: (str(p.text) ?? '').slice(0, 80), final: p.final === true };
+      if (mine) m.micSeen = true;
       break;
     case 'lip.frame':
       m.lip = {
@@ -333,14 +519,26 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
         opening: clamp01(num(p.opening) ?? 0),
         width: clamp01(num(p.width) ?? 0),
         rounding: clamp01(num(p.rounding) ?? 0),
+        at: arrived,
+        sid: psid,
       };
-      if (m.camera === null) m.camera = true;
       break;
     case 'audio.frame': {
       const env = Array.isArray(p.env) ? p.env.map((v) => clamp01(Number(v) || 0)).slice(0, 32) : [];
-      m.audio = { f1: num(p.f1) ?? 0, f2: num(p.f2) ?? 0, rms: clamp01(num(p.rms) ?? 0), env };
+      m.audio = { f1: num(p.f1), f2: num(p.f2), rms: clamp01(num(p.rms) ?? 0), env };
       break;
     }
+    case 'ui.leave':
+      // the tab is gone: its camera, face and microphone stop reading live at once
+      if (!psid) break;
+      if (m.camera?.sid === psid) m.camera = { on: false, sid: psid };
+      if (m.lip?.sid === psid) m.lip = null;
+      if (m.mesh?.sid === psid) m.mesh = null;
+      if (m.spectrum?.sid === psid) {
+        m.spectrum = null;
+        m.micAt = null;
+      }
+      break;
     case 'lip.mesh': {
       // Backfill is stale by definition; and one face at a time: a second tab waits until the first goes quiet.
       if (!live) break;
@@ -354,8 +552,7 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
         // v1 stays valid; while full-mesh (v2/v3) frames from this tab are flowing they win
         if (m.mesh && m.mesh.v === 2 && m.mesh.sid === psid && now - m.mesh.at < PERCEPT_MS) break;
         m.mesh = { v: 1, pts: p.pts.map((v) => Math.min(255, Math.max(0, Number(v) || 0))), n: 81, at: now, sid: psid };
-      } else break;
-      if (m.camera === null) m.camera = true;
+      }
       break;
     }
     case 'audio.spectrum': {
@@ -368,38 +565,120 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
         at: now,
         sid: psid,
       };
-      if (m.micOpen === null) m.micOpen = true;
+      m.micSeen = true;
+      m.micAt = now;
       break;
     }
-    case 'stt.transcript':
-      m.stt = { text: (str(p.text) ?? '').slice(0, 80), final: p.final === true };
-      if (mine && m.micOpen === null) m.micOpen = true;
-      break;
     case 'tts.speak':
-      m.tts = { chars: num(p.chars) ?? 0, voice: str(p.voice) ?? '—', ms: m.tts?.ms ?? null };
+      m.tts = { chars: num(p.chars) ?? 0, voice: shortId(str(p.voice)) ?? '—', ms: m.tts?.ms ?? null };
       break;
     case 'tts.audio':
       m.tts = { chars: m.tts?.chars ?? 0, voice: m.tts?.voice ?? '—', ms: num(p.ms) };
       break;
-    case 'pitch.result':
+    case 'pitch.extract':
+      m.pitchMethod = str(p.method) ?? m.pitchMethod;
+      break;
+    case 'pitch.result': {
+      const voiced = num(p.voicedPct);
+      const method = str(p.method);
       m.pitch = {
-        mean: num(p.f0Mean) ?? 0,
-        min: num(p.f0Min) ?? 0,
-        max: num(p.f0Max) ?? 0,
-        voiced: num(p.voicedPct),
-        latency: num(p.latencyMs),
+        mean: num(p.f0Mean),
+        min: num(p.f0Min),
+        max: num(p.f0Max),
+        // 0..100; rows from before the fix carried a 0..1 fraction
+        voiced: voiced == null ? null : voiced <= 1 ? voiced * 100 : voiced,
+        latency: num(p.ms) ?? num(p.latencyMs),
+        method,
+        f1: num(p.f1Hz),
+        f2: num(p.f2Hz),
       };
+      if (method) m.pitchMethod = method;
       break;
-    case 'sparc.features':
+    }
+    case 'sparc.request':
+      m.sparc = { ...m.sparc, seen: true };
+      break;
+    case 'sparc.features': {
+      const raw = [p.tongueHeight, p.tongueFront, p.jawOpen, p.lipForward, p.lipAperture].map(num);
       m.sparc = {
-        feats: [p.tongueHeight, p.tongueFront, p.jawOpen, p.lipForward, p.lipAperture].map((v) => clamp01(num(v) ?? 0)),
-        latency: num(p.latencyMs),
+        feats: raw.some((v) => v !== null) ? raw.map((v) => v ?? 0) : null,
+        n: num(p.n),
+        latency: num(p.ms) ?? num(p.latencyMs),
         skipped: null,
+        seen: true,
       };
       break;
+    }
     case 'sparc.skipped':
-      m.sparc = { ...m.sparc, skipped: str(p.reason) ?? 'skipped' };
+      m.sparc = { ...m.sparc, skipped: str(p.reason) ?? 'skipped', seen: true };
       break;
+    case 'phones.open':
+      m.phones = { ...m.phones, host: str(p.host) ?? m.phones.host, openAt: arrived, lastAt: Math.max(m.phones.lastAt ?? -Infinity, arrived) };
+      break;
+    case 'phones.close':
+      m.phones = { ...m.phones, closedAt: arrived, lastAt: Math.max(m.phones.lastAt ?? -Infinity, arrived) };
+      break;
+    case 'phones.frame':
+      m.phones.frames.push({ at: arrived, n: Math.max(0, num(p.n) ?? 1) });
+      m.phones.lastAt = Math.max(m.phones.lastAt ?? -Infinity, arrived);
+      break;
+    case 'phones.score':
+      m.phones = {
+        ...m.phones,
+        score: { word: (str(p.word) ?? '—').slice(0, 24), ok: bool(p.ok), ms: num(p.ms) },
+        lastAt: Math.max(m.phones.lastAt ?? -Infinity, arrived),
+      };
+      break;
+    case 'azure.request':
+      m.azure = { status: 'requested', word: (str(p.word) ?? m.azure.word ?? '—').slice(0, 24), accuracy: null, ms: null, note: null };
+      break;
+    case 'azure.result':
+      m.azure = { ...m.azure, status: 'result', accuracy: num(p.accuracy), ms: num(p.ms), note: p.ok === false ? 'not ok' : null };
+      break;
+    case 'azure.error':
+      m.azure = { ...m.azure, status: 'error', accuracy: null, ms: num(p.ms), note: (str(p.error) ?? 'error').slice(0, 40) };
+      break;
+    case 'azure.skipped':
+      m.azure = { ...m.azure, status: 'skipped', accuracy: null, ms: null, note: (str(p.reason) ?? 'skipped').slice(0, 40) };
+      break;
+    case 'lesson.saved':
+    case 'lesson.received':
+    case 'lesson.applied':
+    case 'lesson.failed':
+      m.classroom = { ...m.classroom, stage: e.kind.slice(7), revision: num(p.revision) ?? m.classroom.revision, seen: true };
+      break;
+    case 'classroom.session':
+      m.classroom = { ...m.classroom, sessions: m.classroom.sessions + 1, role: str(p.role) ?? m.classroom.role, seen: true };
+      break;
+    case 'classroom.summary':
+      m.classroom = { ...m.classroom, verified: bool(p.verified), seen: true };
+      break;
+    case 'classroom.scale':
+      m.classroom = { ...m.classroom, scaleRooms: num(p.rooms), seen: true };
+      break;
+    case 'classroom.probe':
+      m.classroom = { ...m.classroom, probe: { rooms: num(p.rooms), updates: num(p.updates) }, seen: true };
+      break;
+    case 'head.ready':
+      m.head = { ...m.head, driver: str(p.driver) ?? m.head.driver, seen: true };
+      break;
+    case 'head.speak':
+      m.head = { ...m.head, speakingUntil: Math.max(m.head.speakingUntil, arrived + Math.min(30000, num(p.ms) ?? 1500)), seen: true };
+      break;
+    case 'backend.up': {
+      const up: BackendUp = {
+        provider: coachProviderOf(p),
+        model: str(p.model),
+        sparc: bool(p.sparc) ?? bool(p.articulation),
+        azure: bool(p.azure),
+        classroom: bool(p.classroom),
+        praat: bool(p.praat),
+      };
+      m.backendUp = up;
+      // a backend that started after the latest call is newer evidence than that call
+      if (up.provider && m.coachProvider && e.at >= m.coachProvider.at) m.coachProvider = { provider: up.provider, at: e.at };
+      break;
+    }
     case 'db.read':
       m.dbReads.push(counted);
       m.dbTable = str(p.table) ?? m.dbTable;
@@ -411,15 +690,16 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
     case 'lip.batch':
     case 'audio.batch':
       m.dbWrites.push(counted);
-      m.dbTable = e.kind === 'lip.batch' ? 'lip_frames' : 'audio_frames';
+      m.dbTable = 'metric_batch';
       break;
     case 'claude.request':
+      noteCoach();
       m.claudeCalls += 1;
-      m.claude = { provider: str(p.provider) ?? m.claude?.provider ?? null, model: str(p.model) ?? m.claude?.model ?? '—', purpose: str(p.purpose) ?? '—', latency: null, inTok: null, outTok: null, error: null };
+      m.claude = { model: str(p.model) ?? m.claude?.model ?? '—', purpose: str(p.purpose) ?? '—', latency: null, inTok: null, outTok: null, error: null };
       break;
     case 'claude.response':
+      noteCoach();
       m.claude = {
-        provider: str(p.provider) ?? m.claude?.provider ?? null,
         model: str(p.model) ?? m.claude?.model ?? '—',
         purpose: str(p.purpose) ?? m.claude?.purpose ?? '—',
         latency: num(p.latencyMs),
@@ -430,8 +710,8 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
       m.claudeLine = (str(p.line) ?? '').slice(0, 120);
       break;
     case 'claude.error':
+      noteCoach();
       m.claude = {
-        provider: str(p.provider) ?? m.claude?.provider ?? null,
         model: str(p.model) ?? m.claude?.model ?? '—',
         purpose: str(p.purpose) ?? m.claude?.purpose ?? '—',
         latency: num(p.latencyMs),
@@ -447,8 +727,6 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean, learner 
       m.ui = { ...m.ui, score: str(p.verdict) };
       break;
   }
-  if (e.target === 'backend' && e.source === 'ui') m.backendReqs.push(counted);
-  if (e.source === 'backend') m.backendOut.push(counted);
 }
 
 // ---------- dot engine ----------
@@ -466,18 +744,6 @@ interface Cluster {
   glowAmp: number;
   rippleAt: number;
   haloAt: number;
-}
-
-interface Curve {
-  ax: number;
-  ay: number;
-  cx: number;
-  cy: number;
-  bx: number;
-  by: number;
-  len: number;
-  heatAt: number;
-  drift: number;
 }
 
 interface Packet {
@@ -688,42 +954,6 @@ function buildCluster(def: NodeDef, index: number): Cluster {
   return { def, dx, dy, rr, size, tone, ph, phase: index * 1.7, glowAt: -1e9, glowAmp: 0, rippleAt: -1e9, haloAt: -1e9 };
 }
 
-function makeCurve(a: NodeDef, b: NodeDef, bend: number): Curve {
-  const mx = (a.x + b.x) / 2;
-  const my = (a.y + b.y) / 2;
-  const vx = b.x - a.x;
-  const vy = b.y - a.y;
-  const L = Math.hypot(vx, vy) || 1;
-  // Perpendicular, so a reverse edge with the same bend bows to the other side (two lanes).
-  const cx = mx + (-vy / L) * bend * L;
-  const cy = my + (vx / L) * bend * L;
-  const ua = Math.hypot(cx - a.x, cy - a.y) || 1;
-  const ub = Math.hypot(cx - b.x, cy - b.y) || 1;
-  const ax = a.x + ((cx - a.x) / ua) * a.r * 1.08;
-  const ay = a.y + ((cy - a.y) / ua) * a.r * 1.08;
-  const bx = b.x + ((cx - b.x) / ub) * b.r * 1.08;
-  const by = b.y + ((cy - b.y) / ub) * b.r * 1.08;
-  let len = 0;
-  let px = ax;
-  let py = ay;
-  for (let i = 1; i <= 24; i++) {
-    const t = i / 24;
-    const q = 1 - t;
-    const x = q * q * ax + 2 * q * t * cx + t * t * bx;
-    const y = q * q * ay + 2 * q * t * cy + t * t * by;
-    len += Math.hypot(x - px, y - py);
-    px = x;
-    py = y;
-  }
-  return { ax, ay, cx, cy, bx, by, len, heatAt: -1e9, drift: Math.random() };
-}
-
-function pointOn(c: Curve, t: number, out: { x: number; y: number }) {
-  const q = 1 - t;
-  out.x = q * q * c.ax + 2 * q * t * c.cx + t * t * c.bx;
-  out.y = q * q * c.ay + 2 * q * t * c.cy + t * t * c.by;
-}
-
 /** cubic-bezier(0.23, 1, 0.32, 1), the --ease-out token, solved for x by bisection. */
 function easeOut(x: number) {
   if (x <= 0) return 0;
@@ -759,6 +989,8 @@ interface EngineIO {
   model: () => Model;
   suspended: () => boolean;
   paused: () => boolean;
+  /** nodes drawn pale: the backend reported them off, or (Phones) nothing in a minute */
+  standby: () => readonly GraphId[];
 }
 
 /**
@@ -819,7 +1051,7 @@ function buildEqualiser(cl: Cluster): Equaliser {
 function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineIO, reduce: boolean): Engine {
   const ctx = canvas.getContext('2d')!;
   const clusters = NODES.map(buildCluster);
-  const byId = Object.fromEntries(clusters.map((c) => [c.def.id, c])) as Record<NodeId, Cluster>;
+  const byId = Object.fromEntries(clusters.map((c) => [c.def.id, c])) as Record<GraphId, Cluster>;
   const eq = buildEqualiser(byId.audio);
   const scratch = new Float32Array(SPEC_BINS);
   // Face canvas: positions ease from where they are toward each new frame over MESH_LERP_MS. v2 frames drive the
@@ -843,7 +1075,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
   let prevNow = 0;
   const curves = new Map<string, Curve>();
   for (const [s, t, bend] of EDGES) curves.set(`${s}>${t}`, makeCurve(NODE[s], NODE[t], bend));
-  const curveFor = (s: NodeId, t: NodeId) => {
+  const curveFor = (s: GraphId, t: GraphId) => {
     const key = `${s}>${t}`;
     let c = curves.get(key);
     if (!c && NODE[s] && NODE[t] && s !== t) {
@@ -864,6 +1096,8 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
   let line = '';
   let lineAt = 0;
   let lineShown = -1;
+  let standby = new Set<GraphId>();
+  let standbyKey = '';
   const pt = { x: 0, y: 0 };
 
   const drawStatic = () => {
@@ -1064,6 +1298,13 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
     }
     stepWire(now, dtMs);
     stepEqualiser(now, Math.min(1 / 30, dtMs / 1000));
+    const sb = io.standby();
+    const sbKey = sb.join('|');
+    if (sbKey !== standbyKey) {
+      standbyKey = sbKey;
+      standby = new Set(sb);
+      dirtyUntil = Math.max(dirtyUntil, now + 50);
+    }
     if (reduce && now > dirtyUntil) return;
     const t = reduce ? 0 : now / 1000;
 
@@ -1131,7 +1372,8 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
       const front = r * 1.3 * easeOut(rk);
       const amp = rip ? (1 - rk) * r * 0.11 : 0;
       const wide = r * 0.22;
-      const darken = g > 0.72 ? 2 : g > 0.3 ? 1 : 0;
+      // a part reported off is drawn two tones paler until it fires
+      const darken = (g > 0.72 ? 2 : g > 0.3 ? 1 : 0) - (standby.has(cl.def.id) && g < 0.3 ? 2 : 0);
       const grow = 1 + 0.32 * g;
       const len = cl.dx.length;
       for (let i = 0; i < len; i++) {
@@ -1149,7 +1391,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
           y += (cl.dy[i] / cl.rr[i]) * push;
         }
         let s = cl.size[i] * grow;
-        let tone = Math.max(0, cl.tone[i] - darken);
+        let tone = Math.min(3, Math.max(0, cl.tone[i] - darken));
         if (isEq) {
           // one band per angular sector, so the rim steps like equaliser bars
           const level = Math.max(-0.12, eq.pos[eq.band[i]]) * eq.weight[i];
@@ -1230,14 +1472,15 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
     fire(e) {
       if (PERCEPT.has(e.kind)) return; // drawn in place by stepWire / stepEqualiser
       const now = performance.now();
-      const src = byId[e.source];
-      const dst = byId[e.target];
+      const [from, to] = routeOf(e);
+      const src = byId[from];
+      const dst = byId[to];
       if (src) {
         src.glowAt = now;
         src.glowAmp = 1;
       }
       if (src && dst && e.kind === 'claude.response') src.haloAt = now;
-      const c = src && dst ? curveFor(e.source, e.target) : undefined;
+      const c = src && dst ? curveFor(from, to) : undefined;
       if (c && dst) {
         c.heatAt = now;
         const quiet = QUIET.has(e.kind);
@@ -1385,6 +1628,30 @@ function WaveCanvas({ model, idle }: { model: RefObject<Model>; idle: boolean })
 
 const SPARC_LABELS = ['tongue height', 'tongue front', 'jaw open', 'lip forward', 'lip aperture'];
 
+const onOff = (v: boolean | null | undefined) => (v == null ? '—' : v ? 'on' : 'off');
+
+/** A card with nothing to show yet: "waiting", or a standby line when the backend said the part is off. */
+function Standby({ line, meta, small = false }: { line: string; meta?: string | null; small?: boolean }) {
+  return (
+    <div className="dash-card">
+      <p className="dash-standby" data-small={small || undefined}>{line}</p>
+      {meta && <p className="dash-meta">{meta}</p>}
+    </div>
+  );
+}
+
+function SttDetail({ c, scoped }: { c: SttCard; scoped: boolean }) {
+  const state = c.open === null ? (c.text ? null : scoped ? 'waiting for this learner' : 'waiting') : c.open ? 'open' : 'closed';
+  return (
+    <div className="dash-card">
+      <p className="dash-quote" data-final={c.text && !c.final ? 'false' : 'true'}>
+        {c.text ? `“${c.text}”` : <span className="dash-dim">no speech yet</span>}
+      </p>
+      <p className="dash-meta">{[state, c.model].filter(Boolean).join(' · ') || 'heard'}</p>
+    </div>
+  );
+}
+
 function Detail({
   id,
   s,
@@ -1393,7 +1660,7 @@ function Detail({
   idle,
   scoped,
 }: {
-  id: NodeId;
+  id: GraphId;
   s: Snap;
   wireRef: RefObject<HTMLCanvasElement>;
   model: RefObject<Model>;
@@ -1402,9 +1669,9 @@ function Detail({
 }): ReactNode {
   switch (id) {
     case 'camera':
-      return <p className="dash-status" data-on={s.camera === true || undefined}>{s.camera === null ? 'waiting' : s.camera ? 'on' : 'off'}</p>;
+      return <p className="dash-status" data-on={s.cameraState === 'on' || undefined}>{s.cameraState}</p>;
     case 'mic':
-      return <p className="dash-status" data-on={s.micOpen === true || undefined}>{s.micOpen === null ? 'waiting' : s.micOpen ? 'listening' : 'closed'}</p>;
+      return <p className="dash-status" data-on={s.micState === 'listening' || undefined}>{s.micState}</p>;
     case 'mediapipe':
       return (
         <div className="dash-mesh">
@@ -1417,7 +1684,15 @@ function Detail({
             <div><dt>round</dt><dd>{s.lip ? s.lip.rounding.toFixed(2) : '—'}</dd></div>
             <div><dt>face</dt><dd data-warn={s.lip && !s.lip.ok ? 'true' : undefined}>{s.lip ? (s.lip.ok ? 'ok' : 'lost') : '—'}</dd></div>
           </dl>
-          <p className="dash-meta">{s.meshLive ? `face mesh · ${s.meshPoints} points` : scoped ? 'waiting for this learner’s camera' : 'no face'}</p>
+          <p className="dash-meta">
+            {s.faceState === 'mesh'
+              ? `face mesh · ${s.meshPoints} points`
+              : s.faceState === 'tracking'
+                ? 'tracking · mesh unavailable'
+                : scoped
+                  ? 'waiting for this learner’s camera'
+                  : 'no face'}
+          </p>
         </div>
       );
     case 'audio': {
@@ -1444,15 +1719,9 @@ function Detail({
         </div>
       );
     }
+    case 'realtime':
     case 'stt':
-      return (
-        <div className="dash-card">
-          <p className="dash-quote" data-final={s.stt?.final ? 'true' : 'false'}>
-            {s.stt?.text ? `“${s.stt.text}”` : <span className="dash-dim">no speech yet</span>}
-          </p>
-          <p className="dash-meta">{s.stt ? (s.stt.final ? 'final' : 'partial') : 'waiting'}</p>
-        </div>
-      );
+      return <SttDetail c={s.stt[id]} scoped={scoped} />;
     case 'tts':
       return (
         <div className="dash-card">
@@ -1463,7 +1732,15 @@ function Detail({
           <p className="dash-meta">{s.tts?.ms != null ? `${(s.tts.ms / 1000).toFixed(1)} s of audio` : 'waiting'}</p>
         </div>
       );
-    case 'backend':
+    case 'head':
+      return (
+        <div className="dash-head-state">
+          <p className="dash-status" data-on={s.head.state === 'speaking' || undefined}>{s.head.state}</p>
+          <p className="dash-meta">{s.head.driver ? `driver · ${s.head.driver}` : 'driver not reported'}</p>
+        </div>
+      );
+    case 'backend': {
+      const up = s.backendUp;
       return (
         <div className="dash-card">
           <p className="dash-big">
@@ -1471,45 +1748,88 @@ function Detail({
             <span> req / min</span>
           </p>
           <p className="dash-meta">{s.backendOut} calls out / min</p>
+          {up && (
+            <p className="dash-meta">
+              Praat {onOff(up.praat)} · Azure {onOff(up.azure)} · SPARC {onOff(up.sparc)}
+            </p>
+          )}
         </div>
       );
-    case 'pitch':
+    }
+    case 'pitch': {
+      const pt = s.pitch;
+      const formants = pt != null && (pt.f1 != null || pt.f2 != null);
+      // with formants the Hz unit sits on their row and the method leads the meta line
+      const meta = pt
+        ? [formants ? null : 'Hz', s.pitchMethod, pt.voiced != null ? `${Math.round(pt.voiced)}% voiced` : null, pt.latency != null ? `${Math.round(pt.latency)} ms` : null]
+        : [s.backendUp?.praat === false ? 'Praat off on this server' : 'waiting', s.pitchMethod];
       return (
         <div className="dash-card">
           <p className="dash-readout">
-            <span>mean <b>{hz(s.pitch?.mean)}</b></span>
-            <span>min <b>{hz(s.pitch?.min)}</b></span>
-            <span>max <b>{hz(s.pitch?.max)}</b></span>
+            <span>mean <b>{hz(pt?.mean)}</b></span>
+            <span>min <b>{hz(pt?.min)}</b></span>
+            <span>max <b>{hz(pt?.max)}</b></span>
           </p>
-          <p className="dash-meta">
-            Hz{s.pitch?.voiced != null ? ` · ${Math.round(s.pitch.voiced * 100)}% voiced` : ''}
-            {s.pitch?.latency != null ? ` · ${Math.round(s.pitch.latency)} ms` : ''}
-          </p>
+          {formants && (
+            <p className="dash-readout">
+              <span>F1 <b>{hz(pt.f1)}</b></span>
+              <span>F2 <b>{hz(pt.f2)}</b></span>
+              <span className="dash-unit">Hz</span>
+            </p>
+          )}
+          <p className="dash-meta">{meta.filter(Boolean).join(' · ')}</p>
         </div>
       );
+    }
     case 'sparc': {
-      const feats = s.sparc.feats;
-      if (!feats)
-        return (
-          <div className="dash-card">
-            <p className="dash-standby">{s.sparc.skipped ? 'standby' : 'waiting'}</p>
-            {s.sparc.skipped && <p className="dash-meta">skipped · {s.sparc.skipped}</p>}
-          </div>
-        );
+      const sp = s.sparc;
+      const feats = sp.feats;
+      const timing = sp.latency != null ? `${Math.round(sp.latency)} ms` : null;
+      if (!feats) {
+        const noCollector = s.backendUp?.sparc === false && !sp.seen;
+        if (noCollector) return <Standby line="standby · no collector" meta="ARTICULATION_URL not set" small />;
+        if (sp.n != null) return <Standby line={`${sp.n} features`} meta={timing} />;
+        return <Standby line={sp.skipped ? 'standby' : 'waiting'} meta={sp.skipped ? `skipped · ${sp.skipped}` : null} />;
+      }
       return (
-        <div className="dash-card" data-stale={s.sparc.skipped ? 'true' : undefined}>
+        <div className="dash-card" data-stale={sp.skipped ? 'true' : undefined}>
           <ul className="dash-bars">
             {feats.map((v, i) => (
               <li key={SPARC_LABELS[i]}>
                 <span>{SPARC_LABELS[i]}</span>
-                <i style={{ '--v': Math.max(0.02, v) } as CSSProperties} />
-                <b>{v.toFixed(2)}</b>
+                {/* centred on zero: right for positive, left for negative, full at ±SPARC_RANGE */}
+                <i style={{ '--v': Math.min(1, Math.max(-1, v / SPARC_RANGE)).toFixed(3) } as CSSProperties} />
+                <b>{v > 0 ? '+' : ''}{v.toFixed(2)}</b>
               </li>
             ))}
           </ul>
-          <p className="dash-meta">
-            {s.sparc.skipped ? `standby · ${s.sparc.skipped}` : s.sparc.latency != null ? `${Math.round(s.sparc.latency)} ms` : ''}
+          <p className="dash-meta">{sp.skipped ? `standby · ${sp.skipped}` : (timing ?? '')}</p>
+        </div>
+      );
+    }
+    case 'azure': {
+      const a = s.azure;
+      if (a.status === null) {
+        const configured = s.backendUp?.azure;
+        return configured === false ? (
+          <Standby line="standby · not configured" meta="no Azure Speech key on this server" small />
+        ) : (
+          <Standby line="waiting" meta={configured ? 'configured, none yet' : null} />
+        );
+      }
+      const meta =
+        a.status === 'requested'
+          ? `assessing · ${a.word ?? '—'}`
+          : a.status === 'result'
+            ? `last · ${a.word ?? '—'}${a.note ? ` · ${a.note}` : ''}`
+            : `${a.status} · ${a.note ?? '—'}`;
+      return (
+        <div className="dash-card">
+          <p className="dash-readout">
+            <span>accuracy <b>{a.accuracy == null ? '—' : Math.round(a.accuracy)}</b></span>
+            <span><b>{a.ms == null ? '—' : fmt(Math.round(a.ms))}</b> ms</span>
           </p>
+          <p className={a.status === 'error' ? 'dash-meta dash-warn' : 'dash-meta'}>{meta}</p>
         </div>
       );
     }
@@ -1523,6 +1843,52 @@ function Detail({
           <p className="dash-meta">{s.dbTable ? `last · ${s.dbTable}` : 'per minute'}</p>
         </div>
       );
+    case 'classroom': {
+      const c = s.classroom;
+      if (!c.seen) {
+        return s.backendUp?.classroom === false ? (
+          <Standby line="standby" meta="not configured on this server" />
+        ) : (
+          <Standby line="waiting" />
+        );
+      }
+      const probe = c.probe
+        ? `probe · ${c.probe.rooms ?? '—'} rooms, ${fmt(c.probe.updates)} updates`
+        : c.scaleRooms != null
+          ? `scale school · ${c.scaleRooms} rooms`
+          : null;
+      return (
+        <div className="dash-card">
+          <p className="dash-readout">
+            <span>lesson <b data-warn={c.stage === 'failed' || undefined}>{c.stage ?? '—'}</b></span>
+            <span>rev <b>{c.revision ?? '—'}</b></span>
+          </p>
+          <p className="dash-meta">
+            {c.sessions} {c.sessions === 1 ? 'session' : 'sessions'}
+            {c.verified != null ? ` · summary ${c.verified ? 'verified' : 'synthetic'}` : ''}
+          </p>
+          {probe && <p className="dash-meta">{probe}</p>}
+        </div>
+      );
+    }
+    case 'phones': {
+      const ph = s.phones;
+      if (ph.state === 'waiting') return <Standby line="waiting" meta={scoped ? 'for this learner’s phone stream' : null} />;
+      if (ph.state === 'not running') return <Standby line="not running" meta="no phone stream in the last minute" small />;
+      return (
+        <div className="dash-card">
+          <p className="dash-readout">
+            <span><b>{ph.fps}</b> frames / s</span>
+            <span>last <b>{ph.score?.word ?? '—'}</b></span>
+          </p>
+          <p className="dash-meta">
+            {[ph.state, ph.host, ph.score ? (ph.score.ok === false ? 'score failed' : ph.score.ms != null ? `scored in ${Math.round(ph.score.ms)} ms` : 'scored') : null]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        </div>
+      );
+    }
     case 'ui':
       return (
         <div className="dash-card">
@@ -1552,17 +1918,20 @@ function Presence({ dots }: { dots: Snap['dots'] }) {
   );
 }
 
+/** The name and tag beside a node: the coach model follows the provider that last answered (backend.up before any call). */
+function titleOf(n: NodeDef, s: Snap): { name: string; loc: Loc } {
+  if (n.id === 'claude' && s.coachProvider) return PROVIDER_TAG[s.coachProvider];
+  return { name: n.name, loc: n.loc };
+}
+
 function ClaudeCard({ s, lineRef }: { s: Snap; lineRef: RefObject<HTMLSpanElement> }) {
   const c = s.claude;
   return (
     <div className="dash-card dash-card--claude">
       <div className="dash-claude__top">
-        <span className="dash-chip">{modelTitle(c?.provider ?? null).name}</span>
-        <span className="dash-chip dash-chip--soft">{c?.model ?? 'model —'}</span>
+        <span className="dash-chip">{c?.model ?? s.backendUp?.model ?? 'model —'}</span>
+        <span className="dash-chip dash-chip--line">{s.coachProvider ? PROVIDER_TAG[s.coachProvider].loc : 'provider —'}</span>
         <span className="dash-chip dash-chip--soft">{c?.purpose ?? 'idle'}</span>
-        <span className="dash-claude__calls">
-          <b>{s.claudeCalls}</b> {s.claudeCalls === 1 ? 'call' : 'calls'}
-        </span>
       </div>
       <p className="dash-claude__line" aria-live="off">
         <span ref={lineRef} />
@@ -1572,6 +1941,7 @@ function ClaudeCard({ s, lineRef }: { s: Snap; lineRef: RefObject<HTMLSpanElemen
         <div><dt>latency</dt><dd>{c?.latency != null ? `${fmt(Math.round(c.latency))} ms` : c ? '…' : '—'}</dd></div>
         <div><dt>in</dt><dd>{fmt(c?.inTok)}</dd></div>
         <div><dt>out</dt><dd>{fmt(c?.outTok)}</dd></div>
+        <div className="dash-claude__calls"><dt>{s.claudeCalls === 1 ? 'call' : 'calls'}</dt><dd>{s.claudeCalls}</dd></div>
       </dl>
       {c?.error && <p className="dash-meta dash-warn">error · {c.error}</p>}
     </div>
@@ -1581,13 +1951,6 @@ function ClaudeCard({ s, lineRef }: { s: Snap; lineRef: RefObject<HTMLSpanElemen
 // ---------- screen ----------
 
 type Conn = 'connecting' | 'live' | 'offline';
-
-function modelTitle(provider: string | null): { name: string; loc: string } {
-  if (provider === 'anthropic') return { name: 'Claude', loc: 'Anthropic' };
-  if (provider === 'openai') return { name: 'GPT', loc: 'OpenAI' };
-  if (provider) return { name: provider, loc: 'model' };
-  return { name: 'Model', loc: 'not named' };
-}
 
 function demoFromHash(): boolean {
   try {
@@ -1634,8 +1997,10 @@ export default function Dashboard({
   hiddenRef.current = hidden;
   pausedRef.current = paused;
   onEventRef.current = onEvent;
-  /** perception liveness as last rendered, so going quiet re-renders the cards once */
-  const shownLive = useRef<[boolean, boolean]>([false, false]);
+  /** liveness-derived states as last rendered (derive().key), so going quiet re-renders the cards once */
+  const shownLive = useRef('');
+  /** the pale (standby) nodes as last rendered, read by the canvas engine every frame */
+  const standbyRef = useRef<readonly GraphId[]>([]);
   const [snap, setSnap] = useState<Snap>(() => snapshot(model.current, performance.now()));
   const [conn, setConn] = useState<Conn>('connecting');
   const [lastAt, setLastAt] = useState<number | null>(null);
@@ -1660,7 +2025,8 @@ export default function Dashboard({
       if (e.kind === 'claude.response' && m.claudeLine) engine.current?.setLine(m.claudeLine);
       if (!QUIET.has(e.kind)) {
         tickSeq.current += 1;
-        m.ticker.unshift({ key: `${e.id}-${tickSeq.current}`, source: e.source, target: e.target, label: e.label, at: now });
+        const [from, to] = routeOf(e);
+        m.ticker.unshift({ key: `${e.id}-${tickSeq.current}`, source: TICK_NAME[from] ?? from, target: TICK_NAME[to] ?? to, label: e.label, at: now });
         if (m.ticker.length > 7) m.ticker.length = 7;
       }
     } else if (e.kind === 'claude.response' && m.claudeLine) {
@@ -1689,6 +2055,7 @@ export default function Dashboard({
         model: () => model.current,
         suspended: () => hiddenRef.current,
         paused: () => pausedRef.current,
+        standby: () => standbyRef.current,
       },
       reduce,
     );
@@ -1712,14 +2079,15 @@ export default function Dashboard({
       const m = model.current;
       const now = performance.now();
       if (prunePresence(m)) dirty.current = true;
-      const ml = meshLive(m, now);
-      const sl = specLive(m, now);
-      if (ml !== shownLive.current[0] || sl !== shownLive.current[1]) dirty.current = true;
+      const { key } = derive(m, now);
+      if (key !== shownLive.current) dirty.current = true;
       if (!dirty.current && !m.ticker.some((t) => now - t.at >= TICK_MS)) return;
       m.ticker = m.ticker.filter((t) => now - t.at < TICK_MS);
       dirty.current = false;
-      shownLive.current = [ml, sl];
-      setSnap(snapshot(m, now));
+      shownLive.current = key;
+      const next = snapshot(m, now);
+      standbyRef.current = next.standby;
+      setSnap(next);
     }, 100);
     return () => window.clearInterval(id);
   }, []);
@@ -1736,12 +2104,17 @@ export default function Dashboard({
   useEffect(() => {
     const m = model.current;
     m.camera = null;
-    m.micOpen = null;
+    m.micSeen = false;
+    m.micAt = null;
     m.lip = null;
     m.audio = null;
     m.mesh = null;
     m.spectrum = null;
-    for (const k of SCOPED) delete m.lastAt[k];
+    m.stt = { realtime: { ...m.stt.realtime, open: null }, stt: { ...m.stt.stt, open: null } };
+    m.phones = freshPhones();
+    m.head = { driver: null, speakingUntil: -1e9, seen: false };
+    // stt.* keys carry the service (stt.open:realtime)
+    for (const k of Object.keys(m.lastAt)) if (SCOPED.has(k.split(':')[0])) delete m.lastAt[k];
     dirty.current = true;
   }, [scope]);
 
@@ -1865,18 +2238,19 @@ export default function Dashboard({
 
         {NODES.map((n) => {
           const [ax, ay, aw] = n.ann;
-          const titled = n.id === 'claude' ? modelTitle(snap.claude?.provider ?? null) : null;
+          const titled = titleOf(n, snap);
           return (
             <section
               key={n.id}
               className={`dash-node dash-node--${n.id}`}
               data-align={n.align}
+              data-standby={snap.standby.includes(n.id) || undefined}
               style={{ left: ax, top: ay, width: aw }}
-              aria-label={titled?.name ?? n.name}
+              aria-label={titled.name}
             >
               <h2 className="dash-node__name">
-                {titled?.name ?? n.name}
-                <span className="dash-node__loc">{titled?.loc ?? n.loc}</span>
+                {titled.name}
+                <span className="dash-node__loc">{titled.loc}</span>
               </h2>
               <p className="dash-node__cap">{n.caption}</p>
               {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} model={model} idle={hidden || paused} scoped={scope !== ''} />}
@@ -1888,11 +2262,11 @@ export default function Dashboard({
         <aside className="dash-legend" aria-label="How to read this view">
           <p className="dash-legend__title">How to read it</p>
           <p>
-            Each cluster is one part of the system. A packet runs along the path that event actually took.
-            A lesson change can stop at the database. It does not have to pass through a model.
+            Each cluster is a part the app really runs; a packet follows the path its event took. Realtime, Ink and the
+            coach model are named from each event’s provider. A pale cluster is off on this server.{' '}
             {scope
-              ? 'The face and the equalizer show only the selected learner’s tab, once it has announced its profile.'
-              : 'The lip wireframe and the equalizer are the live perception streams, not a named learner.'}
+              ? 'The face and the waveform are the selected learner’s live perception streams.'
+              : 'The face and the waveform are the live perception streams of the whole stream, not one learner.'}
           </p>
         </aside>
 

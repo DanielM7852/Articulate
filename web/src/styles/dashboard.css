@@ -179,10 +179,13 @@
 .dash-node[data-align='right'] {
   text-align: right;
 }
+/* the tag wraps under the name in a narrow annotation instead of splitting it */
 .dash-node__name {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  column-gap: 8px;
+  white-space: nowrap;
   font-family: var(--font-serif);
   font-weight: 400;
   font-size: 17px;
@@ -209,11 +212,28 @@
   color: var(--color-muted);
 }
 .dash-node--claude .dash-node__name {
-  font-size: 24px;
-  line-height: 28px;
+  font-size: 21px;
+  line-height: 26px;
+}
+/* a part the backend reported off: its label steps back with its pale cluster */
+.dash-node[data-standby] .dash-node__name,
+.dash-node[data-standby] .dash-node__cap {
+  opacity: 0.6;
+}
+/* the coach's caption shares its name row when it fits (it drops below a long name), so the card stays short beside
+   the learner's lines */
+.dash-node--claude {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
 }
 .dash-node--claude .dash-node__cap {
-  font-size: 13px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.dash-node--claude .dash-card {
+  flex-basis: 100%;
 }
 
 /* ---------- Cards ---------- */
@@ -364,6 +384,16 @@
   opacity: 0.45;
 }
 
+/* acoustics: three F0 readings in a narrow card */
+.dash-node--pitch .dash-readout {
+  gap: 7px;
+}
+
+/* Ava's head: a status line and its driver, no card */
+.dash-head-state .dash-meta {
+  margin-top: 1px;
+}
+
 /* backend */
 .dash-big {
   font-family: var(--font-serif);
@@ -384,6 +414,11 @@
   font-size: 15px;
   color: var(--color-muted);
 }
+/* "standby · no collector" and the like on one line of a narrow card */
+.dash-standby[data-small] {
+  font-size: 13px;
+  white-space: nowrap;
+}
 .dash-bars {
   margin: 0;
   padding: 0;
@@ -393,14 +428,16 @@
 }
 .dash-bars li {
   display: grid;
-  grid-template-columns: 72px 1fr 28px;
+  grid-template-columns: 72px 1fr 32px;
   align-items: center;
   gap: 8px;
   font-size: 10.5px;
   line-height: 13px;
   color: var(--color-muted);
 }
+/* signed bars centred on zero: --v in -1..1 grows the fill right (positive) or, mirrored, left (negative) */
 .dash-bars i {
+  position: relative;
   display: block;
   height: 5px;
   border-radius: 3px;
@@ -409,13 +446,25 @@
 }
 .dash-bars i::before {
   content: '';
-  display: block;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 50%;
   height: 100%;
-  border-radius: 3px;
+  border-radius: 0 3px 3px 0;
   background: var(--color-navy);
   transform: scaleX(var(--v, 0));
   transform-origin: 0 50%;
   transition: transform var(--dur-enter) var(--ease-out);
+}
+.dash-bars i::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  background: var(--color-navy-mist);
 }
 .dash-bars b {
   text-align: right;
@@ -430,6 +479,7 @@
 }
 .dash-claude__top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -449,22 +499,22 @@
   background: var(--color-navy-soft);
   color: var(--color-navy);
 }
-.dash-claude__calls {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--color-muted);
+/* the provider beside the model */
+.dash-chip--line {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-navy-mist);
+  color: var(--color-navy);
 }
-.dash-claude__calls b {
-  color: var(--color-ink);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
+/* the call count closes the stats row */
+.dash-claude__stats .dash-claude__calls {
+  margin-left: auto;
 }
 .dash-claude__line {
-  margin-top: 9px;
-  min-height: 63px;
+  margin-top: 8px;
+  min-height: 57px;
   font-family: var(--font-serif);
-  font-size: 15px;
-  line-height: 21px;
+  font-size: 14px;
+  line-height: 19px;
   color: var(--color-navy);
 }
 .dash-caret {
@@ -477,11 +527,12 @@
   animation: dash-breathe 1s steps(2, jump-none) infinite;
 }
 .dash-claude__stats {
-  margin: 8px 0 0;
-  padding-top: 8px;
+  margin: 7px 0 0;
+  padding-top: 7px;
   border-top: 1px solid var(--color-line);
   display: flex;
-  gap: 18px;
+  gap: 14px;
+  white-space: nowrap;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -501,11 +552,12 @@
 }
 
 /* ---------- Legend ---------- */
+/* bottom right, under the phone model */
 .dash-legend {
   position: absolute;
-  left: 1376px;
-  top: 416px;
-  width: 184px;
+  left: 1420px;
+  top: 604px;
+  width: 156px;
   font-size: 11.5px;
   line-height: 17px;
   color: #8a9393;
