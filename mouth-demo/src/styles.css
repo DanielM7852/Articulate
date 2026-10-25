@@ -80,6 +80,49 @@
   white-space: nowrap;
 }
 
+.md-cutaway__cue {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  max-width: calc(100% - 20px);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--md-navy);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--md-navy);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.md-cutaway__cue.is-on {
+  opacity: 1;
+}
+
+.md-cutaway__marker {
+  transition: opacity 0.25s ease;
+}
+
+.md-cutaway__halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: md-marker-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes md-marker-pulse {
+  0%, 100% { transform: scale(0.8); }
+  50% { transform: scale(1.25); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-cutaway__halo { animation: none; }
+}
+
 /* Narrow containers: the cutaway becomes an inset overlay in the bottom-right corner. */
 @container md-root (max-width: 519px) {
   .md-cutaway {

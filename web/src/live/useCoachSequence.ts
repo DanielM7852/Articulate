@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { speakTeacher, type TeacherSpeech } from '../audio/teacher';
 import type { MouthReferenceHandle } from '../components/MouthReference';
-import type { CueId, LiveCoachResponse } from './liveCoach';
+import type { MouthCueId } from '@mouth-demo/src/mouth-demo.js';
+import type { LiveCoachResponse } from './liveCoach';
 
 /**
  * Plays a live coach response: the teacher speaks the caption (Cartesia, browser fallback) while the
@@ -13,7 +14,7 @@ import type { CueId, LiveCoachResponse } from './liveCoach';
  * holds it at least one cue length, then returns to front view.
  * Every step checks a run token, so cancel() or a newer run() stops speech and resets the demo safely.
  */
-export const CUE_MIN_MS = 2500; // at least one full cue loop
+export const CUE_MIN_MS = 3200; // at least one full cue loop (a two-pose tongue loop is up to 3000 ms)
 export const CUE_SILENT_MS = 3000; // narration off: static captions, cue still shown
 const DEMO_WAIT_MS = 4000;
 const BRIDGE_DEMO_WAIT_MS = 2000;
@@ -30,7 +31,9 @@ export interface SequenceOptions {
  */
 export interface SequenceLine {
   text: string;
-  cueId: CueId | null;
+  cueId: MouthCueId | null;
+  /** With a cue: wait one loop after showCue but leave the cue looping in the side view; the next line or cancel() returns to front. */
+  hold?: boolean;
   showSideView: boolean;
 }
 
@@ -172,6 +175,7 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
         setSpeech(sp);
       }
 
+      let held = false;
       try {
         ensureRef.current();
         let demo = getDemoRef.current();
@@ -206,8 +210,12 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
           avatar.showCue(line.cueId);
           await sleep(sp ? CUE_MIN_MS : CUE_SILENT_MS);
           if (!alive()) return;
-          avatar.stop();
-          await avatar.setView('front');
+          if (line.hold) {
+            held = true;
+          } else {
+            avatar.stop();
+            await avatar.setView('front');
+          }
         } else if (wantSide && avatar) {
           live.current.touchedDemo = true;
           avatar.stop();
@@ -242,12 +250,39 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
       } finally {
         if (alive()) {
           live.current.stopLip?.();
-          live.current = { speech: null, stopLip: null, touchedDemo: false };
+          live.current = { speech: null, stopLip: null, touchedDemo: held };
           setRunning(false);
         }
       }
     },
     [cancel, lipSync],
+  );
+
+  /** Silently show a looping cue in the side view (no caption, no speech). Cleared by cancel() or the next line. */
+  const showHeldCue = useCallback(
+    async (cueId: MouthCueId): Promise<void> => {
+      cancel(false);
+      const my = token.current;
+      const alive = () => token.current === my;
+      try {
+        ensureRef.current();
+        let demo = getDemoRef.current();
+        const until = Date.now() + DEMO_WAIT_MS;
+        while (alive() && !demo?.ready && Date.now() < until) {
+          await sleep(100);
+          demo = getDemoRef.current();
+        }
+        if (!alive() || !demo?.ready) return;
+        live.current.touchedDemo = true;
+        demo.stop();
+        await demo.setView('side');
+        if (!alive()) return;
+        demo.showCue(cueId);
+      } catch {
+        /* presentation only */
+      }
+    },
+    [cancel],
   );
 
   const run = useCallback(
@@ -256,5 +291,5 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
     [speakLine],
   );
 
-  return { speech, caption, running, run, speakLine, say, whenIdle, cancel };
+  return { speech, caption, running, run, speakLine, showHeldCue, say, whenIdle, cancel };
 }

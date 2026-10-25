@@ -1,9 +1,10 @@
-export const POSES = ["neutral", "oo", "ee", "ah", "tongueTip", "velar"];
+export const POSES = ["neutral", "oo", "ee", "ah", "tongueTip", "velar", "r"];
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NAVY = "#203E68";
 const BLUE = "#CBD7E6";
 const WHITE = "#FFFFFF";
+const MARKER = "#E8590C";
 const NUM = /-?\d*\.?\d+(?:e[-+]?\d+)?/gi;
 
 // Each element has the same commands and number count in every pose (see lerpPath).
@@ -17,6 +18,8 @@ const PATHS = {
     tongueTip: "M 98 163 C 112 160 150 194 200 212 C 240 222 268 234 282 250 C 284 268 270 280 245 282 C 190 286 128 280 112 240 C 106 212 99 184 98 163 Z",
     // k g ng: back of the tongue raised against the velum
     velar: "M 104 232 C 140 226 182 210 216 180 C 240 150 262 150 274 224 C 290 244 280 274 248 280 C 190 284 134 280 110 258 C 102 248 100 240 104 232 Z",
+    // r: bunched / retroflex. Body raised mid-mouth, tip lifted and drawn back, well clear of the ridge
+    r: "M 140 200 C 160 186 190 172 215 176 C 245 182 268 214 282 250 C 284 268 270 280 245 282 C 190 286 130 280 114 250 C 108 236 122 216 140 200 Z",
   },
   upperLip: {
     neutral: "M 64 130 C 50 142 44 170 50 190 C 53 200 66 203 76 199 C 70 188 66 170 74 150 C 70 142 68 136 64 130 Z",
@@ -25,6 +28,7 @@ const PATHS = {
     ah: "M 64 130 C 54 140 52 160 56 176 C 58 184 68 186 78 183 C 72 176 70 164 74 150 C 70 142 68 136 64 130 Z",
     tongueTip: "M 64 130 C 50 142 44 170 50 190 C 53 200 66 203 76 199 C 70 188 66 170 74 150 C 70 142 68 136 64 130 Z",
     velar: "M 64 130 C 50 142 44 170 50 190 C 53 200 66 203 76 199 C 70 188 66 170 74 150 C 70 142 68 136 64 130 Z",
+    r: "M 62.2 130 C 44.6 141.1 30.5 168.2 35.6 188.2 C 39 198.2 56.1 200.8 69.7 195.8 C 61.9 186.2 58.8 169.1 66.8 150 C 63.7 142 63.5 136 62.2 130 Z",
   },
   lowerLipJaw: {
     neutral: "M 272 284 C 220 282 150 282 112 268 C 100 262 96 252 96 240 L 94 208 L 76 205 C 62 206 54 214 56 228 C 58 240 50 252 52 268 C 54 292 74 318 104 324 C 154 332 222 330 262 306 C 278 296 286 280 292 258",
@@ -33,12 +37,13 @@ const PATHS = {
     ah: "M 283 288 C 232 301 165 322 125 319 C 112 317 105 309 102 297 L 90 267 L 72 270 C 59 275 54 285 60 297 C 65 308 61 322 68 337 C 77 359 103 378 134 375 C 184 368 248 346 280 312 C 292 297 295 280 294 257",
     // jaw slightly open (neutral toward ah by 0.2 and 0.25)
     tongueTip: "M 274 285 C 222 286 153 290 115 278 C 102 273 98 263 97 251 L 93 220 L 75 218 C 61 220 54 228 57 242 C 59 254 52 266 55 282 C 59 305 80 330 110 334 C 160 339 227 333 266 307 C 281 296 288 280 292 258",
-    velar: "M 275 285 C 223 287 154 292 115 281 C 103 276 98 266 98 254 L 93 223 L 75 221 C 61 223 54 232 57 245 C 60 257 53 270 56 285 C 60 309 81 333 112 337 C 162 341 229 334 267 308 C 282 296 288 280 293 258",
+    velar: "M 275 285 C 223 287 154 292 115 281 C 103 276 98 266 98 254 L 93 223 L 75 221 C 61 223 54 232 57 245 C 60 257 53 270 56 285 C 60 309 81 333 112 337 C 162 341 229 334 267 308 C 282 296 288 280 292 258",
+    r: "M 273 284.5 C 221 284 151.5 286 113.5 273 C 101 267.5 97 257.5 96.5 245.5 L 93.5 214.9 L 73.7 211.9 C 54.3 212.1 42.3 221 45.7 235.9 C 48.6 248.8 50.1 259.9 53.5 275 C 56.5 298.5 77 324 107 329 C 157 335.5 224.5 331.5 264 306.5 C 279.5 296 287 280 292 258",
   },
 };
 
 // Weighted blend (setBlend): weight name -> pose. The result is neutral + sum of w * (pose - neutral).
-export const BLEND_POSES = { ah: "ah", oo: "oo", ee: "ee", tongue: "tongueTip", velar: "velar" };
+export const BLEND_POSES = { ah: "ah", oo: "oo", ee: "ee", tongue: "tongueTip", velar: "velar", r: "r" };
 const BLEND_KEYS = Object.keys(BLEND_POSES);
 
 // Parse every element once: the neutral path split around its numbers, plus each blend pose's offsets from neutral.
@@ -151,6 +156,16 @@ export function createCutaway(parentEl) {
   const lowerLipJaw = svgEl("path", { d: PATHS.lowerLipJaw.neutral }, anim);
   const els = { tongue, upperLip, lowerLipJaw };
 
+  // Contact marker: a dot with a soft halo on the palate line. Hidden until setMarker.
+  const MARKERS = { ridge: [98, 161], velum: [250, 162] };
+  const marker = svgEl("g", { class: "md-cutaway__marker", opacity: 0 }, svg);
+  const markerHalo = svgEl("circle", { class: "md-cutaway__halo", r: 15, fill: MARKER, "fill-opacity": 0.3 }, marker);
+  const markerDot = svgEl("circle", { r: 6, fill: MARKER, stroke: WHITE, "stroke-width": 2 }, marker);
+
+  const cueLabel = document.createElement("div");
+  cueLabel.className = "md-cutaway__cue";
+  el.appendChild(cueLabel);
+
   const label = document.createElement("span");
   label.className = "md-cutaway__label";
   label.textContent = "Illustrative view";
@@ -167,6 +182,21 @@ export function createCutaway(parentEl) {
       d.setAttribute("r", 1.5 + h * 0.7);
       d.setAttribute("fill-opacity", 0.55 + h * 0.45);
     }
+  }
+
+  // where: "ridge" | "velum" | null; strength 0..1 sets opacity and size.
+  function setMarker(where, strength = 1) {
+    const pos = MARKERS[where];
+    const m = pos ? Math.min(1, Math.max(0, strength)) : 0;
+    if (pos) for (const c of [markerHalo, markerDot]) { c.setAttribute("cx", pos[0]); c.setAttribute("cy", pos[1]); }
+    markerDot.setAttribute("r", 4 + m * 2.5);
+    markerHalo.setAttribute("r", 9 + m * 8);
+    marker.setAttribute("opacity", m);
+  }
+
+  function setCueLabel(text) {
+    cueLabel.textContent = text || "";
+    cueLabel.classList.toggle("is-on", !!text);
   }
 
   function show(t) {
@@ -206,5 +236,5 @@ export function createCutaway(parentEl) {
   show(0);
   setHighlight(0);
 
-  return { el, show, setPose, setBlend, setHighlight, dispose() { el.remove(); } };
+  return { el, show, setPose, setBlend, setHighlight, setMarker, setCueLabel, dispose() { el.remove(); } };
 }
