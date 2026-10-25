@@ -78,3 +78,37 @@ button.wl-pill {
     right: 16px;
   }
 }
+
+/* Step controls: Watch again / Next part / My turn sit together in the footer. */
+.wl-ctas {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 10px;
+}
+.wl-ctas .ob-text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Header: the word picker and the voice-check redo link share the row with the heading. */
+.wl-words {
+  width: 300px;
+  max-width: 100%;
+}
+.wl-words button {
+  height: 34px;
+  font-size: 13px;
+  text-transform: capitalize;
+}
+.wl-redo {
+  height: 36px;
+  font-size: 13px;
+}
+@media (max-width: 720px) {
+  .wl-words {
+    order: 5;
+    width: 100%;
+  }
+}
