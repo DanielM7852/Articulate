@@ -93,6 +93,8 @@ literal text, and the app would then treat that provider as configured. Delete t
 | `SPACETIME_URI` | optional | `https://maincloud.spacetimedb.com` (default) |
 | `SPACETIME_DATABASE` | optional | `articulate-live`. Without both the database and the token, learner history is stored as local JSON in `STORE_DIR` and backend telemetry is off. |
 | `SPACETIME_TOKEN` | optional | `{{ RUNPOD_SECRET_spacetime_token }}` (`spacetime login show --token`) |
+| `CLASSROOM_DEV_IDENTITIES` | optional | `true` (set by `create-pod.sh`). Serves the Classroom, School and teacher console on `SPACETIME_DATABASE` using `SPACETIME_TOKEN` as owner, and opens `/v1/dev/classroom/*`, which lets any visitor mint a development teacher or learner identity. A dev login, not production auth. |
+| `CLASSROOM_DATABASE` | optional | Classroom database name. Defaults to `SPACETIME_DATABASE`. |
 | `LIVE_COORDINATION` | optional | Keep `local` (default). `spacetime` queues coach jobs for the standalone workers (`python -m app.live.worker`), and this image does not run them. |
 | `LIVE_IDENTITY_SECRET` | only with `LIVE_COORDINATION=spacetime` | `{{ RUNPOD_SECRET_live_identity_secret }}`, at least 32 characters. Unused in `local` mode. |
 | `CORS_ORIGINS` | optional | `https://<POD_ID>-8000.proxy.runpod.net`. The app and the API share one origin, so this only matters if a frontend on another origin calls the API. |

@@ -66,6 +66,7 @@ body=$(cat <<JSON
     "SPACETIME_URI": "https://maincloud.spacetimedb.com",
     "SPACETIME_DATABASE": "${SPACETIME_DATABASE:-articulate-live}",
     "SPACETIME_TOKEN": "{{ RUNPOD_SECRET_spacetime_token }}",
+    "CLASSROOM_DEV_IDENTITIES": "true",
     "LIVE_COORDINATION": "local",
     "STORE_DIR": "/workspace/articulate-store"${extra_env}
   }

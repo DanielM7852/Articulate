@@ -40,7 +40,7 @@ class DevSessionRequest(BaseModel):
 @router.get("/v1/dev/classroom/status")
 def classroom_status(request: Request) -> dict:
     owner = load_owner(request.app.state.settings)
-    if owner is None or not dev_classroom_enabled(owner):
+    if owner is None or not dev_classroom_enabled(owner, request.app.state.settings):
         return {"configured": False, "label": "development identity"}
     return {
         "configured": True,
@@ -53,8 +53,8 @@ def classroom_status(request: Request) -> dict:
 @router.post("/v1/dev/classroom/session")
 async def classroom_session(body: DevSessionRequest, request: Request) -> dict:
     owner = load_owner(request.app.state.settings)
-    if owner is None or not dev_classroom_enabled(owner):
-        raise HTTPException(404, "development classroom identity is local only")
+    if owner is None or not dev_classroom_enabled(owner, request.app.state.settings):
+        raise HTTPException(404, "development classroom identity is off")
     try:
         session = await open_dev_session(request.app.state.settings, body.role, body.name, body.classroom)
         session["uri"] = _visible_uri(request, session["uri"])
@@ -68,8 +68,8 @@ async def classroom_session(body: DevSessionRequest, request: Request) -> dict:
 async def classroom_scale(request: Request) -> dict:
     """Mint the synthetic scale rooms on the local classroom database."""
     owner = load_owner(request.app.state.settings)
-    if owner is None or not dev_classroom_enabled(owner):
-        raise HTTPException(404, "development classroom identity is local only")
+    if owner is None or not dev_classroom_enabled(owner, request.app.state.settings):
+        raise HTTPException(404, "development classroom identity is off")
     try:
         school = await open_scale_school(request.app.state.settings)
     except ClassroomError as exc:
@@ -92,8 +92,8 @@ class SyntheticSeed(BaseModel):
 async def seed_synthetic(body: SyntheticSeed, request: Request) -> dict:
     """Insert labeled synthetic findings. They never count as verified progress."""
     owner = load_owner(request.app.state.settings)
-    if owner is None or not dev_classroom_enabled(owner):
-        raise HTTPException(404, "development classroom identity is local only")
+    if owner is None or not dev_classroom_enabled(owner, request.app.state.settings):
+        raise HTTPException(404, "development classroom identity is off")
     wrote = 0
     for _ in range(3):
         ok = await commit_verified_summary(

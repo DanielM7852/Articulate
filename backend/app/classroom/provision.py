@@ -9,11 +9,12 @@ import json
 import secrets
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from app import telemetry
-from app.classroom.owner import load_owner
+from app.classroom.owner import is_local_uri, load_owner
 from app.config import Settings
 from app.paths import BACKEND_ROOT
 
@@ -56,8 +57,15 @@ def _known(body: str) -> str:
 
 
 def roster_path(settings: Settings) -> Path:
-    del settings
-    return BACKEND_ROOT / ".local_store" / "dev_classroom.json"
+    raw = Path(settings.store_dir)
+    return (raw if raw.is_absolute() else BACKEND_ROOT / raw) / "dev_classroom.json"
+
+
+def roster_key(owner: dict, classroom: str, role: str, name: str) -> str:
+    """Tokens are per server, so a remote owner scopes the key by database and host."""
+    if is_local_uri(owner["uri"]):
+        return f"{classroom}/{role}/{name}"
+    return f"{owner['database']}@{urlparse(owner['uri']).hostname}/{classroom}/{role}/{name}"
 
 
 def _load_roster(settings: Settings) -> dict[str, Any]:
@@ -102,7 +110,7 @@ async def open_dev_session(settings: Settings, role: str, name: str, classroom: 
         raise ClassroomError("classroom database is not configured", 503)
     if role not in {"teacher", "learner"} or not _NAMES.fullmatch(name) or not _NAMES.fullmatch(classroom):
         raise ClassroomError("invalid development identity", 422)
-    key = f"{classroom}/{role}/{name}"
+    key = roster_key(owner, classroom, role, name)
     roster = _load_roster(settings)
     existing = roster.get(key)
     if existing:

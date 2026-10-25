@@ -1,7 +1,8 @@
-"""Owner credentials for the local classroom database.
+"""Owner credentials for the classroom database.
 
-The token is the identity that published `articulate-classroom`. It stays in the
-gitignored local store and is never returned to the browser.
+`classroom_owner.json` in the store (the identity that published a local
+`articulate-classroom`) wins. Without it, the backend's SPACETIME_TOKEN owns the
+configured SpacetimeDB database. The token is never returned to the browser.
 """
 
 import ipaddress
@@ -26,17 +27,23 @@ def owner_path(settings: Settings) -> Path:
 
 def load_owner(settings: Settings) -> dict | None:
     path = owner_path(settings)
-    if not path.is_file():
-        return None
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not data.get("token") or not data.get("database") or not data.get("uri"):
-        return None
-    return data
+    if path.is_file():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("token") and data.get("database") and data.get("uri"):
+            return data
+    database = settings.classroom_database or settings.spacetime_database
+    uri = settings.classroom_uri or settings.spacetime_uri
+    if settings.spacetime_token and database and uri:
+        return {"token": settings.spacetime_token, "database": database, "uri": uri}
+    return None
 
 
-def dev_classroom_enabled(owner: dict) -> bool:
-    host = urlparse(owner["uri"]).hostname
-    return host in {"127.0.0.1", "localhost"}
+def is_local_uri(uri: str) -> bool:
+    return urlparse(uri).hostname in {"127.0.0.1", "localhost"}
+
+
+def dev_classroom_enabled(owner: dict, settings: Settings) -> bool:
+    return is_local_uri(owner["uri"]) or bool(settings.classroom_dev_identities)
 
 
 def _hostname(value: str) -> str:
