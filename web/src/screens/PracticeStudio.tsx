@@ -30,7 +30,9 @@ import { analyzeAttempt, type CoachResponse } from '../services/coach';
 import { attemptsFor, useAppState } from '../state/AppState';
 import { learnerProfileId } from '../state/learnerId';
 import { SOUNDS, SOUND_ORDER, type Attempt } from '../state/types';
-import { TARGETS } from '../vowel/targets';
+import { targetsFor } from '../vowel/targets';
+import { useStoredVoice } from '../audio/useStoredVoice';
+import { FormantDebug } from '../components/FormantDebug';
 
 /**
  * Practice Studio: a therapist-led, hands-free session (see conversation/director/useSessionDirector.ts for the
@@ -154,7 +156,9 @@ export default function PracticeStudio() {
   const [slow, setSlow] = useState(false);
 
   // Live F1/F2 on the same microphone stream; it runs whenever the mic is open.
-  const tracking = useVowelTracking(mic.stream, TARGETS[plan.sound]);
+  const voice = useStoredVoice();
+  const targets = useMemo(() => targetsFor(voice), [voice]);
+  const tracking = useVowelTracking(mic.stream, targets[plan.sound]);
 
   const seq = useCoachSequence(
     () => mouthRef.current,
@@ -484,8 +488,10 @@ export default function PracticeStudio() {
         holdSec={tracking.holdSec}
         hidden={!assistanceOn}
         live={tracking.status !== 'off' && tracking.status !== 'error'}
+        targets={targets}
         emptyHint={`Begin the session, then hold “${s.spelled}” steadily.`}
       />
+      <FormantDebug point={tracking.point} voice={voice} />
       <div className="lp-overlay lp-overlay--tl lp-pills">
         {compact ? (
           viewSwitch

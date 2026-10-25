@@ -61,5 +61,25 @@ export function computeMouthAnchor(driver) {
   world.divideScalar(idx.length);
   const headLocal = driver.headBone.worldToLocal(world);
 
-  return { mesh, restCenter, radius, headLocal };
+  // The mouth sits at the front of the head, so a side view centred on it pushes the back of the head
+  // out of frame. sideShift moves the side-view pivot (head-local) to the middle of the head's depth.
+  const toHead = new THREE.Matrix4().copy(driver.headBone.matrixWorld).invert();
+  let zMin = Infinity;
+  let zMax = -Infinity;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  for (let i = 0; i < n; i++) {
+    mesh.getVertexPosition(i, v);
+    v.applyMatrix4(mesh.matrixWorld).applyMatrix4(toHead);
+    if (v.z < zMin) zMin = v.z;
+    if (v.z > zMax) zMax = v.z;
+    if (v.y < yMin) yMin = v.y;
+    if (v.y > yMax) yMax = v.y;
+  }
+  const ok = Number.isFinite(zMin);
+  const sideShift = new THREE.Vector3(0, 0, ok ? (zMin + zMax) / 2 - headLocal.z : 0);
+  const headDepth = ok ? zMax - zMin : 0;
+  const headHeight = ok ? yMax - yMin : 0;
+
+  return { mesh, restCenter, radius, headLocal, sideShift, headDepth, headHeight };
 }

@@ -14,7 +14,7 @@ import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
 import { MAX_CLIP_MS, useAttemptAudio, type AttemptAudio } from '../audio/attemptAudio';
 import { useVoiceFrames, type VoiceFrames } from '../audio/useVoiceFrames';
 import { useLipTracking, type LipTrackingStatus } from '../vision/useLipTracking';
-import { CUE_MIN_MS, useCoachSequence } from '../live/useCoachSequence';
+import { CUE_MIN_MS, useCoachSequence, type SequenceLine } from '../live/useCoachSequence';
 import type { CueId } from '../live/liveCoach';
 import { isScored, requestWordAsk, requestWordCoach, scoreWord, wordFallbackLine } from '../live/wordCoach';
 import { isClose, unitDurationMs } from '../game/ghost/follow';
@@ -25,6 +25,8 @@ import { GHOST_WORDS, type GhostWordSpec } from '../game/ghost/words';
 import type { WordAttemptResult } from '../game/types';
 import { useAppState } from '../state/AppState';
 import { learnerProfileId } from '../state/learnerId';
+import { targetsFor } from '../vowel/targets';
+import { FormantDebug } from '../components/FormantDebug';
 import '../conversation/director/director.css';
 import '../styles/word-lesson.css';
 
@@ -238,15 +240,20 @@ export default function WordLesson() {
   const [wordKey, setWordKey] = useState(DEFAULT_WORD);
   const cur = useRef<WordData>(wordData(DEFAULT_WORD));
   const { spec, plan } = wordData(wordKey);
-  const model = useMemo(() => ghostModel(spec.word), [spec.word]);
-  const modelRef = useRef(model);
-  modelRef.current = model;
-
   // The learner's voice size: stored once, redone on request.
   const [learner, setLearner] = useState<StoredVoice | null>(() => readStoredVoice());
   const learnerRef = useRef(learner);
   learnerRef.current = learner;
   const learnerFactor = learner?.factor ?? DEFAULT_FACTOR;
+  // One model feeds both the board's drawing and its GhostAttempt scoring (GhostBoard sizes it once).
+  const learnerVowels = learner?.vowels;
+  const model = useMemo(
+    () => ghostModel(spec.word, learner ? { factor: learner.factor, anchors: learnerVowels } : undefined),
+    [spec.word, learner?.factor, learnerVowels],
+  );
+  const modelRef = useRef(model);
+  modelRef.current = model;
+  const targets = useMemo(() => targetsFor(learner), [learner]);
   const [voiceListening, setVoiceListening] = useState(false);
 
   const [phase, setPhaseState] = useState<Phase>('setup');
@@ -297,6 +304,12 @@ export default function WordLesson() {
   const avaLipStop = useRef<(() => void) | null>(null);
   const avaCue = useRef(false); // a cue owns the mouth, so no lip sync
   const avaView = useRef(false); // the realtime path moved the avatar to the side view
+  const lastSide = useRef<SequenceLine | null>(null); // the latest line that played a side-view demo, for "Replay side view"
+  const replayingRef = useRef(false);
+  const [replaying, setReplaying] = useState(false);
+  const [hasSide, setHasSide] = useState(false);
+  const spokeRef = useRef(false); // the learner has voiced something in the current live attempt
+  const [spoke, setSpoke] = useState(false);
   const mounted = useRef(true);
   const [talking, setTalking] = useState(false);
   const [voiceFallback, setVoiceFallback] = useState(false); // a line fell back to the browser voice (sticky)
@@ -442,12 +455,19 @@ export default function WordLesson() {
     [seq.whenIdle, seq.cancel],
   );
 
+  /** Remember the latest line that showed the side view, so the learner can replay it. */
+  const rememberSide = useCallback((l: SequenceLine) => {
+    lastSide.current = l;
+    setHasSide(true);
+  }, []);
+
   /** One Ava line. With narration off the caption stays up for its reading time. False if superseded. */
   const line = useCallback(
     async (text: string, side = false, cueId: CueId | null = null): Promise<boolean> => {
       const my = runId.current;
       const started = Date.now();
       takeFloor();
+      if (side) rememberSide({ text, cueId, showSideView: true });
       await seq.speakLine({ text, cueId, showSideView: side }, { narration: voiceOnRef.current });
       if (runId.current !== my) return false;
       if (!voiceOnRef.current) {
@@ -456,7 +476,7 @@ export default function WordLesson() {
       }
       return runId.current === my;
     },
-    [seq.speakLine, takeFloor],
+    [rememberSide, seq.speakLine, takeFloor],
   );
 
   /** Gate the realtime mic (VAD off, mic disabled) so scripted lines and the board never feed Ava. False if superseded. */
@@ -608,6 +628,8 @@ export default function WordLesson() {
       setWordKey(cur.current.key);
       progress.current = startProgress();
       shownStep.current = 0;
+      lastSide.current = null; // a new word: nothing to replay yet
+      setHasSide(false);
       floor.current = 'script';
       if (realtimeActive()) {
         quietAva(true);
@@ -729,8 +751,9 @@ export default function WordLesson() {
   );
 
   /** Show the side view / cue for a coaching line. Resolves to when the cue appeared (0 if none or superseded). */
-  const startView = useCallback(async (side: boolean, cueId: CueId | null, my: number): Promise<number> => {
+  const startView = useCallback(async (side: boolean, cueId: CueId | null, my: number, text = ''): Promise<number> => {
     avaCue.current = side && cueId !== null;
+    if (side && text) rememberSide({ text, cueId, showSideView: true });
     const av = mouthRef.current;
     if (!side || !av?.ready) return 0;
     avaView.current = true;
@@ -743,7 +766,7 @@ export default function WordLesson() {
     } catch {
       return 0; // presentation only
     }
-  }, []);
+  }, [rememberSide]);
 
   /**
    * Realtime coaching for one attempt: cutaway/cue on the avatar, Ava relays the coach caption. 'spoken' when she
@@ -756,7 +779,7 @@ export default function WordLesson() {
       my: number,
     ): Promise<'spoken' | 'fallback' | 'aborted'> => {
       const a = avaRef.current;
-      const viewP = startView(p.side, p.cueId, my);
+      const viewP = startView(p.side, p.cueId, my, p.caption);
       const before = a.speechCount();
       let relayed = true;
       try {
@@ -1068,7 +1091,7 @@ export default function WordLesson() {
         cueId,
         focus,
         before: avaRef.current.speechCount(),
-        view: startView(side, cueId, my),
+        view: startView(side, cueId, my, caption),
       };
       return { measured: true, caption, focusZoneId: focus, verdict, instructions };
     },
@@ -1122,6 +1145,51 @@ export default function WordLesson() {
       );
   }, [phase, mic.status, narration.show, spec.word, learner]);
 
+  /**
+   * "Replay side view": play the latest side-view line again with Ava's audio (narration forced on, since it is an
+   * explicit request). An open talk window is closed first so the replay is never scored as an attempt, and reopened after;
+   * the realtime mic is gated while it plays. The button only shows in phases where nothing else is running.
+   */
+  const replaySide = useCallback(async () => {
+    const l = lastSide.current;
+    const ph = phaseRef.current;
+    if (!l || replayingRef.current || ph === 'thinking' || (ph === 'live' && spokeRef.current)) return; // never during a real attempt
+    const w = win.current;
+    if (w.active && (w.pending || w.deciding)) return; // a relay is in flight
+    const wasTalking = ph === 'coaching' && w.active;
+    const wasLive = ph === 'live'; // waiting for the learner to start: close the unstarted attempt, replay, then reopen it
+    const prevPractice = !!avaRef.current.session()?.practiceMode;
+    const prevFloor = floor.current;
+    const my = wasTalking || wasLive ? ++runId.current : runId.current;
+    replayingRef.current = true;
+    setReplaying(true);
+    try {
+      if (wasTalking) endWindow();
+      if (wasLive) setPhase('cue'); // board idle: nothing is scored and progress/tries are untouched; stale results are ignored (phase is not 'live')
+      takeFloor(true); // silences realtime Ava and returns her view to the front
+      await gateAva(my); // mic gated so the replay audio never reaches her
+      await seq.speakLine(l, { narration: true });
+    } catch {
+      /* presentation only */
+    } finally {
+      replayingRef.current = false;
+      setReplaying(false);
+      if (mounted.current && runId.current === my) {
+        quietAva(true);
+        if (wasLive) {
+          await goLive(LINES.yourTurn); // short cue, then a fresh attempt on the same step
+        } else if (wasTalking) {
+          floor.current = 'ava';
+          await avaRef.current.setPracticeMode(false).catch(() => undefined);
+          if (mounted.current && runId.current === my) void talkWindow(my).catch(() => undefined);
+        } else {
+          floor.current = prevFloor;
+          if (realtimeActive() && !prevPractice) await avaRef.current.setPracticeMode(false).catch(() => undefined);
+        }
+      }
+    }
+  }, [endWindow, gateAva, goLive, quietAva, realtimeActive, seq.speakLine, setPhase, takeFloor, talkWindow]);
+
   function finish() {
     stopRun();
     quietAva();
@@ -1137,6 +1205,18 @@ export default function WordLesson() {
     navigate('/');
   }
 
+  // Track whether the learner has started the current attempt (first voiced or burst frame), so Replay can hide then.
+  useEffect(() => {
+    spokeRef.current = false;
+    setSpoke(false);
+    if (phase !== 'live') return;
+    return voice.subscribe((f) => {
+      if (spokeRef.current || !(f.voiced || f.burst)) return;
+      spokeRef.current = true;
+      setSpoke(true);
+    });
+  }, [phase, attemptId, voice.subscribe]);
+
   const step = plan[Math.min(stepIdx, plan.length - 1)];
   const nextWord = WORD_KEYS[WORD_KEYS.indexOf(spec.word) + 1] ?? null;
   const boardMode = phase === 'watch' ? 'watch' : phase === 'live' || (phase === 'coaching' && talking && windowLive) ? 'live' : 'idle';
@@ -1147,6 +1227,10 @@ export default function WordLesson() {
   const avaTalking = realtimeOn && ava.speaking && !!ava.caption;
   const captionText = avaTalking ? ava.caption : seq.caption;
   const showTeacherCaption = captions && !!captionText && phase !== 'setup';
+
+  // Replay is offered only while nothing is recording or being scored: after coaching (talk window open), at the end of
+  // the word, or on an idle watch-only part. Never during 'live' or 'thinking'.
+  const canReplay = hasSide && ((phase === 'live' && !spoke) || phase === 'done' || (phase === 'coaching' && talking) || (phase === 'cue' && !step.practisable));
 
   const where = stepLabel(plan, stepIdx);
   const statusText =
@@ -1307,6 +1391,18 @@ export default function WordLesson() {
                 Browser voice · Cartesia unavailable
               </span>
             )}
+            {canReplay && (
+              <button
+                type="button"
+                className="lp-pill wl-pill wl-replay"
+                onClick={() => void replaySide().catch(() => undefined)}
+                disabled={replaying || seq.running || avaTalking}
+                title="Watch Ava's side-view mouth demo again"
+              >
+                <RotateCcw size={16} aria-hidden="true" />
+                Replay side view
+              </button>
+            )}
             {realtimeOn && (
               <span className="lp-pill wl-pill" role="status">
                 <MessageCircle size={16} aria-hidden="true" />
@@ -1323,6 +1419,7 @@ export default function WordLesson() {
               spec={spec}
               model={model}
               learnerFactor={learnerFactor}
+              targets={targets}
               unit={step.unit}
               mode={boardMode}
               speed={step.speedWatch}
@@ -1335,6 +1432,7 @@ export default function WordLesson() {
             />
           )}
         </section>
+        <FormantDebug frames={voice} voice={learner} />
         {/* Lip tracking needs a playing video element; the board shows the lips as the cursor ring. */}
         {camera && (
           <div className="sd-offscreen" aria-hidden="true">

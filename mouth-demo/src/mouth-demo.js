@@ -190,7 +190,7 @@ export async function createMouthDemo(container, options = {}) {
     disposers.push(() => highlight.dispose());
 
     views = createViews({ camera: scene.camera, controls: scene.controls, canvas: scene.canvas });
-    views.setAnchor(driver.headBone, anchor.headLocal);
+    views.setAnchor(driver.headBone, anchor.headLocal, { sideShift: anchor.sideShift, headDepth: anchor.headDepth, headHeight: anchor.headHeight });
     views.snap();
     disposers.push(() => views.dispose());
 

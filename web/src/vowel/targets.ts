@@ -1,4 +1,5 @@
-import type { SoundId } from '../state/types';
+import { SOUND_ORDER, type SoundId } from '../state/types';
+import { pullToward } from './pull';
 
 /**
  * Orientation regions for the three practice vowels on the F1/F2 plane.
@@ -23,6 +24,26 @@ export const TARGETS: Record<SoundId, VowelTarget> = {
   u: { f1: 420, f2: 1050, rf1: 0.3, rf2: 0.25 },
   a: { f1: 850, f2: 1400, rf1: 0.25, rf2: 0.22 },
 };
+
+/**
+ * The three targets for one learner. The base centre is the fixed one scaled by exp(factor), the same single
+ * voice factor the ghost model uses. A stored per-vowel median (their own eee/oo/ah from the warm-up) pulls
+ * that centre toward it by at most one radius (pullToward), keeping the generic log half-widths. Structural
+ * voice type so this module stays free of component imports.
+ */
+export function targetsFor(
+  voice: { factor?: number; vowels?: Partial<Record<SoundId, { f1: number; f2: number }>> } | null | undefined,
+): Record<SoundId, VowelTarget> {
+  const scale = Math.exp(voice?.factor ?? 0);
+  const out = {} as Record<SoundId, VowelTarget>;
+  for (const id of SOUND_ORDER) {
+    const base = TARGETS[id];
+    const a = voice?.vowels?.[id];
+    const sized = { f1: base.f1 * scale, f2: base.f2 * scale };
+    out[id] = { ...pullToward(sized, a, base.rf1, base.rf2), rf1: base.rf1, rf2: base.rf2 };
+  }
+  return out;
+}
 
 /** How long a steady hold inside the region fills the hold ring. Matches the on-screen hint. */
 export const HOLD_GOAL_SEC = 3;
