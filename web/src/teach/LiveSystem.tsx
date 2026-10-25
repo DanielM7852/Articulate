@@ -118,6 +118,9 @@ export default function LiveSystem({
       {/* 2026-10-25: the activity list started open and pushed the graph into a short band.
       <details className="live-inspector" open>
       */}
+      {/* 2026-10-25: the Activity bar sat over the bottom-left of the graph; the user asked for it to go. The list is kept
+          behind `false` so the learner links and stage checks can come back as a side panel later. */}
+      {false && (
       <details className="live-inspector">
         <summary>Activity</summary>
         <ol className="live-stages">
@@ -167,6 +170,7 @@ export default function LiveSystem({
           ))}
         </ul>
       </details>
+      )}
     </section>
   );
 }

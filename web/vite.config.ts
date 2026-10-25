@@ -30,6 +30,7 @@ export default defineConfig({
       input: {
         main: repo('./index.html'),
         teach: repo('./teach.html'),
+        live: repo('./live.html'),
       },
     },
   },

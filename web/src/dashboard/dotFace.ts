@@ -1,7 +1,11 @@
+import { FRAME, createFaceCloud } from './faceCloud';
 import { FACE_CANON, FACE_TRIS } from './faceTris';
 
 /**
- * The MediaPipe card's dot face: the learner's face mesh (lip.mesh v2, docs/telemetry.md) drawn as a stippled
+ * The MediaPipe card's learner face. `createDotFace` draws it as Ava's dot head at card scale (faceCloud.ts, WebGL
+ * with Ava's point material); this file keeps the frame decoding and, when WebGL is unavailable, a 2D fallback.
+ *
+ * The 2D fallback: the learner's face mesh (lip.mesh v2, docs/telemetry.md) drawn as a stippled
  * dot cloud over MediaPipe's canonical tesselation, a small sibling of Ava's dot head (mouth-demo pointcloud.js).
  *
  * Sampling happens once, on the canonical model: dots gather where the form turns (nose, lip line and corners,
@@ -38,8 +42,8 @@ const EYES = [
 ];
 
 /** Canonical depth as FaceLandmarker reports it: about mid-face at 0, compressed (the replay generator uses the same). */
-const CANON_Z_MID = 2.6;
-const CANON_Z_GAIN = 0.75;
+const CANON_Z_MID = FRAME.zMid;
+const CANON_Z_GAIN = FRAME.zGain;
 /** Iris radius as a share of the eye's width, when the frame has no iris points (468-point frames, the idle pose). */
 const IRIS_R = 0.19;
 /** Mid-tone dots around each iris (the gaze). */
@@ -511,10 +515,31 @@ export interface DotFace {
    * scales the breath and the drift (0 = still: idle, or reduced motion), `t` is the time in seconds.
    */
   draw(c: CanvasRenderingContext2D, px: number, P: Float32Array, alpha: number, life?: number, t?: number): void;
+  /** Releases the WebGL renderer (a later draw recreates it). */
+  dispose(): void;
 }
 
-/** `box` is the square's size in design px; `pad` keeps the dots off the canvas edge. */
+/**
+ * `box` is the square's size in design px; `pad` keeps the head off the canvas edge. Draws Ava's dot head
+ * (faceCloud.ts); falls back to the 2D stipple when WebGL is unavailable or its context is lost.
+ */
 export function createDotFace(box: number, pad: number): DotFace {
+  const cloud = createFaceCloud(box, pad);
+  let stipple: ReturnType<typeof createStippleFace> | null = null;
+  return {
+    draw(c, px, P, alpha, life = 0, t = 0) {
+      if (cloud.draw(c, px, P, alpha, life, t)) return;
+      stipple ??= createStippleFace(box, pad);
+      stipple.draw(c, px, P, alpha, life, t);
+    },
+    dispose() {
+      cloud.dispose();
+    },
+  };
+}
+
+/** The 2D fallback: `box` is the square's size in design px; `pad` keeps the dots off the canvas edge. */
+function createStippleFace(box: number, pad: number): Pick<DotFace, 'draw'> {
   const sx = new Float32Array(FACE_POINTS);
   const sy = new Float32Array(FACE_POINTS);
   const clamped = new Uint8Array(NV);
