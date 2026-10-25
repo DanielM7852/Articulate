@@ -31,6 +31,7 @@ from app.live.decision import (
     zone_info,
 )
 from app.live.history import LearnerContext, LearnerHistory, build_history
+from app.live.learner_model import build_learner_model, prompt_view
 from app.live.schemas import (
     AudioFrame,
     AudioScore,
@@ -131,6 +132,7 @@ def _user_message(
     video: VideoScore | None,
     candidates: dict[str, float | str],
     context: LearnerContext,
+    view: dict[str, Any],
 ) -> str:
     payload = {
         "sound": body.sound,
@@ -142,6 +144,7 @@ def _user_message(
         "video": video.model_dump() if video else None,
         "allowedEvidenceFields": sorted(candidates),
         "recentAttempts": context.attempts,
+        "learnerModel": view,
         "learnerNotes": context.notes,
     }
     return json.dumps(payload, separators=(",", ":"))
@@ -161,6 +164,7 @@ def _word_user_message(
     score: WordScore,
     candidates: dict[str, float | str],
     context: LearnerContext,
+    view: dict[str, Any],
     acoustics: dict[str, Any] | None = None,
     azure: dict[str, Any] | None = None,
 ) -> str:
@@ -210,6 +214,10 @@ def _word_user_message(
             "fricative and nasal arrive skipped with no evidence and are taught from their hint only"
         ),
         "allowedEvidenceFields": sorted(candidates),
+        "recentAttempts": [
+            a for a in context.timeline if a.get("kind") == "word" and a.get("word") == word.word
+        ][:5],
+        "learnerModel": view,
         "learnerNotes": context.notes,
     }
     if acoustics is not None:
@@ -373,9 +381,11 @@ async def _decide(
     audio: AudioScore,
     video: VideoScore | None,
     context: LearnerContext,
+    model: dict[str, dict[str, Any]],
     timings: dict[str, int],
 ):
     candidates = evidence_candidates(audio, video, body.clientSummary)
+    view = prompt_view(model, sound=body.sound)
     timings["llm"] = 0
     timings["validate"] = 0
     if deps.model_available:
@@ -385,7 +395,7 @@ async def _decide(
                 deps.settings,
                 deps.llm_client,
                 llm.COACH_SYSTEM,
-                _user_message(body, audio, video, candidates, context),
+                _user_message(body, audio, video, candidates, context, view),
                 CoachDecision,
                 deps.settings.live_coach_effort,
                 deps.settings.live_coach_timeout_s,
@@ -396,7 +406,7 @@ async def _decide(
             )
             t1 = time.perf_counter()
             timings["llm"] = _ms(t0, t1)
-            evidence = validate_decision(decision, body.sound, audio, video, candidates)
+            evidence = validate_decision(decision, body.sound, audio, video, candidates, view)
             timings["validate"] = _ms(t1, time.perf_counter())
             return "agent", decision, evidence
         except Exception as exc:  # noqa: BLE001 - any model or validation failure uses the fallback
@@ -413,6 +423,7 @@ async def _decide_word(
     body: LiveCoachRequest,
     score: WordScore,
     context: LearnerContext,
+    model: dict[str, dict[str, Any]],
     timings: dict[str, int],
     wav: bytes | None = None,
     acoustics: dict[str, Any] | None = None,
@@ -422,6 +433,7 @@ async def _decide_word(
     assert word is not None
     candidates = word_evidence_candidates(word, score)
     practice = _practice_ids(body)
+    view = prompt_view(model, word=word)
     timings["llm"] = 0
     timings["validate"] = 0
     if deps.model_available:
@@ -431,7 +443,7 @@ async def _decide_word(
                 deps.settings,
                 deps.llm_client,
                 llm.WORD_COACH_SYSTEM + (f"\n{llm.WORD_COACH_AUDIO_NOTE}" if wav else ""),
-                _word_user_message(body, score, candidates, context, acoustics, azure),
+                _word_user_message(body, score, candidates, context, view, acoustics, azure),
                 CoachDecision,
                 deps.settings.live_coach_effort,
                 deps.settings.live_coach_timeout_s,
@@ -444,7 +456,7 @@ async def _decide_word(
             t1 = time.perf_counter()
             timings["llm"] = _ms(t0, t1)
             decision = normalize_word_cue(decision)
-            evidence = validate_word_decision(decision, word, score, candidates, practice)
+            evidence = validate_word_decision(decision, word, score, candidates, practice, history=view)
             timings["validate"] = _ms(t1, time.perf_counter())
             return "agent", decision, evidence
         except Exception as exc:  # noqa: BLE001 - any model or validation failure uses the fallback
@@ -481,8 +493,13 @@ async def coach_attempt(
                        {"verdict": video.verdict, "okFrames": video.usableFrames})
     # The current attempt may already be stored (for example a retried request); never show it as history.
     context.attempts = [a for a in context.attempts if a.get("attemptId") != body.attemptId]
+    context.word_attempts = [a for a in context.word_attempts if a.get("attemptId") != body.attemptId]
+    context.timeline = [a for a in context.timeline if a.get("attemptId") != body.attemptId]
+    model = build_learner_model(context.timeline)
 
     word_score = score_word(body.word, _practice_ids(body)) if body.word is not None else None
+    quality, quality_reason = (body.word.quality, body.word.qualityReason) if body.word is not None else (None, None)
+    clarity_check = None
     if word_score is not None and word_score.verdict == "on_target":
         # The local judge already passed every counted zone: no Praat, Azure or model call; GPT is only for errors.
         logger.info("live word coach: local pass, cloud skipped")
@@ -505,6 +522,7 @@ async def coach_attempt(
         )
         if azure_ms is not None:
             timings["azure"] = azure_ms
+        clarity_check = "praat" if acoustics is not None else None
         if acoustics is not None:
             timings["acoustics"] = _ms(t_ac, time.perf_counter())
         if acoustics is not None and not acoustics["speech"]["clear"] and body.word.quality == "usable":
@@ -512,6 +530,7 @@ async def coach_attempt(
             # (insufficient score, deterministic retry line) without calling the model.
             unclear = body.word.model_copy(update={"quality": "unclear", "qualityReason": "no-voice"})
             word_score = score_word(unclear, _practice_ids(body))
+            quality, quality_reason = "unclear", "no-voice"
             candidates = word_evidence_candidates(unclear, word_score)
             timings["llm"] = 0
             timings["validate"] = 0
@@ -519,13 +538,13 @@ async def coach_attempt(
             source = "fallback"
         else:
             source, decision, evidence = await _decide_word(
-                deps, body, word_score, context, timings, wav, acoustics, azure
+                deps, body, word_score, context, model, timings, wav, acoustics, azure
             )
         focus = decision.focusZoneId
         side = word_show_side_view(focus, decision.nextAction)
     else:
         wav = None
-        source, decision, evidence = await _decide(deps, body, audio, video, context, timings)
+        source, decision, evidence = await _decide(deps, body, audio, video, context, model, timings)
         focus = None
         side = show_side_view(decision.cueId, decision.nextAction)
     telemetry.emit("backend", "ui", "coach.decision", f"{decision.nextAction}: {decision.caption.strip()}",
@@ -557,9 +576,22 @@ async def coach_attempt(
         "clientSummary": body.clientSummary.model_dump(),
         "cueId": response.cueId,
         "nextAction": response.nextAction,
+        "caption": response.caption,
     }
     if word_score is not None:
-        summary["word"] = word_score.model_dump(include={"word", "verdict", "zoneCount", "hitCount", "weakestZoneId"})
+        summary["word"] = {
+            **word_score.model_dump(include={"word", "verdict", "zoneCount", "hitCount", "weakestZoneId"}),
+            "quality": quality,
+            "qualityReason": quality_reason,
+            "practiceZoneIds": _practice_ids(body),
+            "verdictSource": "board",
+            "clarityCheck": clarity_check,
+            "zones": [
+                {"zoneId": z.zoneId, "phoneme": z.phoneme, "kind": z.kind, "verdict": z.verdict,
+                 "advisory": z.is_advisory, "evidence": z.evidence}
+                for z in word_score.zones
+            ],
+        }
         summary["focusZoneId"] = focus
     # Vowel turns keep their stored shape; word turns also record the focus zone.
     skip = {"audio", "video", "persisted", "model", "timingsMs", "word"} | (set() if word_score else {"focusZoneId"})
