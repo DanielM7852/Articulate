@@ -94,6 +94,61 @@ export const LearnerProgress = __t.object("LearnerProgress", {
 });
 export type LearnerProgress = __Infer<typeof LearnerProgress>;
 
+export const LiveInsight = __t.object("LiveInsight", {
+  attemptId: __t.string(),
+  profileId: __t.string(),
+  sound: __t.string(),
+  status: __t.string(),
+  say: __t.string(),
+  source: __t.string(),
+  createdAt: __t.u32(),
+  expiresAt: __t.u32(),
+});
+export type LiveInsight = __Infer<typeof LiveInsight>;
+
+export const LiveJob = __t.object("LiveJob", {
+  id: __t.string(),
+  profileId: __t.string(),
+  sessionId: __t.string(),
+  kind: __t.string(),
+  requestJson: __t.string(),
+  requestHash: __t.string(),
+  expectedRevision: __t.u32(),
+  status: __t.string(),
+  workerId: __t.string(),
+  leaseToken: __t.string(),
+  leaseUntil: __t.f64(),
+  attempts: __t.u32(),
+  resultJson: __t.string(),
+  errorCode: __t.string(),
+  createdAt: __t.f64(),
+  expiresAt: __t.u32(),
+});
+export type LiveJob = __Infer<typeof LiveJob>;
+
+export const LiveQueue = __t.object("LiveQueue", {
+  id: __t.u32(),
+  active: __t.u32(),
+  running: __t.u32(),
+});
+export type LiveQueue = __Infer<typeof LiveQueue>;
+
+export const LiveQuota = __t.object("LiveQuota", {
+  profileId: __t.string(),
+  active: __t.u32(),
+});
+export type LiveQuota = __Infer<typeof LiveQuota>;
+
+export const LiveSession = __t.object("LiveSession", {
+  id: __t.string(),
+  profileId: __t.string(),
+  stateJson: __t.string(),
+  revision: __t.u32(),
+  expiresAt: __t.u32(),
+  activeJob: __t.string(),
+});
+export type LiveSession = __Infer<typeof LiveSession>;
+
 export const MetricBatch = __t.object("MetricBatch", {
   id: __t.u64(),
   attemptId: __t.string(),
@@ -112,4 +167,15 @@ export const Sessions = __t.object("Sessions", {
   body: __t.string(),
 });
 export type Sessions = __Infer<typeof Sessions>;
+
+export const TelemetryEvent = __t.object("TelemetryEvent", {
+  id: __t.u64(),
+  at: __t.timestamp(),
+  source: __t.string(),
+  target: __t.string(),
+  kind: __t.string(),
+  label: __t.string(),
+  payload: __t.string(),
+});
+export type TelemetryEvent = __Infer<typeof TelemetryEvent>;
 

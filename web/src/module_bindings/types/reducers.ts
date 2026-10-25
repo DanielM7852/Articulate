@@ -7,22 +7,38 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import BeginAttemptReducer from "../begin_attempt_reducer";
+import ClaimLiveJobReducer from "../claim_live_job_reducer";
+import CleanupLiveStateReducer from "../cleanup_live_state_reducer";
 import CommitEventReducer from "../commit_event_reducer";
+import EmitTelemetryReducer from "../emit_telemetry_reducer";
 import EndAttemptReducer from "../end_attempt_reducer";
+import EnqueueLiveJobReducer from "../enqueue_live_job_reducer";
+import FailLiveJobReducer from "../fail_live_job_reducer";
+import FinishLiveJobReducer from "../finish_live_job_reducer";
 import PushMetricsReducer from "../push_metrics_reducer";
 import RecordArticulationReducer from "../record_articulation_reducer";
 import RecordCoachTurnReducer from "../record_coach_turn_reducer";
 import RegisterLearnerReducer from "../register_learner_reducer";
+import RenewLiveJobReducer from "../renew_live_job_reducer";
 import SetLearnerNoteReducer from "../set_learner_note_reducer";
 import SetLearnerProgressReducer from "../set_learner_progress_reducer";
+import SetLiveInsightReducer from "../set_live_insight_reducer";
 
 export type BeginAttemptParams = __Infer<typeof BeginAttemptReducer>;
+export type ClaimLiveJobParams = __Infer<typeof ClaimLiveJobReducer>;
+export type CleanupLiveStateParams = __Infer<typeof CleanupLiveStateReducer>;
 export type CommitEventParams = __Infer<typeof CommitEventReducer>;
+export type EmitTelemetryParams = __Infer<typeof EmitTelemetryReducer>;
 export type EndAttemptParams = __Infer<typeof EndAttemptReducer>;
+export type EnqueueLiveJobParams = __Infer<typeof EnqueueLiveJobReducer>;
+export type FailLiveJobParams = __Infer<typeof FailLiveJobReducer>;
+export type FinishLiveJobParams = __Infer<typeof FinishLiveJobReducer>;
 export type PushMetricsParams = __Infer<typeof PushMetricsReducer>;
 export type RecordArticulationParams = __Infer<typeof RecordArticulationReducer>;
 export type RecordCoachTurnParams = __Infer<typeof RecordCoachTurnReducer>;
 export type RegisterLearnerParams = __Infer<typeof RegisterLearnerReducer>;
+export type RenewLiveJobParams = __Infer<typeof RenewLiveJobReducer>;
 export type SetLearnerNoteParams = __Infer<typeof SetLearnerNoteReducer>;
 export type SetLearnerProgressParams = __Infer<typeof SetLearnerProgressReducer>;
+export type SetLiveInsightParams = __Infer<typeof SetLiveInsightReducer>;
 
