@@ -141,10 +141,12 @@ export interface WordCoachInput {
   profileId: string;
   /** The zones of the part being practised; absent means the whole word. Sent top-level. */
   practiceZoneIds?: string[];
+  /** Short WAV of the attempt; omitted from the request when null/undefined. */
+  audio?: { format: 'wav'; data: string; durationMs: number } | null;
 }
 
 /** POST one word attempt. Throws on any failure so the caller can use wordFallbackLine. */
-export function requestWordCoach({ result, profileId, practiceZoneIds }: WordCoachInput, signal?: AbortSignal): Promise<LiveCoachResponse> {
+export function requestWordCoach({ result, profileId, practiceZoneIds, audio }: WordCoachInput, signal?: AbortSignal): Promise<LiveCoachResponse> {
   const sound = WORD_SOUND[result.word] ?? 'a';
   const request: LiveCoachRequest & { practiceZoneIds?: string[] } = {
     attemptId: result.attemptId,
@@ -163,6 +165,7 @@ export function requestWordCoach({ result, profileId, practiceZoneIds }: WordCoa
     frames: { audio: [], video: [] },
     word: result,
     ...(practiceZoneIds ? { practiceZoneIds } : {}),
+    ...(audio ? { attemptAudio: audio } : {}),
   };
   return requestLiveCoach(request, signal);
 }

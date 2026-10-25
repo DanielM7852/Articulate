@@ -11,6 +11,7 @@ import { VoiceCheck, readStoredVoice, storeVoice, type StoredVoice } from '../co
 import { onTeacherFallback, prepareTeacher, unlockTeacherAudio } from '../audio/teacher';
 import { useAvaRealtime, type AvaCoaching } from '../realtime/useAvaRealtime';
 import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
+import { MAX_CLIP_MS, useAttemptAudio, type AttemptAudio } from '../audio/attemptAudio';
 import { useVoiceFrames, type VoiceFrames } from '../audio/useVoiceFrames';
 import { useLipTracking, type LipTrackingStatus } from '../vision/useLipTracking';
 import { CUE_MIN_MS, useCoachSequence } from '../live/useCoachSequence';
@@ -120,6 +121,10 @@ const ATTEMPT_WAIT_MS = 1500;
 const MAX_HELD = 4;
 const ECHO_SETTLE_MS = 700;
 const TALK_POLL_MS = 120;
+/** Attempt audio for the coach: the board reports 600 ms after the last voiced frame and durationMs stops at that
+ *  frame, so the clip reaches back over that tail plus a short pre-roll before the first voiced frame. */
+const CLIP_TAIL_MS = 600;
+const CLIP_PREROLL_MS = 250;
 
 const lessonContext = (word: string) =>
   `[app] Lesson context: the practice word is "${word}". The lesson goes one part of the word at a time, then joins the parts back into the whole word. ` +
@@ -216,6 +221,7 @@ const cap = (text: string) => `${text[0].toUpperCase()}${text.slice(1)}`;
 export default function WordLesson() {
   const navigate = useNavigate();
   const mic = useMicrophone();
+  const attemptTap = useAttemptAudio(mic.stream);
   const voice = useVoiceFrames(mic.stream);
   const { camera, setCamera, narration: voiceOn, captions, completeOnboarding } = useAppState();
   const profileId = useMemo(() => learnerProfileId(), []);
@@ -796,7 +802,7 @@ export default function WordLesson() {
    * before the coach request (runAttempt starts its filler there). Null when run `my` was superseded.
    */
   const coachResult = useCallback(
-    async (result: WordAttemptResult, step: LessonStep, my: number, onStart?: () => void): Promise<Coached | null> => {
+    async (result: WordAttemptResult, step: LessonStep, my: number, onStart?: () => void, endedAt: number = Date.now()): Promise<Coached | null> => {
       const { spec: word, plan: steps } = cur.current;
       const practice = step.unit.zoneIds;
       lastResult.current = { result, practice };
@@ -815,8 +821,15 @@ export default function WordLesson() {
       let cueId: CueId | null = null;
       let side: boolean;
       let score = scoreWord(result, practice);
+      // Best effort and synchronous: audio must never delay or break coaching.
+      let audio: AttemptAudio | null = null;
       try {
-        const resp = await requestWordCoach({ result, profileId, practiceZoneIds: practice }, ctl.signal);
+        audio = attemptTap.current?.clip(endedAt, Math.min(MAX_CLIP_MS, result.durationMs + CLIP_TAIL_MS + CLIP_PREROLL_MS)) ?? null;
+      } catch {
+        audio = null;
+      }
+      try {
+        const resp = await requestWordCoach({ result, profileId, practiceZoneIds: practice, audio }, ctl.signal);
         caption = resp.caption;
         focus = resp.focusZoneId ?? null;
         cueId = resp.cueId;
@@ -1037,7 +1050,7 @@ export default function WordLesson() {
         };
       }
       const pick = [...fresh].reverse().find((r) => r.result.quality === 'usable') ?? fresh[fresh.length - 1];
-      const coached = await coachResult(pick.result, step, my);
+      const coached = await coachResult(pick.result, step, my, undefined, pick.at);
       if (!coached || !alive()) return gone;
       const { prog, finalStep, caption, focus, cueId, side, verdict } = coached;
       const instructions = finalStep

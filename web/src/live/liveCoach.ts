@@ -26,6 +26,8 @@ export interface LiveCoachRequest {
   frames: { audio: AudioFrame[]; video: RecordedLipFrame[] } | null;
   /** Word mode: the board's attempt. `sound` is then the word's vowel ("a" for track). */
   word?: WordAttemptResult;
+  /** Word mode: a short 16 kHz mono PCM16 WAV of the attempt (base64, no data: prefix). Omitted when unavailable. */
+  attemptAudio?: { format: 'wav'; data: string; durationMs: number };
 }
 
 /** Server roll-up of a word attempt (backend/app/live/scoring.py score_word). */
