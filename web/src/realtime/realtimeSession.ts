@@ -106,7 +106,9 @@ export class RealtimeSession {
     error: new Set(), event: new Set(),
   };
   private _state: RealtimeState = 'idle';
-  private gates = { practice: false, playback: false };
+  // Starts gated: practice mode is in effect from the first track, so nothing the learner or the speakers produce can
+  // start a response until the lesson calls setPracticeMode(false).
+  private gates = { practice: true, playback: false };
   private activeResponse: string | null = null;
   private pendingUpdates: Array<{
     eventId: string;
@@ -177,7 +179,7 @@ export class RealtimeSession {
       const pc = new RTCPeerConnection();
       this.pc = pc;
       this.sender = pc.addTrack(track, stream);
-      this.applyGates();
+      this.applyGates(); // the outgoing track is disabled before any audio can be sent
       const dc = pc.createDataChannel('oai-events');
       this.dc = dc;
       dc.onmessage = (m) => this.onServerMessage(m.data);
@@ -209,6 +211,8 @@ export class RealtimeSession {
         const t = setTimeout(() => reject(new Error('Realtime data channel did not open.')), CONNECT_TIMEOUT_MS);
         dc.onopen = () => { clearTimeout(t); resolve(); };
       });
+      // Turn detection off and the input buffer cleared before connect() resolves (the track is already disabled).
+      await this.setPracticeMode(true);
       this.setState('open');
     } catch (err) {
       this.fail(err instanceof Error ? err.message : 'Realtime connection failed.');
@@ -329,9 +333,14 @@ export class RealtimeSession {
    * appended so the session persona instructions stay in force), then response.create.
    */
   injectResult(text: string, instructions?: string): void {
-    const body = instructions ? `${text}\n\n${instructions}` : text;
+    this.sendSystemMessage(instructions ? `${text}\n\n${instructions}` : text, true);
+  }
+
+  /** Add a system message from the app ("[app] " prefix, never doubled) and optionally ask for a response. */
+  sendSystemMessage(text: string, respond: boolean): void {
+    const body = text.startsWith('[app]') ? text : `[app] ${text}`;
     this.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: body }] } });
-    this.send({ type: 'response.create' });
+    if (respond) this.send({ type: 'response.create' });
   }
 
   /**

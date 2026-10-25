@@ -76,10 +76,20 @@ class ClientSummary(BaseModel):
     qualityReason: str | None = Field(default=None, max_length=80)
 
 
-ZoneKind = Literal["vowel", "tuner", "stop"]
+ZoneKind = Literal["vowel", "tuner", "stop", "liquid", "fricative", "nasal"]
+# Kinds the microphone cannot judge reliably in real time. Their zones never count toward the word verdict.
+ADVISORY_KINDS = frozenset({"liquid", "fricative", "nasal"})
 ZoneVerdict = Literal["hit", "partial", "miss", "skipped"]
 ZONE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,16}$")
 EVIDENCE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,39}$")
+
+
+def _check_zone_ids(value: list[str] | None) -> list[str] | None:
+    if value is None:
+        return None
+    if any(not ZONE_ID_RE.fullmatch(v) for v in value):
+        raise ValueError("practiceZoneIds must match [A-Za-z0-9_-]{1,16}")
+    return list(dict.fromkeys(value))
 
 
 class WordZoneResult(BaseModel):
@@ -95,6 +105,13 @@ class WordZoneResult(BaseModel):
     startMs: float | None = None
     endMs: float | None = None
     evidence: dict[str, float] = Field(default_factory=dict, max_length=24)
+    # Advisory zones (liquid, fricative, nasal) never count toward the word verdict. Fricative and nasal results
+    # arrive skipped with empty evidence; liquid results carry a graded verdict for information only.
+    advisory: bool = False
+
+    @property
+    def is_advisory(self) -> bool:
+        return self.advisory or self.kind in ADVISORY_KINDS
 
     @field_validator("zoneId")
     @classmethod
@@ -124,6 +141,8 @@ class WordAttempt(BaseModel):
     quality: Literal["usable", "unclear"]
     qualityReason: Literal["silence", "clipped", "too-short", "no-voice"] | None = None
     lipUsable: bool = False
+    # Same as LiveCoachRequest.practiceZoneIds; accepted here too so either spelling of the request works.
+    practiceZoneIds: list[str] | None = Field(default=None, max_length=12)
 
     @field_validator("zones")
     @classmethod
@@ -132,6 +151,11 @@ class WordAttempt(BaseModel):
         if len(set(ids)) != len(ids):
             raise ValueError("zone ids must be unique")
         return value
+
+    @field_validator("practiceZoneIds")
+    @classmethod
+    def _practice(cls, value: list[str] | None) -> list[str] | None:
+        return _check_zone_ids(value)
 
 
 WordVerdict = Literal["on_target", "close", "off", "insufficient"]
@@ -161,6 +185,8 @@ class LiveCoachRequest(BaseModel):
     frames: Frames | None = None
     # Present: coach this word attempt (word mode). Absent: the vowel path, unchanged.
     word: WordAttempt | None = None
+    # Word mode: the zone ids being practised now. Absent: the whole word.
+    practiceZoneIds: list[str] | None = Field(default=None, max_length=12)
 
     @field_validator("attemptId")
     @classmethod
@@ -168,6 +194,18 @@ class LiveCoachRequest(BaseModel):
         if not valid_attempt_id(value):
             raise ValueError("attemptId must be a UUID")
         return value
+
+    @field_validator("practiceZoneIds")
+    @classmethod
+    def _practice(cls, value: list[str] | None) -> list[str] | None:
+        return _check_zone_ids(value)
+
+    @property
+    def practice_ids(self) -> list[str] | None:
+        """The practised zone ids from either place the client may put them; None means the whole word."""
+        if self.practiceZoneIds is not None:
+            return self.practiceZoneIds
+        return self.word.practiceZoneIds if self.word is not None else None
 
     @field_validator("profileId")
     @classmethod
@@ -418,3 +456,59 @@ class TalkDraft(BaseModel):
     cueId: CueId | None = None
     showSideView: bool = False
     intent: TalkIntent | None = None
+
+
+class WordAskCoaching(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    caption: str = Field(max_length=600)
+    focusZoneId: str | None = Field(default=None, max_length=16)
+
+
+class WordAskAttempt(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    verdict: str | None = Field(default=None, max_length=32)
+    hitCount: int | None = None
+    zoneCount: int | None = None
+    weakestZoneId: str | None = Field(default=None, max_length=16)
+
+
+class WordAskRequest(BaseModel):
+    """A learner's question about the word lesson, relayed by Ava's ask_coach tool."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    profileId: str
+    word: str = Field(min_length=1, max_length=32)
+    question: str = Field(min_length=1, max_length=500)
+    lastCoaching: WordAskCoaching | None = None
+    lastAttempt: WordAskAttempt | None = None
+    tries: int = Field(default=0, ge=0, le=10000)
+    # The part(s) of the word being practised now; absent means the whole word.
+    practiceZoneIds: list[str] | None = Field(default=None, max_length=12)
+
+    @field_validator("practiceZoneIds")
+    @classmethod
+    def _practice(cls, value: list[str] | None) -> list[str] | None:
+        return _check_zone_ids(value)
+
+    @field_validator("profileId")
+    @classmethod
+    def _profile(cls, value: str) -> str:
+        if not valid_profile_id(value):
+            raise ValueError("profileId must match [A-Za-z0-9_.:@-]{1,64}")
+        return value
+
+
+class WordAskResponse(BaseModel):
+    say: str
+    source: Literal["model", "fallback"]
+
+
+class WordAskDraft(BaseModel):
+    """Model output for one answer. Code validates it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    say: str = Field(min_length=1, max_length=600)

@@ -27,10 +27,13 @@ from app.live.schemas import (
     SessionTurn,
     SessionTurnRequest,
     SoundId,
+    WordAskRequest,
+    WordAskResponse,
     valid_attempt_id,
     valid_profile_id,
 )
 from app.live.session import get_store, start_session, take_turn
+from app.live.word_ask import answer_word_question
 from app.live.shared_insight import SharedInsights
 
 router = APIRouter(prefix="/v1/live")
@@ -155,6 +158,13 @@ async def live_coach(body: LiveCoachRequest, request: Request, background: Backg
     if _shared(request, body.profileId):
         return await _coordination(request).submit("attempt.coach", body.model_dump())
     return await coach_attempt(_deps(request), body, background.add_task)
+
+
+@router.post("/word/ask", response_model=WordAskResponse)
+async def live_word_ask(body: WordAskRequest, request: Request) -> WordAskResponse:
+    """A learner's question from Ava's ask_coach tool. Always 200 with a validated line (model or fallback)."""
+    authorize_profile(request, body.profileId)
+    return await answer_word_question(_deps(request), body)
 
 
 @router.post("/notes", response_model=LearnerNotes, responses=ACCEPTED)

@@ -1,6 +1,6 @@
 """Server-side copy of the practice words: zone labels, phonemes and body hints.
 
-Mirrors web/src/game/words.ts (TRACK) exactly for the fields the coach needs. Keep the two in sync.
+Mirrors web/src/game/words.ts (track, sheep, rent, brain) exactly for the fields the coach needs. Keep the two in sync.
 Targets (Hz) stay on the client; the server only needs what Ava may say about each zone.
 """
 
@@ -34,8 +34,8 @@ TRACK = WordInfo(
     zones=(
         ZoneInfo("t", "t", "t", "stop", "Tongue tip up behind the teeth, then let go.",
                  "Tongue tip up behind the teeth, then let go.", "at the start"),
-        ZoneInfo("r", "r", "r", "tuner", "Curl the tongue tip back, or bunch it up. Pull the needle down.",
-                 "Curl the tongue tip back, or bunch it up. Pull the needle down.", "after the t"),
+        ZoneInfo("r", "r", "r", "liquid", "Curl the tongue tip back, or bunch it up, and keep the voice going.",
+                 "Curl the tongue tip back, or bunch it up, and keep the voice going.", "after the t"),
         ZoneInfo("a", "ae", "a", "vowel", "Jaw open, tongue low and forward.",
                  "Open wide, tongue low and forward.", "in the middle"),
         ZoneInfo("k", "k", "ck", "stop", "Back of the tongue up, then release.",
@@ -43,11 +43,51 @@ TRACK = WordInfo(
     ),
 )
 
-WORDS: dict[str, WordInfo] = {"track": TRACK}
+SHEEP = WordInfo(
+    word="sheep",
+    zones=(
+        ZoneInfo("sh", "sh", "sh", "fricative", "Pull the tongue back a little, then push a long, soft stream of air.",
+                 "Pull the tongue back a little, then push a long, soft stream of air.", "at the start"),
+        ZoneInfo("ee", "iy", "ee", "vowel", "Lips spread wide, tongue high and forward.",
+                 "Tongue high and forward, held steady.", "in the middle"),
+        ZoneInfo("p", "p", "p", "stop", "Close the lips, build a little air, then let it pop.",
+                 "Seal the front of the mouth, build a little air, then let it pop.", "at the end"),
+    ),
+)
 
-# Zone -> mouth-demo cue. The demo has only lip/jaw cues (round-lips, spread-lips, open-jaw), so only the
-# vowel maps to one; tongue zones (t, r, ck) use the side view with no cue.
-ZONE_CUE: dict[str, str] = {"a": "open-jaw"}
+RENT = WordInfo(
+    word="rent",
+    zones=(
+        ZoneInfo("r", "r", "r", "liquid", "Curl the tongue tip back, or bunch it up, and keep the voice going.",
+                 "Curl the tongue tip back, or bunch it up, and keep the voice going.", "at the start"),
+        ZoneInfo("e", "eh", "e", "vowel", "Jaw half open, tongue in the middle and a little forward.",
+                 "Tongue in the middle and a little forward.", "in the middle"),
+        ZoneInfo("n", "n", "n", "nasal", "Tongue tip up behind the teeth and let the voice hum through the nose.",
+                 "Tongue tip up behind the teeth and let the voice hum through the nose.", "after the e"),
+        ZoneInfo("t", "t", "t", "stop", "Tongue tip up behind the teeth, then let go.",
+                 "Tongue tip up behind the teeth, then let go.", "at the end"),
+    ),
+)
+
+BRAIN = WordInfo(
+    word="brain",
+    zones=(
+        ZoneInfo("b", "b", "b", "stop", "Close the lips, then pop them open with your voice on.",
+                 "Seal the front of the mouth, then pop it open with your voice on.", "at the start"),
+        ZoneInfo("r", "r", "r", "liquid", "Curl the tongue tip back, or bunch it up, and keep the voice going.",
+                 "Curl the tongue tip back, or bunch it up, and keep the voice going.", "after the b"),
+        ZoneInfo("ai", "ey", "ai", "vowel", "Start with the jaw half open, then glide up toward a smile.",
+                 "Start with the tongue in the middle, then glide up and forward.", "in the middle"),
+        ZoneInfo("n", "n", "n", "nasal", "Tongue tip up behind the teeth and let the voice hum through the nose.",
+                 "Tongue tip up behind the teeth and let the voice hum through the nose.", "at the end"),
+    ),
+)
+
+WORDS: dict[str, WordInfo] = {w.word: w for w in (TRACK, SHEEP, RENT, BRAIN)}
+
+# Zone -> mouth-demo cue. The demo has only lip/jaw cues (round-lips, spread-lips, open-jaw), so only vowels with
+# such a cue map to one; every consonant (and the vowels without a cue) uses the side view with no cue.
+ZONE_CUE: dict[str, str] = {"a": "open-jaw", "ee": "spread-lips"}
 
 
 def word_info(word: str) -> WordInfo | None:

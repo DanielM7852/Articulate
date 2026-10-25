@@ -35,7 +35,7 @@ from app.live.schemas import (
     VideoScore,
     WordScore,
 )
-from app.live.scoring import score_audio, score_video, score_word
+from app.live.scoring import practice_scope, score_audio, score_video, score_word
 from app.live.targets import SOUND_CUE, SOUND_SPELLING
 from app.live.words import ZONE_CUE
 
@@ -135,6 +135,15 @@ def _user_message(
     return json.dumps(payload, separators=(",", ":"))
 
 
+def _practice_ids(body: LiveCoachRequest) -> list[str] | None:
+    """practiceZoneIds restricted to the attempt's zones; None (whole word) when absent or nothing matches."""
+    requested = body.practice_ids
+    if requested is None or body.word is None:
+        return None
+    scope = practice_scope(body.word, requested)
+    return scope or None
+
+
 def _word_user_message(
     body: LiveCoachRequest,
     score: WordScore,
@@ -157,10 +166,12 @@ def _word_user_message(
                 "verdict": z.verdict,
                 "dwellMs": round(z.dwellMs),
                 "evidence": z.evidence,
+                "advisory": z.is_advisory,
                 "cue": ZONE_CUE.get(z.zoneId),
             }
         )
     weakest = next((zone for zone in zones if zone["id"] == score.weakestZoneId), None)
+    practice = _practice_ids(body)
     payload = {
         "word": word.word,
         "verdict": score.verdict,
@@ -169,15 +180,20 @@ def _word_user_message(
         "quality": word.quality,
         "qualityReason": word.qualityReason,
         "lipUsable": word.lipUsable,
+        "practiceZoneIds": practice,
         "zones": zones,
         "weakestZone": weakest,
         "focusZoneCue": weakest["cue"] if weakest else None,
         "evidenceMeaning": (
             "vowel: f1Offset/f2Offset are log-ratios to the target centre (positive f1Offset = more open, positive "
-            "f2Offset = further forward), inTargetFraction is the share of voiced frames inside the target; tuner (r): "
+            "f2Offset = further forward), inTargetFraction is the share of voiced frames inside the target; in ghost mode "
+            "vowel and liquid evidence also has pathDistance (mean distance of the learner's path from the model "
+            "ghost path in close-zone units; 1 or less means inside the close zone) and closeFraction (share of path "
+            "points inside the close zone); liquid and legacy tuner (r): "
             "valueMedian/valueBest are the F3-F2 gap in Hz (lower is a stronger r), inBandFraction the share in the "
             "green band; stop: burstDetected 1 when a release burst was seen; lips: spreadMean, roundingMean, "
-            "lipOpeningMean when the camera was usable"
+            "lipOpeningMean when the camera was usable; advisory zones (liquid, fricative, nasal) are never judged: "
+            "fricative and nasal arrive skipped with no evidence and are taught from their hint only"
         ),
         "allowedEvidenceFields": sorted(candidates),
         "learnerNotes": context.notes,
@@ -255,6 +271,7 @@ async def _decide_word(
     word = body.word
     assert word is not None
     candidates = word_evidence_candidates(word, score)
+    practice = _practice_ids(body)
     timings["llm"] = 0
     timings["validate"] = 0
     if deps.model_available:
@@ -274,14 +291,14 @@ async def _decide_word(
             )
             t1 = time.perf_counter()
             timings["llm"] = _ms(t0, t1)
-            evidence = validate_word_decision(decision, word, score, candidates)
+            evidence = validate_word_decision(decision, word, score, candidates, practice)
             timings["validate"] = _ms(t1, time.perf_counter())
             return "agent", decision, evidence
         except Exception as exc:  # noqa: BLE001 - any model or validation failure uses the fallback
             timings["llm"] = _ms(t0, time.perf_counter())
             logger.warning("live word coach used fallback: %s %s", type(exc).__name__, str(exc)[:80])
     t2 = time.perf_counter()
-    decision, evidence = word_fallback_decision(word, score, candidates)
+    decision, evidence = word_fallback_decision(word, score, candidates, practice)
     timings["validate"] += _ms(t2, time.perf_counter())
     return "fallback", decision, evidence
 
@@ -307,7 +324,7 @@ async def coach_attempt(
     # The current attempt may already be stored (for example a retried request); never show it as history.
     context.attempts = [a for a in context.attempts if a.get("attemptId") != body.attemptId]
 
-    word_score = score_word(body.word) if body.word is not None else None
+    word_score = score_word(body.word, _practice_ids(body)) if body.word is not None else None
     if word_score is not None:
         source, decision, evidence = await _decide_word(deps, body, word_score, context, timings)
         focus = decision.focusZoneId

@@ -6,8 +6,8 @@ import { inZone, type ZoneSet } from './zones';
 export type Outcome = 'hit' | 'miss' | 'unheard';
 
 /**
- * Self-paced: each note waits for the player, and its window opens at voice onset.
- * Timed: notes arrive at a fixed spacing, with a visual approach ring. Neither uses audio cues.
+ * Self-paced: each note waits for the player, and its window opens at an accepted vowel or an explicit attempt.
+ * Timed: notes arrive at a minimum spacing, with a visual approach ring. Neither uses audio cues.
  */
 export type Pacing = { kind: 'self' } | { kind: 'timed'; spacingMs: number };
 
@@ -89,6 +89,10 @@ export class GameRun {
   private readonly lastHoldMs: (number | null)[] = [];
 
   constructor(readonly steps: Step[], readonly zones: ZoneSet, options: Partial<GameOptions> = {}) {
+    for (const { note } of steps) {
+      const required = note.kind === 'hold' ? [note.vowel] : [note.from, note.to];
+      for (const vowel of required) if (!zones[vowel]) throw new Error(`Missing personal zone: ${vowel}`);
+    }
     this.options = { ...GAME_DEFAULTS, ...options };
     this.notes = steps.map((_, index) => ({
       index, status: 'upcoming', targetMs: NaN, windowStartMs: NaN, windowEndMs: NaN,
@@ -113,8 +117,22 @@ export class GameRun {
     const t = frame.timestampMs;
     if (this.originMs === null) this.start(t);
     this.timeMs = t;
-    for (const note of this.notes) this.advance(note, frame);
+    const note = this.notes.find((candidate) => !candidate.outcome);
+    if (note) this.advance(note, frame);
     return this.snapshot();
+  }
+
+  /** A visible button starts an attempt even when no vowel can be tracked. */
+  beginAttempt(timestampMs = this.timeMs): GameSnapshot {
+    const note = this.notes.find((candidate) => !candidate.outcome);
+    if (this.options.pacing.kind === 'self' && note?.status === 'waiting') this.open(note, timestampMs);
+    return this.snapshot();
+  }
+
+  private open(note: NoteState, t: number) {
+    note.status = 'open';
+    note.windowStartMs = t;
+    note.windowEndMs = t + this.windowFor(note.index) + this.options.latencyMs;
   }
 
   private start(t: number) {
@@ -139,19 +157,15 @@ export class GameRun {
 
   private advance(note: NoteState, frame: TrackedFrame) {
     const t = frame.timestampMs;
-    const { pacing, approachMs, latencyMs } = this.options;
+    const { pacing, approachMs } = this.options;
     if (note.status === 'resolved') return;
     if (pacing.kind === 'timed') {
       if (note.status === 'upcoming' && t >= note.targetMs - approachMs) note.status = 'approaching';
       if (note.status !== 'open' && t >= note.windowStartMs) note.status = 'open';
     } else {
       if (note.status === 'resting' && t >= note.targetMs) note.status = 'waiting';
-      // The window opens at the first frame with any sound, accepted or not.
-      if (note.status === 'waiting' && frame.status !== 'quiet') {
-        note.status = 'open';
-        note.windowStartMs = t;
-        note.windowEndMs = t + this.windowFor(note.index) + latencyMs;
-      }
+      // Rejected room noise must not start an attempt on the player's behalf.
+      if (note.status === 'waiting' && frame.status === 'tracking' && frame.point) this.open(note, t);
     }
     if (note.status !== 'open') return;
     if (t > note.windowEndMs) {
@@ -160,7 +174,7 @@ export class GameRun {
     }
     if (frame.status === 'tracking' && frame.point) {
       note.heardPoints++;
-      if (this.judge(note, frame.point)) this.resolve(note, 'hit', t);
+      if (this.judge(note, frame.point) && note.heardPoints >= this.options.minHeardPoints) this.resolve(note, 'hit', t);
     }
   }
 
@@ -191,9 +205,16 @@ export class GameRun {
     note.status = 'resolved';
     note.outcome = outcome;
     const next = this.notes[note.index + 1];
-    if (next && this.options.pacing.kind === 'self') {
+    if (!next) return;
+    if (this.options.pacing.kind === 'self') {
       next.status = 'resting';
       next.targetMs = t + this.options.restMs;
+    } else {
+      // A slow or unheard attempt may consume the nominal spacing. The next visible ring
+      // still gets its full approach; no other note is judged behind the current card.
+      next.targetMs = Math.max(note.targetMs + this.options.pacing.spacingMs, t + this.options.approachMs);
+      next.windowStartMs = next.targetMs - this.options.earlyMs;
+      next.windowEndMs = next.targetMs + this.windowFor(next.index) + this.options.latencyMs;
     }
   }
 }

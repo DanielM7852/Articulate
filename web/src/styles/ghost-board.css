@@ -1,0 +1,188 @@
+/* ---------- Ghost board (gb-) ----------
+ * The ghost-path board. It reuses the word board's plot, grid, ink, cursor and lip ring (wb- classes
+ * from word-board.css) and adds the model path, its close-zone band, stop circles and cue badges.
+ * Everything that moves per frame is written by the board's rAF loop; CSS only animates state changes.
+ */
+.gb {
+  height: 100%;
+  min-height: 340px;
+  display: grid;
+}
+.gb-board {
+  min-height: 300px;
+}
+
+/* Model path: dim for the whole word, solid for the unit being practised; the band is the close zone. */
+.gb-band {
+  fill: none;
+  stroke: var(--color-navy-mist);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.2;
+}
+.gb-band[data-active='true'] {
+  opacity: 0.4;
+}
+.gb-line {
+  fill: none;
+  stroke: var(--color-navy-mist);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 2 6;
+}
+.gb-line[data-active='true'] {
+  stroke: var(--color-navy);
+  stroke-width: 3.5;
+  stroke-dasharray: 7 6;
+}
+.gb-part-label {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  text-anchor: middle;
+  fill: var(--color-navy-mist);
+  paint-order: stroke;
+  stroke: var(--color-cream);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  transition: fill 200ms ease;
+}
+.gb-part-label[data-active='true'] {
+  fill: var(--color-navy);
+}
+
+/* Stop: an osu-style hit circle on the path. It fills when a release burst lands. */
+.gb-stop-ring {
+  fill: var(--color-surface);
+  stroke: var(--color-navy-mist);
+  stroke-width: 2.5;
+  transition: fill 200ms ease, stroke 200ms ease;
+}
+.gb-stop-approach {
+  fill: none;
+  stroke: var(--color-navy);
+  stroke-width: 2;
+  opacity: 0.55;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: gb-approach 1.6s ease-in-out infinite;
+}
+.gb-stop-letter {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  text-anchor: middle;
+  dominant-baseline: central;
+  fill: var(--color-muted);
+}
+.gb-stop[data-active='true'] .gb-stop-ring {
+  stroke: var(--color-navy);
+}
+.gb-stop[data-active='true'] .gb-stop-letter {
+  fill: var(--color-navy);
+}
+.gb-stop[data-state='hit'] .gb-stop-ring {
+  fill: var(--color-success);
+  stroke: var(--color-success);
+}
+.gb-stop[data-state='hit'] .gb-stop-letter {
+  fill: #fff;
+}
+.gb-stop[data-state='miss'] .gb-stop-ring {
+  stroke: var(--color-navy-mist);
+  stroke-dasharray: 4 3;
+}
+.gb-stop[data-state='miss'] .gb-stop-letter {
+  fill: var(--color-ink);
+}
+.gb-stop[data-active='false'] {
+  opacity: 0.45;
+}
+.gb-stop-burst {
+  fill: none;
+  stroke: var(--color-success);
+  stroke-width: 3;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: wb-burst 520ms var(--ease-out);
+}
+.gb-stop[data-focus='true'] .gb-stop-ring {
+  stroke: var(--color-navy);
+  stroke-width: 3.5;
+}
+
+/* Liquid: a small tag on the path. Advisory, so it never turns pass or fail colours. */
+.gb-liquid-dot {
+  fill: var(--color-cream);
+  stroke: var(--color-navy-mist);
+  stroke-width: 2;
+}
+.gb-liquid[data-active='true'] .gb-liquid-dot {
+  stroke: var(--color-navy);
+}
+.gb-liquid[data-active='false'] {
+  opacity: 0.5;
+}
+
+/* Fricative and nasal: a cue badge. Shown, never scored. */
+.gb-cue-box {
+  fill: var(--color-surface);
+  stroke: var(--color-navy-mist);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+.gb-cue-text {
+  font-size: 13px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+  fill: var(--color-muted);
+}
+.gb-cue[data-active='true'] .gb-cue-box {
+  stroke: var(--color-navy);
+}
+.gb-cue[data-active='true'] .gb-cue-text {
+  fill: var(--color-navy);
+}
+.gb-cue[data-active='false'] {
+  opacity: 0.5;
+}
+.gb-cue[data-focus='true'] .gb-cue-box {
+  stroke: var(--color-navy);
+  stroke-dasharray: none;
+}
+
+/* The ghost dot in watch mode. */
+.gb-board .wb-ghost-dot {
+  width: 24px;
+  height: 24px;
+  background: rgba(32, 62, 104, 0.2);
+  border: 2.5px solid var(--color-navy);
+}
+.gb-board[data-passing='true'] .wb-ghost-dot {
+  background: rgba(32, 62, 104, 0.55);
+}
+
+.gb-board[data-mode='live'] .wb-status::before {
+  background: var(--color-success);
+}
+.gb-board[data-mode='watch'] .wb-status::before {
+  background: var(--color-navy);
+}
+
+@keyframes gb-approach {
+  0%, 100% { transform: scale(1.25); opacity: 0.15; }
+  50% { transform: scale(1); opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gb-stop-approach {
+    animation: none;
+    opacity: 0.4;
+    transform: scale(1.15);
+  }
+  .gb-stop-burst {
+    animation: none;
+    opacity: 0.8;
+  }
+}
