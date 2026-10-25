@@ -56,5 +56,5 @@ test('demoCues: partForZone and stepPronounce', () => {
   expect(whole?.part.id).toBe('ck');
   expect(whole?.cueId).toBe('tongue-back');
   expect(stepPronounce(track, { id: 'chain-t-r-a-k', partIds: ['tr', 'a', 'ck'] }, null)).toBe(null);
-  expect(partPronounce(GHOST_WORDS.sheep, GHOST_WORDS.sheep.parts[0])?.cueId).toBe(null);
+  expect(partPronounce(GHOST_WORDS.sheep, GHOST_WORDS.sheep.parts[0])?.cueId).toBe('tongue-sh');
 });
