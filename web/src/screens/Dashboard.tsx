@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject, type CSSProperties } from 'react';
 import { subscribeTelemetry, type NodeId, type TelemetryEvent } from '../telemetry/client';
 import brandMark from '../assets/landing/brand-mark.svg';
-import { FACE_POINTS, canonicalFace, createDotFace, decodeFaceV2 } from '../dashboard/dotFace';
+import { FACE_POINTS, canonicalFace, createDotFace, decodeFaceV2, decodeFaceV3 } from '../dashboard/dotFace';
 import '../styles/dashboard.css';
 
 /**
@@ -12,7 +12,7 @@ import '../styles/dashboard.css';
  * a fixed 1600 x 900 design space that is scaled to fit the viewport (the canvas uses the same
  * transform). Animation state lives in refs; React only re-renders the cards, at most 10 times a second.
  * The perception streams (lip.mesh, audio.spectrum) are drawn by the same frame loop: the MediaPipe card's
- * face canvas (a dot face over the full mesh for v2 frames, the 81-point wireframe for v1), and the Audio
+ * face canvas (a dot face over the full mesh for v3 and v2 frames, the 81-point wireframe for v1), and the Audio
  * cluster as a radial equaliser on per-band springs.
  *
  * Live events come from `subscribeTelemetry`. `?demo` (or `d`) replays /telemetry-demo.json through
@@ -133,7 +133,8 @@ interface Model {
   audio: { f1: number; f2: number; rms: number; env: number[] } | null;
   /**
    * latest lip.mesh; `at` is performance.now() on arrival. v1: `pts` 81 points 0..255. v2: `xyz` the full mesh,
-   * decoded once on arrival (dotFace.ts frame); `n` is the point count the frame carried.
+   * decoded once on arrival (dotFace.ts frame) from a wire v2 (replay) or v3 (live) payload; `n` is the point
+   * count the frame carried.
    */
   mesh: { v: 1; pts: number[]; n: number; at: number; sid: string | null } | { v: 2; xyz: Float32Array; n: number; at: number; sid: string | null } | null;
   /** latest audio.spectrum, bins 0..1 */
@@ -321,13 +322,13 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
       // Backfill is stale by definition; and one face at a time: a second tab waits until the first goes quiet.
       if (!live) break;
       if (m.mesh && m.mesh.sid !== psid && now - m.mesh.at < PERCEPT_MS) break;
-      if (p.v === 2 && typeof p.pts === 'string') {
+      if ((p.v === 2 || p.v === 3) && typeof p.pts === 'string') {
         const n = num(p.n) ?? 0;
-        const xyz = decodeFaceV2(p.pts, n);
+        const xyz = p.v === 3 ? decodeFaceV3(p.pts, n) : decodeFaceV2(p.pts, n);
         if (!xyz) break;
         m.mesh = { v: 2, xyz, n, at: now, sid: psid };
       } else if (Array.isArray(p.pts) && p.pts.length === MESH_LEN) {
-        // v1 stays valid; while v2 frames from this tab are flowing they win
+        // v1 stays valid; while full-mesh (v2/v3) frames from this tab are flowing they win
         if (m.mesh && m.mesh.v === 2 && m.mesh.sid === psid && now - m.mesh.at < PERCEPT_MS) break;
         m.mesh = { v: 1, pts: p.pts.map((v) => Math.min(255, Math.max(0, Number(v) || 0))), n: 81, at: now, sid: psid };
       } else break;

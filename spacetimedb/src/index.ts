@@ -412,6 +412,11 @@ const telemetryNodes = [
 ];
 const telemetryKindRe = /^[a-z]+(\.[a-z_]+)+$/;
 const TELEMETRY_KEEP = 400;
+/** Low-rate rows (camera.on, ui.join, stt.*, ...) are only trimmed while more than this many remain. */
+const TELEMETRY_KEEP_LOW = 150;
+/** 5-10 Hz per-tab streams: trimmed first so a busy lesson cannot push the low-rate events out. */
+const TELEMETRY_HIGH_RATE = new Set(["lip.frame", "lip.mesh", "audio.frame", "audio.spectrum", "ui.ping"]);
+const byId = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0);
 
 export const emit_telemetry = db.reducer(
   {
@@ -437,12 +442,19 @@ export const emit_telemetry = db.reducer(
       label,
       payload: payload_json,
     });
-    const excess = Number(ctx.db.telemetryEvent.count()) - TELEMETRY_KEEP;
+    let excess = Number(ctx.db.telemetryEvent.count()) - TELEMETRY_KEEP;
     if (excess <= 0) return;
-    const ids: bigint[] = [];
-    for (const row of ctx.db.telemetryEvent.iter()) ids.push(row.id);
-    ids.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    for (const id of ids.slice(0, excess)) ctx.db.telemetryEvent.id.delete(id);
+    // Retention: oldest high-rate rows go first; low-rate rows only while more than TELEMETRY_KEEP_LOW exist.
+    const high: bigint[] = [];
+    const low: bigint[] = [];
+    for (const row of ctx.db.telemetryEvent.iter()) (TELEMETRY_HIGH_RATE.has(row.kind) ? high : low).push(row.id);
+    high.sort(byId);
+    low.sort(byId);
+    const fromHigh = Math.min(excess, high.length);
+    for (let i = 0; i < fromHigh; i++) ctx.db.telemetryEvent.id.delete(high[i]);
+    excess -= fromHigh;
+    const fromLow = Math.min(excess, Math.max(0, low.length - TELEMETRY_KEEP_LOW));
+    for (let i = 0; i < fromLow; i++) ctx.db.telemetryEvent.id.delete(low[i]);
   },
 );
 */

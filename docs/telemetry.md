@@ -14,9 +14,10 @@ No media, transcripts, or profile ids are written here. A lesson event may add a
 | target   | string    | node id                                                |
 | kind     | string    | dotted event kind, see below                           |
 | label    | string    | short human text for the dashboard (<= 120 chars)      |
-| payload  | string    | JSON object, <= 2048 bytes                             |
+| payload  | string    | JSON object, <= 2048 bytes live (4096 in the unpublished source) |
 
-The reducer keeps only the newest 400 rows (deletes the oldest on insert).
+The reducer keeps at most 400 rows. The deployed module deletes the oldest on insert; the source on
+this branch (pending a republish) uses the retention rule in "Retention" below.
 
 ## Reducer `emit_telemetry`
 
@@ -24,7 +25,17 @@ Args (positional order matters for the Python HTTP caller):
 `source: string, target: string, kind: string, label: string, payload_json: string`
 
 Any identity may call it (browser or backend). Validation: node ids from the list below,
-kind matches `^[a-z]+(\.[a-z_]+)+$`, label <= 120 chars, payload_json valid JSON object <= 2048 bytes.
+kind matches `^[a-z]+(\.[a-z_]+)+$`, label <= 120 chars, payload_json valid JSON object <= 2048 bytes
+(the deployed module; the source says 4096 but has not been republished). The live reducer reports every
+rejection with the generic text "The instance encountered a fatal error.", not the thrown message.
+
+### Retention (module source, applies after the next publish)
+
+At most 400 rows. When an insert pushes the count over, the oldest rows among the high-rate kinds
+(`lip.frame`, `lip.mesh`, `audio.frame`, `audio.spectrum`, `ui.ping`) are deleted first. Low-rate rows
+(everything else: `camera.on`, `ui.join`, `stt.*`, ...) are deleted, oldest first, only while more than
+150 of them remain. One pass partitions the ids, then each list is sorted, so a busy lesson streaming at
+10 Hz no longer pushes the session's join and camera events out of the table.
 
 ## Node ids
 
@@ -68,6 +79,7 @@ kind matches `^[a-z]+(\.[a-z_]+)+$`, label <= 120 chars, payload_json valid JSON
 | sparc.features     | sparc -> backend    | `{tongueHeight, tongueFront, jawOpen, lipForward, lipAperture, latencyMs}` |
 | sparc.skipped      | backend -> sparc    | `{reason}`                                                             |
 | db.read / db.write | backend -> db       | `{table, rows}`                                                        |
+| backend.up         | backend -> db       | `{provider, model, articulation, pitchTable, coordination, telemetryIdentity}` once at startup when telemetry goes live; label "backend online"; telemetryIdentity is `anonymous` or `configured` |
 | video.score        | backend -> ui       | `{verdict, okFrames}`                                                  |
 | ui.join            | ui -> db            | `{sid, ua}` ua = coarse device class: phone, tablet or desktop; label "learner joined" |
 | ui.ping            | ui -> db            | `{sid}` every 20 s while the tab is visible                            |
@@ -96,11 +108,38 @@ The header shows "N learners live" and the Learner node shows one dot per live s
 - `subscribeTelemetry(cb: (e: TelemetryEvent) => void): () => void` live inserts, newest first on backfill.
 - `TelemetryEvent = { id: string; at: number; source; target; kind; label; payload: Record<string, unknown> }`
 
+Delivery is visible in the console. In SpacetimeDB 2.13 each reducer accessor
+(`conn.reducers.emitTelemetry(...)`) returns a `Promise<void>` that resolves when the reducer commits and
+rejects with `SenderError` (the reducer threw) or `InternalError` (host failure), or with an error when the
+connection is down. The client counts the outcome per kind and keeps the counters on
+`window.__telemetryStats` (always set; it holds no payloads):
+
+```
+window.__telemetryStats
+// { "lip.mesh": { sent, accepted, rejected, dropped, lastError }, "lip.frame": {...}, ... }
+```
+
+- `sent`: reducer calls made; `accepted` / `rejected`: their outcome; `lastError`: the last rejection text.
+- `dropped`: emits skipped because the connection was not ready or 20 calls were already in flight
+  (throttled emits are not counted).
+- The first rejection of each kind logs one `console.warn` with the kind and the payload byte length; a
+  subscription error logs once.
+
 ## Python
 
 `backend/app/telemetry.py` exports `emit(source, target, kind, label, payload: dict)`.
 Fire-and-forget on the running event loop (thread-safe via `call_soon_threadsafe` when called
-from a worker thread). No-op when `spacetime_uri` is not configured. Never raises.
+from a worker thread). Never raises. No-op until `configure` (called from the app lifespan) is live:
+
+- `TELEMETRY_ENABLED=false` turns it off entirely.
+- With `SPACETIME_DATABASE` and `SPACETIME_TOKEN` set, events go to that database with that token.
+- With no `SPACETIME_TOKEN`, the backend mints an anonymous identity (`POST {SPACETIME_URI}/v1/identity`,
+  5 s timeout) in a background task at startup, caches it in the gitignored
+  `<STORE_DIR>/telemetry_identity.json` so restarts keep one identity, and emits to `SPACETIME_DATABASE`
+  or `TELEMETRY_DATABASE` (default `articulate-live`). The table and reducer are public, so no owner token is
+  needed. A failure logs one INFO line and leaves telemetry off; app startup is never blocked.
+
+Once live, the backend emits `backend.up` with its live configuration.
 
 ## Publishing the module (teammate's machine)
 
@@ -159,10 +198,39 @@ drops token-like payload fields and session ids. Hiding the tab would not be an 
 
 Demo replay reads `telemetry-demo.json` in the browser. It does not call classroom reducers.
 
-## Full face mesh (lip.mesh v2)
+## Full face mesh (lip.mesh v3, live)
 
-`lip.mesh` payload version 2 carries all 478 FaceLandmarker points (468 + 10 iris) so the dashboard can
-render the learner's face as a barycentric dot cloud over the canonical tesselation, like Ava's head.
+`lip.mesh` payload version 3 is what the browser emits. It carries all 478 FaceLandmarker points
+(468 + 10 iris) so the dashboard can render the learner's face as a barycentric dot cloud over the
+canonical tesselation, like Ava's head.
+
+| field | meaning |
+|-------|---------|
+| v     | 3 |
+| n     | 478 (468 when the model returns no iris points) |
+| pts   | base64 of n records of 3 bytes: x uint8, y uint8, z uint8 |
+| yaw, pitch, roll | head pose in degrees from the LipFrame, one decimal |
+
+Normalisation: the same nose-centred square as v1 and v2 (centre = landmark 1, half-size = 1.6 x
+inter-ocular), x and y quantised to 0..255 across the square and clamped; z = landmark z divided by
+inter-ocular, mapped from [-0.6, 0.6] to 0..255 (0 = nearest the camera). The dashboard decodes x and y
+as byte / 255, the same 0..1 square as v2.
+
+Size: 478 x 3 = 1,434 bytes = 1,912 base64 chars. The worst-case payload with pose and `sid`
+(`{v:3,n:478,pts,yaw:-123.4,pitch:-123.4,roll:-123.4,sid:"8626a337"}`) is 1,995 bytes. The browser drops
+any mesh payload that would exceed 2,000 bytes (`MAX_PAYLOAD_BYTES` in `useLipTracking.ts`, logged once
+at debug level).
+
+Why: the deployed `emit_telemetry` still caps `payload_json` at 2048 bytes. A v2 payload is about
+3,256 bytes with the sid, so every v2 emit was rejected and the dashboard's MediaPipe card read "no face"
+forever. The 8-bit grid is 1/255 of a square 3.2 inter-oculars wide, about 0.013 x the inter-ocular
+distance, finer than the dot face needs. v1 (81 points) is still emitted when fewer than 468 landmarks
+exist. Rate stays 10 Hz per tab.
+
+## lip.mesh v2 (replay only)
+
+Version 2 is no longer emitted. The dashboard still decodes it so `web/public/telemetry-demo.json`
+(recorded in v2) replays unchanged.
 
 | field | meaning |
 |-------|---------|
@@ -173,6 +241,6 @@ render the learner's face as a barycentric dot cloud over the canonical tesselat
 
 Normalisation: same nose-centred square as v1 (centre = landmark 1, half-size = 1.6 x inter-ocular),
 x and y quantised to 0..65535 across the square and clamped; z = landmark z divided by inter-ocular,
-mapped from [-0.6, 0.6] to 0..255 (0 = nearest the camera). The reducer payload cap is 4096 bytes to
-make room (a v2 payload is about 3.3 KB). v1 (81 points, `pts` as an int array) remains valid; the
-dashboard accepts both and prefers v2. Rate stays 10 Hz per tab.
+mapped from [-0.6, 0.6] to 0..255 (0 = nearest the camera). A v2 payload is about 3.3 KB, which needs
+the 4096-byte cap in the module source; the deployed module's 2048-byte cap rejects it. v1 (81 points,
+`pts` as an int array) remains valid; the dashboard accepts v1, v2 and v3 and prefers a full mesh.

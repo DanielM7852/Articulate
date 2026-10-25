@@ -21,6 +21,7 @@ export const LESSON_STEPS = ['Choose', 'Try', 'Understand', 'Practice', 'Try ind
 /* ---------- Optional lip camera ---------- */
 const LIP_STATUS_LABEL: Partial<Record<LipTrackingStatus, string>> = {
   loading: 'Loading lip tracking',
+  warming: 'Starting lip tracking',
   tracking: 'Lip tracking on',
   'no-face': 'Face not found',
   error: 'Lip tracking unavailable',
