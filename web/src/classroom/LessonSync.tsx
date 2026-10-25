@@ -25,6 +25,27 @@ let shownNotice: { profileId: string; revision: number; text: string } | null = 
  * immediately. Application waits until capture is idle, then the visible
  * plan changes, then application is acknowledged. Snapshots are not spoken.
  */
+
+/**
+ * The classroom join form is a development login against a localhost classroom server
+ * (docs/teacher-dashboard.md). It is shown only when explicitly enabled, so the ordinary
+ * learner flow and demos never see it: `?classroom` in the URL (remembered for the tab),
+ * or VITE_CLASSROOM=on. An existing classroom session always keeps its banner.
+ */
+function classroomJoinEnabled(): boolean {
+  try {
+    if (import.meta.env.VITE_CLASSROOM === 'on') return true;
+    const hash = window.location.hash;
+    const query = window.location.search + (hash.includes('?') ? '&' + hash.slice(hash.indexOf('?') + 1) : '');
+    if (/(^|[?&])classroom(=|&|$)/.test(query)) {
+      sessionStorage.setItem('articulate.classroom.join', '1');
+      return true;
+    }
+    return sessionStorage.getItem('articulate.classroom.join') === '1';
+  } catch {
+    return false;
+  }
+}
 export function LessonSync() {
   const { applyTeacherLesson, lessonTarget, lessonCue, lessonRepetitions, lessonRevision, plan } = useAppState();
   const [session, setSession] = useState<DevSession | null>(() => loadSession());
@@ -189,6 +210,7 @@ export function LessonSync() {
   if (onQuiz) return null;
 
   if (!session || session.role !== 'learner') {
+    if (!classroomJoinEnabled()) return null;
     return (
       <aside className="classroom-banner">
         <IdentityForm role="learner" onReady={setSession} />
