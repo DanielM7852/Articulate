@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
+import { QUESTIONS, questionLine } from '../audio/bakedLines';
 import {
   AudioLines,
   CalendarDays,
@@ -63,12 +64,6 @@ const GUIDANCE: { id: Guidance; label: string }[] = [
   { id: 'explore', label: 'Room to explore' },
 ];
 
-const QUESTIONS = {
-  1: { title: 'What would you like to feel more comfortable with?', hint: 'Pick as many as you like.' },
-  2: { title: 'Which sounds most like your routine?', hint: 'Then choose a pace that feels comfortable.' },
-  3: { title: 'When a sound feels new, what helps you start?', hint: 'And how much guidance you’d like.' },
-} as const;
-
 type Step = keyof typeof QUESTIONS;
 const isStep = (n: number): n is Step => n === 1 || n === 2 || n === 3;
 
@@ -81,7 +76,7 @@ export default function Quiz() {
 
   useEffect(() => {
     if (!isStep(step)) return;
-    narration.say(`${QUESTIONS[step].title} ${QUESTIONS[step].hint}`);
+    narration.say(questionLine(step));
   }, [step, narration.say]);
 
   if (!isStep(step)) return <Navigate to="/quiz/1" replace />;

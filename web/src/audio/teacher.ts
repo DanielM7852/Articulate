@@ -2,6 +2,7 @@
 // with word and phoneme timestamps and a playback clock. Falls back to speechSynthesis.
 
 import { emit } from '../telemetry/client';
+import { bakedEntryReady, loadBakedManifest, type BakedEntry } from './bakedVoice';
 
 export interface TimedWord { text: string; start: number; end: number }
 export interface TimedPhoneme { p: string; start: number; end: number }
@@ -112,6 +113,7 @@ export function onTeacherFallback(fn: (reason: string) => void): () => void {
  * speakTeacher starts without a connect delay. Silently does nothing if the token endpoint fails.
  */
 export function prepareTeacher(): void {
+  void loadBakedManifest();
   try {
     if (typeof WebSocket === 'undefined') return;
     if (idle && (idle.ws.readyState === WebSocket.OPEN || idle.ws.readyState === WebSocket.CONNECTING)) {
@@ -273,7 +275,44 @@ class Impl implements TeacherSpeech {
   // ---- lifecycle
 
   begin(): void {
+    void this.runBakedOrLive();
+  }
+
+  /** Fixed scripted lines play from a prebaked file (no TTS credits); everything else, or any failure, goes live. */
+  private async runBakedOrLive(): Promise<void> {
+    let entry: BakedEntry | null = null;
+    try { entry = await bakedEntryReady(this.text, this.speed); } catch { entry = null; }
+    if (this.ended) return;
+    if (entry && (await this.runBaked(entry))) return;
+    if (this.ended) return;
     void this.runCartesia();
+  }
+
+  /** Returns true when the baked line is playing (or was cancelled); false means fall back to live. */
+  private async runBaked(entry: BakedEntry): Promise<boolean> {
+    try {
+      const ctx = getCtx(24000);
+      if (!ctx) return false;
+      void ctx.resume().catch(() => undefined);
+      const res = await fetch(entry.file);
+      if (!res.ok) return false;
+      const audio = await ctx.decodeAudioData(await res.arrayBuffer());
+      if (this.ended) return true;
+      const samples = audio.getChannelData(0);
+      if (!samples.length) return false;
+      this.ctx = ctx;
+      this.sampleRate = audio.sampleRate;
+      this.words.push(...entry.words.map((w) => ({ ...w })));
+      this.phonemes.push(...entry.phonemes.map((p) => ({ ...p })));
+      if (this.words.length || this.phonemes.length) {
+        this.emit('timeline', { words: this.words.map((w) => ({ ...w })), phonemes: this.phonemes.map((p) => ({ ...p })) });
+      }
+      this.scheduleSamples(new Float32Array(samples));
+      this.markStreamDone();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   cancel(): void {
@@ -469,9 +508,16 @@ class Impl implements TeacherSpeech {
     try { decoded = decodeF32(b64, this.carry); } catch { return; }
     this.carry = decoded.rest;
     if (decoded.samples.length === 0) return;
-    this.samplesTotal += decoded.samples.length;
-    const buffer = ctx.createBuffer(1, decoded.samples.length, this.sampleRate);
-    buffer.copyToChannel(decoded.samples as Float32Array<ArrayBuffer>, 0);
+    this.scheduleSamples(decoded.samples);
+  }
+
+  /** Queue samples after whatever is already scheduled; shared by streamed chunks and baked playback. */
+  private scheduleSamples(samples: Float32Array): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.samplesTotal += samples.length;
+    const buffer = ctx.createBuffer(1, samples.length, this.sampleRate);
+    buffer.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(ctx.destination);
