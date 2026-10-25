@@ -203,7 +203,7 @@ let informed = false;
 function inform(why: string) {
   if (informed) return;
   informed = true;
-  console.info(`[phones] scoring unavailable (${why}); using the formant verdicts`);
+  console.warn(`[phones] live phone model unavailable (scoring: ${why}); the board is using the basic formant view.`);
 }
 
 /** Score the clip against the targets. Null on any failure, timeout, abort or non-200. Never throws. */

@@ -53,7 +53,11 @@ def create_app(recognizer=None, settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="articulate-phones", lifespan=lifespan)
     app.add_middleware(
-        CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_methods=["*"], allow_headers=["*"]
+        CORSMiddleware,
+        allow_origins=list(settings.allowed_origins),
+        allow_origin_regex=settings.allowed_origin_regex,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     async def infer(wave: np.ndarray, offset_ms: float, with_frames: bool = False):
@@ -140,7 +144,8 @@ def create_app(recognizer=None, settings: Settings | None = None) -> FastAPI:
     @app.websocket("/ws/phones")
     async def ws_phones(ws: WebSocket):
         origin = ws.headers.get("origin")
-        if origin is not None and origin not in settings.allowed_origins:
+        if origin is not None and not settings.origin_allowed(origin):
+            log.warning("rejected /ws/phones from origin %s (set PHONES_ALLOWED_ORIGINS to allow it)", origin)
             await ws.close(code=1008)
             return
         await ws.accept()

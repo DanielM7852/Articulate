@@ -92,6 +92,20 @@ def test_ws_origin_rejected(client):
             ws.receive_json()
 
 
+@pytest.mark.parametrize("origin", ["http://127.0.0.1:5173", "http://localhost:5176", "http://127.0.0.1:4321", "http://localhost"])
+def test_ws_any_local_port_allowed(client, origin):
+    # The web app moves between dev ports (5173, 5176, ...); a local page must never be locked out of the phones.
+    with client.websocket_connect("/ws/phones", headers={"origin": origin}) as ws:
+        assert ws.receive_json()["type"] == "ready"
+
+
+@pytest.mark.parametrize("origin", ["http://127.0.0.1.evil.example", "http://localhost.evil.example:5173", "https://example.com"])
+def test_ws_lookalike_origin_rejected(client, origin):
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws/phones", headers={"origin": origin}) as ws:
+            ws.receive_json()
+
+
 def test_ws_frames(client):
     special = {"<pad>", "<s>", "</s>", "<unk>"}
     with client.websocket_connect("/ws/phones", headers={"origin": "http://127.0.0.1:5176"}) as ws:

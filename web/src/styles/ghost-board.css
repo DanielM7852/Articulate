@@ -217,3 +217,18 @@
   opacity: 0.45;
   pointer-events: none;
 }
+
+/* Quiet note under the status chip when the live phone model is unavailable. */
+.gb-offline {
+  position: absolute;
+  top: 44px;
+  right: 10px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-navy);
+  opacity: 0.8;
+  pointer-events: none;
+}

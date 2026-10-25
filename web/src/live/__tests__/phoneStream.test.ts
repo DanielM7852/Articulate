@@ -1,5 +1,5 @@
 import { expect, test } from '../../game/__tests__/harness';
-import { CHUNK_SAMPLES, EMPTY_PHONES, PcmChunker, floatToInt16, mergePhones } from '../phoneStream';
+import { CHUNK_SAMPLES, EMPTY_PHONES, PcmChunker, classifyClose, connectPhoneStream, floatToInt16, mergePhones, type StreamInfo, type StreamState } from '../phoneStream';
 
 const ph = (p: string, startMs: number) => ({ p, startMs, endMs: startMs + 60, conf: 0.9 });
 
@@ -78,4 +78,80 @@ test('PcmChunker passes through at 16k', () => {
   const out = c.push(new Float32Array(201).fill(0.25));
   expect(out.length).toBe(2);
   expect(out[0][0]).toBe(Math.round(0.25 * 32767));
+});
+
+test('classifyClose maps close codes to reasons', () => {
+  expect(classifyClose(1008, false)).toBe('origin-rejected');
+  expect(classifyClose(1006, false)).toBe('unreachable');
+  expect(classifyClose(1000, false)).toBe('unreachable');
+  expect(classifyClose(1000, true)).toBe('closed');
+  expect(classifyClose(1008, true)).toBe('closed');
+});
+
+class FakeWS {
+  static last: FakeWS | null = null;
+  static OPEN = 1;
+  binaryType = '';
+  readyState = 0;
+  bufferedAmount = 0;
+  onmessage: ((e: { data: unknown }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: ((e: { code: number }) => void) | null = null;
+  constructor(public url: string) {
+    FakeWS.last = this;
+  }
+  send() {}
+  close() {}
+}
+
+function run(url: string, script: (ws: FakeWS) => void) {
+  const g = globalThis as unknown as Record<string, unknown>;
+  const prevWS = g.WebSocket;
+  const prevWarn = console.warn;
+  const warns: string[] = [];
+  const states: { s: StreamState; info?: StreamInfo }[] = [];
+  g.WebSocket = FakeWS;
+  console.warn = (m: unknown) => void warns.push(String(m));
+  const h = connectPhoneStream({ getAudioTracks: () => [] } as unknown as MediaStream, {
+    url,
+    onState: (s, info) => states.push({ s, info }),
+    onPhones: () => undefined,
+  });
+  try {
+    script(FakeWS.last!);
+  } finally {
+    h.close();
+    g.WebSocket = prevWS;
+    console.warn = prevWarn;
+  }
+  return { warns, reasons: states.filter((x) => x.info?.reason).map((x) => x.info!.reason) };
+}
+
+test('close 1008 before ready reports origin-rejected and warns once per url+reason', () => {
+  const a = run('ws://t1/ws', (ws) => ws.onclose!({ code: 1008 }));
+  expect(a.reasons.join()).toBe('origin-rejected');
+  expect(a.warns.length).toBe(1);
+  expect(a.warns[0].includes('(origin-rejected) at ws://t1/ws')).toBe(true);
+  expect(a.warns[0].includes('PHONES_ALLOWED_ORIGINS')).toBe(true);
+  expect(a.warns[0].includes('basic formant view')).toBe(true);
+  const b = run('ws://t1/ws', (ws) => ws.onclose!({ code: 1008 }));
+  expect(b.reasons.join()).toBe('origin-rejected');
+  expect(b.warns.length).toBe(0);
+  const c = run('ws://t1/ws', (ws) => ws.onclose!({ code: 1006 }));
+  expect(c.reasons.join()).toBe('unreachable');
+  expect(c.warns.length).toBe(1);
+});
+
+test('error then close before ready is unreachable; close after ready is closed', () => {
+  const a = run('ws://t2/ws', (ws) => {
+    ws.onerror!();
+    ws.onclose!({ code: 1006 });
+  });
+  expect(a.reasons.join()).toBe('unreachable');
+  const b = run('ws://t3/ws', (ws) => {
+    ws.onmessage!({ data: JSON.stringify({ type: 'ready' }) });
+    ws.onclose!({ code: 1006 });
+  });
+  expect(b.reasons.join()).toBe('closed');
+  expect(b.warns.length).toBe(1);
 });

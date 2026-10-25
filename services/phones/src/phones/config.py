@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,7 +27,19 @@ class Settings:
     commit_lag_ms: float = field(default_factory=lambda: _f("PHONES_COMMIT_LAG_MS", 300))
     # Window RMS below this (full scale = 1.0) skips inference.
     silence_rms: float = field(default_factory=lambda: _f("PHONES_SILENCE_RMS", 0.004))
-    allowed_origins: tuple[str, ...] = ("http://127.0.0.1:5176", "http://localhost:5176")
+    # Browser pages served from this machine on any port (the web app moves between dev ports) are always allowed;
+    # PHONES_ALLOWED_ORIGINS (comma-separated) adds other exact origins, e.g. a LAN demo host.
+    allowed_origin_regex: str = field(
+        default_factory=lambda: os.environ.get(
+            "PHONES_ALLOWED_ORIGIN_REGEX", r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$"
+        )
+    )
+    allowed_origins: tuple[str, ...] = field(
+        default_factory=lambda: tuple(o.strip() for o in os.environ.get("PHONES_ALLOWED_ORIGINS", "").split(",") if o.strip())
+    )
+
+    def origin_allowed(self, origin: str) -> bool:
+        return origin in self.allowed_origins or re.fullmatch(self.allowed_origin_regex, origin) is not None
     max_clip_s: float = field(default_factory=lambda: _f("PHONES_MAX_CLIP_S", 30))
 
     @property

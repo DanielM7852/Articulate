@@ -74,3 +74,10 @@ def test_cors_preflight(client):
                                                     "Access-Control-Request-Method": "POST",
                                                     "Access-Control-Request-Headers": "content-type"})
     assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "http://127.0.0.1:5176"
+
+
+@pytest.mark.parametrize("origin,ok", [("http://127.0.0.1:5173", True), ("http://localhost:9999", True), ("http://evil.example", False)])
+def test_cors_preflight_any_local_port(client, origin, ok):
+    r = client.options("/v1/phones/score", headers={"Origin": origin, "Access-Control-Request-Method": "POST",
+                                                    "Access-Control-Request-Headers": "content-type"})
+    assert (r.status_code == 200 and r.headers.get("access-control-allow-origin") == origin) is ok
