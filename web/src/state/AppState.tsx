@@ -79,6 +79,8 @@ function load(): AppState {
       ...defaultState,
       ...parsed,
       ...SESSION_DEFAULTS,
+      // Older builds could store audio on with narration stuck off (no control turned it back on): narration follows audio.
+      narration: parsed.audio ?? defaultState.audio,
       plan: { ...defaultState.plan, ...parsed.plan },
     };
   } catch {
@@ -108,7 +110,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       completeOnboarding: () => patch({ onboarded: true }),
       reset: () => setState(defaultState),
       setCaptions: (on) => patch({ captions: on }),
-      setAudio: (on) => setState((s) => ({ ...s, audio: on, narration: on ? s.narration : false })),
+      // The header speaker toggle is the only audio control, so narration follows it both ways.
+      setAudio: (on) => setState((s) => ({ ...s, audio: on, narration: on })),
       setNarration: (on) => setState((s) => ({ ...s, narration: on, audio: on ? true : s.audio })),
       setCamera: (on) => patch({ camera: on }),
       updatePreferences: (p) => setState((s) => ({ ...s, preferences: { ...s.preferences, ...p } })),

@@ -267,6 +267,46 @@ def test_fallback_always_passes_the_validator(kw):
     assert decision.focusZoneId == s.weakestZoneId
 
 
+@pytest.mark.parametrize(
+    "practice,name",
+    [
+        (None, "track"),
+        (["t", "r", "a", "k"], "track"),
+        (["t", "r"], "the tr in track"),
+        (["k"], "the ck in track"),
+    ],
+)
+@pytest.mark.parametrize(
+    "reason,template",
+    [
+        (None, "I couldn't catch {n} that time. Say it once more, clear and steady."),
+        ("clipped", "That was a bit loud for me. Say {n} once more, a little softer."),
+        ("too-short", "That went by quickly. Say {n} once more, at an easy pace."),
+    ],
+)
+def test_insufficient_fallback_names_the_practised_part(practice, name, reason, template):
+    a = attempt(quality="unclear", reason=reason)
+    s = score_word(a, practice)
+    _, caption, focus = word_fallback_line(a, s, practice)
+    assert focus is None
+    assert caption == template.format(n=name)
+    candidates = word_evidence_candidates(a, s)
+    decision, evidence = word_fallback_decision(a, s, candidates, practice)
+    assert validate_word_decision(decision, a, s, candidates, practice) == evidence
+
+
+def test_part_label_caption_allowed_only_for_a_strict_practice_part():
+    a = attempt()
+    caption = "Nice. Say the tr once more, tongue tip up then back."
+    d = word_decision(focusZoneId=None, caption=caption, evidenceFields=["word.verdict"], nextAction="next_sound")
+    s = score_word(a, ["t", "r"])
+    cands = word_evidence_candidates(a, s)
+    assert validate_word_decision(d, a, s, cands, ["t", "r"])
+    s_all = score_word(a)
+    with pytest.raises(DecisionError, match="caption_misses_word"):
+        validate_word_decision(d, a, s_all, word_evidence_candidates(a, s_all), None)
+
+
 def test_fallback_without_camera_avoids_jaw():
     a = attempt(verdicts={"a": "miss"})
     _, caption, _ = word_fallback_line(a, score_word(a))

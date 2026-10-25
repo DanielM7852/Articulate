@@ -1,5 +1,5 @@
 import type { WordAttemptResult, ZoneResult } from '../game/types';
-import { requestLiveCoach, type LiveCoachRequest, type LiveCoachResponse, type WordScore } from './liveCoach';
+import type { LiveCoachRequest, LiveCoachResponse, WordScore } from './liveCoach';
 import { livePost } from './transport';
 
 /**
@@ -103,6 +103,14 @@ export interface FallbackSpec {
   zones: { id: string; label: string }[];
 }
 
+/** What the learner is asked to say: the practised part ("the tr in track") or the whole word. */
+function spokenName(spec: FallbackSpec, word: string, practice?: string[] | null): string {
+  if (!practice || practice.length === 0) return word;
+  const part = spec.zones.filter((z) => practice.includes(z.id));
+  if (part.length === 0 || part.length >= spec.zones.length) return word;
+  return `the ${part.map((z) => z.label).join('')} in ${word}`;
+}
+
 /** The caption the backend's deterministic fallback would produce, and the zone it coaches. */
 export function wordFallbackLine(
   spec: FallbackSpec,
@@ -112,12 +120,13 @@ export function wordFallbackLine(
   const word = result.word;
   const score = scoreWord(result, practice);
   if (score.verdict === 'insufficient') {
+    const name = spokenName(spec, word, practice);
     const caption =
       result.qualityReason === 'clipped'
-        ? `That was a bit loud for me. Say ${word} once more, a little softer.`
+        ? `That was a bit loud for me. Say ${name} once more, a little softer.`
         : result.qualityReason === 'too-short'
-          ? `That went by quickly. Say ${word} once more, at an easy pace.`
-          : `I couldn't catch ${word} that time. Say it once more, clear and steady.`;
+          ? `That went by quickly. Say ${name} once more, at an easy pace.`
+          : `I couldn't catch ${name} that time. Say it once more, clear and steady.`;
     return { caption, focusZoneId: null };
   }
   const id = score.weakestZoneId;
@@ -167,7 +176,8 @@ export function requestWordCoach({ result, profileId, practiceZoneIds, audio }: 
     ...(practiceZoneIds ? { practiceZoneIds } : {}),
     ...(audio ? { attemptAudio: audio } : {}),
   };
-  return requestLiveCoach(request, signal);
+  // Loaded on demand: liveCoach pulls in telemetry (import.meta.env), which the pure helpers here must not need in tests.
+  return import('./liveCoach').then((m) => m.requestLiveCoach(request, signal));
 }
 
 export interface WordAskInput {

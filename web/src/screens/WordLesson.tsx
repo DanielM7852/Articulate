@@ -17,7 +17,7 @@ import { useLipTracking, type LipTrackingStatus } from '../vision/useLipTracking
 import { CUE_MIN_MS, useCoachSequence, type SequenceLine } from '../live/useCoachSequence';
 import type { CueId } from '../live/liveCoach';
 import { usePhoneCursor } from '../live/usePhoneCursor';
-import { ASSUMED_END_LAG_MS, applyPhoneJudgement, clipOffsetMs, isPhoneJudged, scorePhones, unitPhoneZones } from '../live/phoneJudge';
+import { ASSUMED_END_LAG_MS, RESCUE_MIN_CLIP_MS, applyPhoneJudgement, canPhoneRescue, clipOffsetMs, isPhoneJudged, scorePhones, unitPhoneZones } from '../live/phoneJudge';
 import { isScored, requestWordAsk, requestWordCoach, scoreWord, wordFallbackLine } from '../live/wordCoach';
 import { isClose, unitDurationMs } from '../game/ghost/follow';
 import { ghostModel } from '../game/ghost/models';
@@ -36,7 +36,7 @@ import '../styles/word-lesson.css';
  * Word lesson (ghost paths): the learner picks one of four words, does a short voice check once, and Ava coaches
  * the word one part at a time. The ghost board is the live visual; Ava, the 3D model and cues are the advice.
  *
- *   plan  = lessonPlan(word): each part, then the chain back to the whole word, then the whole word twice
+ *   plan  = lessonPlan(word): each part on its own, then the whole word twice
  *   step  = intro line -> board watches the ghost -> (if practisable) live attempt -> coach -> progression
  *
  * Phases:
@@ -106,7 +106,6 @@ function introLine(spec: GhostWordSpec, step: LessonStep): { text: string; side:
     const cueId = zoneIds.length === 1 ? (ZONE_CUE[zoneIds[0]] ?? null) : null;
     return { text: `Let's work on the ${label} in ${spec.word}. Watch the path.`, side: true, cueId };
   }
-  if (step.kind === 'chain') return { text: `Now join them: ${label}.`, side: false, cueId: null };
   return {
     text: step.speedWatch < 1 ? `Now the whole word, slowly: ${spec.word}.` : `And at normal speed: ${spec.word}.`,
     side: false,
@@ -994,10 +993,11 @@ export default function WordLesson() {
     try {
       const { spec: word, plan } = cur.current;
       const step = plan[shownStep.current];
-      if (!step || result.word !== word.word || result.quality !== 'usable') return result;
+      if (!step || result.word !== word.word || (result.quality !== 'usable' && !canPhoneRescue(result))) return result;
       const zones = unitPhoneZones(word.word, step.unit);
       if (zones.length === 0) return result;
-      const clip = attemptTap.current?.clip(judgedAt.current.at, Math.min(MAX_CLIP_MS, result.durationMs + CLIP_TAIL_MS + CLIP_PREROLL_MS)) ?? null;
+      const want = result.durationMs + CLIP_TAIL_MS + CLIP_PREROLL_MS;
+      const clip = attemptTap.current?.clip(judgedAt.current.at, Math.min(MAX_CLIP_MS, canPhoneRescue(result) ? Math.max(want, RESCUE_MIN_CLIP_MS) : want)) ?? null;
       if (!clip) return result;
       const resp = await scorePhones(clip, zones.map((z) => z.phone));
       if (!resp) return result;
@@ -1378,7 +1378,7 @@ export default function WordLesson() {
         <StepHeading
           title={
             <>
-              Say <span className="navy">“{spec.word}”</span>
+              Say <span className="navy">“{step.kind === 'part' ? step.unit.label : spec.word}”</span>
             </>
           }
         />

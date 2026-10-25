@@ -286,8 +286,10 @@ def validate_word_decision(
         info = zone_info(word, focus)
         if not (mentions_word or (info is not None and _mentions_label(caption, info.label))):
             raise DecisionError("caption_misses_focus")
-    elif not mentions_word:
-        raise DecisionError("caption_misses_word")
+    else:
+        part = _practice_label(word, practice)
+        if not (mentions_word or (part is not None and _mentions_label(caption, part))):
+            raise DecisionError("caption_misses_word")
     return [EvidenceItem(field=f, value=candidates[f]) for f in fields]
 
 
@@ -297,18 +299,32 @@ def word_show_side_view(focus_zone_id: str | None, next_action: str) -> bool:
 
 
 _INSUFFICIENT = {
-    "clipped": ("The capture was too loud to read clearly.", "That was a bit loud for me. Say {word} once more, a little softer."),
-    "too-short": ("The capture was too short to read every part.", "That went by quickly. Say {word} once more, at an easy pace."),
+    "clipped": ("The capture was too loud to read clearly.", "That was a bit loud for me. Say {name} once more, a little softer."),
+    "too-short": ("The capture was too short to read every part.", "That went by quickly. Say {name} once more, at an easy pace."),
 }
 _INSUFFICIENT_DEFAULT = (
     "The capture did not have enough clear voice to read.",
-    "I couldn't catch {word} that time. Say it once more, clear and steady.",
+    "I couldn't catch {name} that time. Say it once more, clear and steady.",
 )
 
 
 def _first_sentence(text: str) -> str:
     parts = [x for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x.strip()]
     return parts[0] if parts else text.strip()
+
+
+def _practice_label(word: WordAttempt, practice: list[str] | None) -> str | None:
+    """Joined label of the practised zones (word zone order) when they are a strict part of the word, else None."""
+    scope = practice_scope(word, practice)
+    if practice is None or not scope or len(scope) == len(word.zones):
+        return None
+    return "".join(info.label for zid in scope if (info := zone_info(word, zid)) is not None) or None
+
+
+def _practice_name(word: WordAttempt, practice: list[str] | None) -> str:
+    """The word, or "the <part> in <word>" when the learner is practising only some of its zones."""
+    labels = _practice_label(word, practice)
+    return word.word if labels is None else f"the {labels} in {word.word}"
 
 
 def word_fallback_line(
@@ -321,7 +337,7 @@ def word_fallback_line(
     name = word.word
     if score.verdict == "insufficient":
         obs, cap = _INSUFFICIENT.get(word.qualityReason or "", _INSUFFICIENT_DEFAULT)
-        return obs, cap.format(word=name), None
+        return obs, cap.format(name=_practice_name(word, practice)), None
     if score.weakestZoneId is None:
         if practice is not None:
             return (

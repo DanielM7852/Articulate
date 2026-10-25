@@ -1,6 +1,6 @@
 import { expect, test } from '../../game/__tests__/harness';
 import { phonePlace } from '../../game/ghost/phoneMap';
-import { CENTROID_MIN_MASS, easePlace, frameCentroid, latestPhonePlace, newestCentroid } from '../phoneCentroid';
+import { CENTROID_MIN_MASS, easePlace, frameCentroid, latestPhonePlace, newestCentroid, pathCentroid } from '../phoneCentroid';
 import { parseFrames, type Phone, type PhoneFrame } from '../phoneStream';
 
 const fr = (mass: number, ...top: [string, number][]): PhoneFrame => ({ t: 0, mass, top });
@@ -40,6 +40,38 @@ test('centroid: symbols are folded (aspiration, r, nasalised)', () => {
   expect(a.x).toBeCloseTo((P('k').x + P('ɹ').x) / 2, 1e-9);
   const b = frameCentroid(fr(0.9, ['æ̃', 0.6]))!;
   expect(b.y).toBeCloseTo(P('æ').y, 1e-9);
+});
+
+const TRACK = ['t', 'ɹ', 'æ', 'k'];
+const lerp = (a: string, b: string, f: number) => ({ x: P(a).x + (P(b).x - P(a).x) * f, y: P(a).y + (P(b).y - P(a).y) * f });
+
+test('pathCentroid: non-adjacent targets stay on the dominant target', () => {
+  const c = pathCentroid(fr(0.9, ['t', 0.5], ['æ', 0.4]), TRACK)!;
+  expect(c.x).toBeCloseTo(P('t').x, 1e-9);
+  expect(c.y).toBeCloseTo(P('t').y, 1e-9);
+});
+
+test('pathCentroid: adjacent targets slide along the segment', () => {
+  const m = pathCentroid(fr(0.9, ['t', 0.5], ['ɹ', 0.5]), TRACK)!;
+  expect(m.x).toBeCloseTo(lerp('t', 'ɹ', 0.5).x, 1e-9);
+  expect(m.y).toBeCloseTo(lerp('t', 'ɹ', 0.5).y, 1e-9);
+  const c = pathCentroid(fr(0.9, ['ɹ', 0.3], ['æ', 0.6]), TRACK)!;
+  expect(c.x).toBeCloseTo(lerp('ɹ', 'æ', 2 / 3).x, 1e-9);
+  expect(c.y).toBeCloseTo(lerp('ɹ', 'æ', 2 / 3).y, 1e-9);
+});
+
+test('pathCentroid: off-target dominance, gates, empty targets, folding', () => {
+  const f = fr(0.9, ['w', 0.7], ['ɹ', 0.2]);
+  const c = pathCentroid(f, TRACK)!;
+  const free = frameCentroid(f)!;
+  expect(c.x).toBeCloseTo(free.x, 1e-9);
+  expect(c.y).toBeCloseTo(free.y, 1e-9);
+  expect(pathCentroid(fr(0.3, ['t', 0.9]), TRACK)).toBe(null);
+  const e = pathCentroid(fr(0.9, ['t', 0.4], ['k', 0.4]), [])!;
+  expect(e.x).toBeCloseTo(frameCentroid(fr(0.9, ['t', 0.4], ['k', 0.4]))!.x, 1e-9);
+  const k = pathCentroid(fr(0.9, ['kʰ', 0.8]), TRACK)!;
+  expect(k.x).toBeCloseTo(P('k').x, 1e-9);
+  expect(k.y).toBeCloseTo(P('k').y, 1e-9);
 });
 
 test('centroid: newest usable frame wins; blanks are skipped', () => {

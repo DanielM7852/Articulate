@@ -30,6 +30,15 @@ const DEFAULT_TIMEOUT_MS = 1500;
 /** The board reports an attempt 600 ms after its last voiced frame (WordLesson's CLIP_TAIL_MS), and the clip ends at that report. */
 export const ASSUMED_END_LAG_MS = 600;
 
+/** Formant-tracker failures the phone scorer may overrule (it hears speech the tracker missed). Never clipped or silence. */
+export const PHONE_RESCUE_REASONS: readonly string[] = ['no-voice', 'too-short'];
+/** A rescuable try's clip is at least this long, so a late formant onset does not cut off the word. */
+export const RESCUE_MIN_CLIP_MS = 1500;
+
+export function canPhoneRescue(result: WordAttemptResult): boolean {
+  return result.quality === 'unclear' && result.qualityReason !== undefined && PHONE_RESCUE_REASONS.includes(result.qualityReason);
+}
+
 export interface PhoneTarget {
   p: string;
   startMs: number;
@@ -132,9 +141,15 @@ export function applyPhoneJudgement(
   response: PhoneScoreResponse,
   offsetMs: number,
 ): WordAttemptResult {
-  if (result.quality !== 'usable') return result;
+  const rescue = canPhoneRescue(result);
+  if (result.quality !== 'usable' && !rescue) return result;
   const zones = unitPhoneZones(result.word, unit);
   if (zones.length === 0 || response.targets.length !== zones.length) return result;
+  if (rescue) {
+    // The formant tracker lost the voice; trust the phone scorer only when it clearly heard at least half the unit.
+    const heard = response.targets.filter((t) => t.post >= PHONE_PARTIAL_POST).length;
+    if (heard < Math.ceil(response.targets.length / 2)) return result;
+  }
   const byZone = new Map(zones.map((z, i) => [z.zoneId, response.targets[i]]));
   const out: ZoneResult[] = result.zones.map((z) => {
     const t = byZone.get(z.zoneId);
@@ -155,6 +170,12 @@ export function applyPhoneJudgement(
     }
     return { ...z, verdict: verdictFromScore(t.post, t.gop, z.kind), startMs, endMs, dwellMs: Math.max(0, endMs - startMs), evidence };
   });
+  if (rescue) {
+    // The tracker's duration is too short here; the aligned phones span the word, so the coach clip covers all of it.
+    const span = Math.max(...response.targets.map((t) => t.endMs)) - Math.min(...response.targets.map((t) => t.startMs));
+    const { qualityReason: _dropped, ...rest } = result;
+    return { ...rest, quality: 'usable', durationMs: Math.max(result.durationMs, Math.round(span)), zones: out };
+  }
   return { ...result, zones: out };
 }
 

@@ -4,7 +4,10 @@ import type { GhostUnit } from '../../game/ghost/types';
 import {
   PHONE_HIT_POST,
   PHONE_PARTIAL_POST,
+  PHONE_RESCUE_REASONS,
+  RESCUE_MIN_CLIP_MS,
   applyPhoneJudgement,
+  canPhoneRescue,
   clipOffsetMs,
   parsePhoneResponse,
   scorePhones,
@@ -93,6 +96,57 @@ test('only the unit zones change and advisory/kind are kept', () => {
 test('unclear results are returned unchanged', () => {
   const r = result({ quality: 'unclear', qualityReason: 'silence' });
   expect(applyPhoneJudgement(r, unit('a', ['a']), resp([tgt('æ', 0.9)]), 0) === r).toBe(true);
+});
+
+const skippedZone = (id: string, ph: string, kind: ZoneResult['kind']): ZoneResult =>
+  zone(id, ph, kind, { verdict: 'skipped', startMs: null, endMs: null, evidence: {} });
+const unclearTrack = (reason: WordAttemptResult['qualityReason']): WordAttemptResult =>
+  result({
+    quality: 'unclear',
+    qualityReason: reason,
+    durationMs: 0,
+    zones: [skippedZone('t', 't', 'stop'), skippedZone('r', 'r', 'liquid'), skippedZone('a', 'ae', 'vowel'), skippedZone('k', 'k', 'stop')],
+  });
+const full = unit('track', ['t', 'r', 'a', 'k']);
+
+test('canPhoneRescue only for unclear no-voice / too-short', () => {
+  expect(canPhoneRescue(unclearTrack('no-voice'))).toBe(true);
+  expect(canPhoneRescue(unclearTrack('too-short'))).toBe(true);
+  expect(canPhoneRescue(unclearTrack('clipped'))).toBe(false);
+  expect(canPhoneRescue(unclearTrack('silence'))).toBe(false);
+  expect(canPhoneRescue(unclearTrack(undefined))).toBe(false);
+  expect(canPhoneRescue(result({ quality: 'usable' }))).toBe(false);
+  expect(PHONE_RESCUE_REASONS.join()).toBe('no-voice,too-short');
+  expect(RESCUE_MIN_CLIP_MS).toBe(1500);
+});
+
+test('rescue: 2 of 4 targets heard makes the try usable with phone verdicts', () => {
+  const r0 = unclearTrack('no-voice');
+  const r = applyPhoneJudgement(r0, full, resp([tgt('t', 0.9, 200, 260), tgt('ɹ', 0.05, 300, 380, -5), tgt('æ', 0.8), tgt('k', 0.02, 560, 640, -5)]), 0);
+  expect(r === r0).toBe(false);
+  expect(r.quality).toBe('usable');
+  expect(r.durationMs).toBe(440); // the aligned span (200..640 ms), so the coach clip covers the whole word
+  expect('qualityReason' in r).toBe(false);
+  expect(verdictOf(r, 't')).toBe('hit');
+  expect(verdictOf(r, 'r')).toBe('miss');
+  expect(verdictOf(r, 'a')).toBe('hit');
+  expect(verdictOf(r, 'k')).toBe('miss');
+  expect(r.zones.find((z) => z.zoneId === 't')!.evidence.judgedByPhones).toBe(1);
+  expect(r0.quality).toBe('unclear');
+});
+
+test('rescue: 1 of 4 heard leaves the try unchanged', () => {
+  const r0 = unclearTrack('too-short');
+  const r = applyPhoneJudgement(r0, full, resp([tgt('t', 0.9), tgt('ɹ', 0.05), tgt('æ', 0.0), tgt('k', 0.02)]), 0);
+  expect(r === r0).toBe(true);
+});
+
+test('rescue: clipped and silence are never rescued', () => {
+  const good = resp([tgt('t', 0.9), tgt('ɹ', 0.9), tgt('æ', 0.9), tgt('k', 0.9)]);
+  for (const reason of ['clipped', 'silence'] as const) {
+    const r0 = unclearTrack(reason);
+    expect(applyPhoneJudgement(r0, full, good, 0) === r0).toBe(true);
+  }
 });
 
 test('evidence is merged, finite and within 24 keys', () => {

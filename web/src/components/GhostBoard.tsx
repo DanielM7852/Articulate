@@ -10,8 +10,8 @@ import { SOUND_ORDER, type SoundId } from '../state/types';
 import { AXES, project, type VowelTarget } from '../vowel/targets';
 import { GhostInk } from '../game/ghost/ghostInk';
 import { phoneCursorState } from '../live/phoneCursor';
-import { ZONE_PHONES, isPhoneJudged, unitPhoneZones } from '../live/phoneJudge';
-import { easePlace, frameCentroid, latestPhonePlace } from '../live/phoneCentroid';
+import { ZONE_PHONES, canPhoneRescue, isPhoneJudged, unitPhoneZones } from '../live/phoneJudge';
+import { easePlace, latestPhonePlace, pathCentroid } from '../live/phoneCentroid';
 import { OFF_PATH_MAP_DIST, distanceToPolylines, formantsToMap, mapSymbols, mapToFormants, phoneMapModel, phonePlace, type PhonePlace } from '../game/ghost/phoneMap';
 import type { PhoneCursorInput } from '../live/usePhoneCursor';
 import '../styles/word-board.css';
@@ -249,7 +249,7 @@ export function GhostBoard({
     if (!raw || reportedRef.current === attempt.attemptId || judgingRef.current === attempt.attemptId) return;
     const id = attempt.attemptId;
     const judgeFn = props.current.judge;
-    if (judgeFn && raw.quality === 'usable') {
+    if (judgeFn && (raw.quality === 'usable' || canPhoneRescue(raw))) {
       judgingRef.current = id;
       setScoring(true);
       publish({ done: snap.done, stops: snap.stops, verdicts: {}, judged: false, passed: [] });
@@ -397,7 +397,8 @@ export function GhostBoard({
 
       // Learner cursor and ink: only while live.
       s.loud = smooth ? smoothToward(s.loud, s.loudTarget, dt, LOUDNESS_TAU_MS) : s.loudTarget;
-      // Phone-map cursor: eases (exponential) toward the centroid of the phones the model hears and holds through silence.
+      // Phone-map cursor: eases (exponential) toward where the model's heard phones sit (on the path while it hears the
+      // unit's targets, see pathCentroid) and holds through silence.
       const ph = phoneRef.current;
       const phoneOn = md === 'live' && ph.st !== null && ph.cfg !== null;
       const rt = phoneRt.current;
@@ -418,7 +419,7 @@ export function GhostBoard({
         for (const f of ph.frames) {
           if (f.n <= rt.lastN) continue;
           rt.lastN = f.n;
-          const c = frameCentroid(f);
+          const c = pathCentroid(f, ph.cfg.targets);
           if (c) {
             rt.target = c;
             rt.heard = true;
