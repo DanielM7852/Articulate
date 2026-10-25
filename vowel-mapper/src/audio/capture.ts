@@ -44,7 +44,7 @@ export async function createMicrophoneSession(options: CaptureOptions): Promise<
   const { stream, signal } = options;
   const settings = options.settings ?? DEFAULT_SETTINGS;
   const engine = stream && sharedEngines.get(stream);
-  if (!stream || (engine && (engine.settings.ceilingHz !== settings.ceilingHz || engine.settings.minimumRms !== settings.minimumRms))) {
+  if (!stream || (engine && (engine.settings.ceilingHz !== settings.ceilingHz || engine.settings.minimumRms !== settings.minimumRms || !!engine.settings.harmonicEnvelope !== !!settings.harmonicEnvelope))) {
     return openEngine(options);
   }
   if (signal?.aborted) throw cancelled();

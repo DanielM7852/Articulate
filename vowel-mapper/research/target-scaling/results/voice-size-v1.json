@@ -1,0 +1,17 @@
+{
+ "id": "h95-tracker-voice-size",
+ "version": 1,
+ "status": "exploratory (Amendment 3)",
+ "uh": [
+  6.561426243346474,
+  7.239695627833524
+ ],
+ "groupFactor": {
+  "men": -0.1379266730207164,
+  "women": 0.03970458364393211,
+  "boys": 0.0765498555375986,
+  "girls": 0.11791901544884045
+ },
+ "method": "factor = mean(factor from one held 'uh', group mean factor)",
+ "matchesReferenceV1": true
+}

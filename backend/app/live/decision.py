@@ -7,6 +7,7 @@ Everything it says is checked here, and any failure means the deterministic fall
 import re
 from typing import Any
 
+from app.live.scoring import practice_scope
 from app.live.schemas import AudioScore, ClientSummary, CoachDecision, EvidenceItem, VideoScore, WordAttempt, WordScore
 from app.live.targets import SOUND_CUE, SOUND_SPELLING
 from app.live.words import ZONE_CUE, ZoneInfo, word_info
@@ -183,6 +184,8 @@ _PRAISE = re.compile(
 )
 # Deaf and hard-of-hearing learners: instructions are about the body and the board, never about listening.
 _LISTEN = re.compile(r"\b(listen\w*|hear\w*|sounds? like)\b", re.IGNORECASE)
+# Advisory parts (liquid, fricative, nasal) are never judged, so a line about one may not praise or grade it.
+_JUDGE = re.compile(r"\b(right|correct|nailed|hit|missed?|landed|reached|got it|spot on)\b", re.IGNORECASE)
 _QUOTES_OPEN = "\"'“‘"
 _QUOTES_CLOSE = "\"'”’"
 
@@ -234,9 +237,13 @@ def validate_word_decision(
     word: WordAttempt,
     score: WordScore,
     candidates: dict[str, float | str],
+    practice: list[str] | None = None,
 ) -> list[EvidenceItem]:
-    """Every vowel-mode rule that applies to words, plus the word rules. Raises DecisionError on any violation."""
-    zone_ids = {z.zoneId for z in word.zones}
+    """Every vowel-mode rule that applies to words, plus the word rules. Raises DecisionError on any violation.
+
+    `practice` (practiceZoneIds): the focus zone must come from that list.
+    """
+    zone_ids = set(practice_scope(word, practice))
     focus = decision.focusZoneId
     if focus is not None and focus not in zone_ids:
         raise DecisionError("focus_zone_unknown")
@@ -268,6 +275,9 @@ def validate_word_decision(
         raise DecisionError("tongue_claim")
     if _LISTEN.search(text):
         raise DecisionError("listening_language")
+    focus_zone = next((z for z in word.zones if z.zoneId == focus), None)
+    if focus_zone is not None and focus_zone.is_advisory and (_JUDGE.search(text) or _PRAISE.search(text)):
+        raise DecisionError("judged_advisory_zone")
     sentences = [x for x in re.split(r"(?<=[.!?])\s+", caption) if x.strip()]
     if sum(1 for x in sentences if _PRAISE.search(x)) > WORD_PRAISE_MAX_SENTENCES:
         raise DecisionError("too_much_praise")
@@ -301,7 +311,9 @@ def _first_sentence(text: str) -> str:
     return parts[0] if parts else text.strip()
 
 
-def word_fallback_line(word: WordAttempt, score: WordScore) -> tuple[str, str, str | None]:
+def word_fallback_line(
+    word: WordAttempt, score: WordScore, practice: list[str] | None = None
+) -> tuple[str, str, str | None]:
     """(observation, caption, focusZoneId) built only from the verdicts and the zone hints.
 
     web/src/live/wordCoach.ts builds the same caption when the backend cannot be reached; keep them in sync.
@@ -311,6 +323,12 @@ def word_fallback_line(word: WordAttempt, score: WordScore) -> tuple[str, str, s
         obs, cap = _INSUFFICIENT.get(word.qualityReason or "", _INSUFFICIENT_DEFAULT)
         return obs, cap.format(word=name), None
     if score.weakestZoneId is None:
+        if practice is not None:
+            return (
+                f"The board marked the practised part of {name} as hit.",
+                f"That part of {name} landed. Nice work.",
+                None,
+            )
         return f"The board marked every part of {name} as hit.", f"Every part of {name} landed. Nice work.", None
     zone_id = score.weakestZoneId
     zone = next(z for z in word.zones if z.zoneId == zone_id)
@@ -318,6 +336,13 @@ def word_fallback_line(word: WordAttempt, score: WordScore) -> tuple[str, str, s
     assert info is not None
     where = f" {info.position}" if info.position else ""
     hint = _first_sentence(info.hint if word.lipUsable else info.hint_no_camera)
+    if zone.is_advisory:
+        # Cue-only part: taught from the hint and the side view, never graded.
+        return (
+            f"The {info.label}{where} is a part the board does not judge.",
+            f"Let's work on the {info.label}{where}. {hint}",
+            zone_id,
+        )
     if zone.verdict == "partial":
         observation = f"The board marked the {info.label}{where} as partly there."
         lead = f"The {info.label}{where} was faint." if zone.kind == "stop" else f"The {info.label}{where} was nearly there."
@@ -335,8 +360,9 @@ def word_fallback_decision(
     word: WordAttempt,
     score: WordScore,
     candidates: dict[str, float | str],
+    practice: list[str] | None = None,
 ) -> tuple[CoachDecision, list[EvidenceItem]]:
-    observation, caption, focus = word_fallback_line(word, score)
+    observation, caption, focus = word_fallback_line(word, score, practice)
     action = "next_sound" if score.verdict == "on_target" else "retry"
     cue = ZONE_CUE.get(focus) if focus is not None and action == "retry" else None
     wanted = ["word.verdict"] + ([f"word.{focus}.verdict"] if focus else [])

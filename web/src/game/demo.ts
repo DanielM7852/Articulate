@@ -10,7 +10,7 @@ import { clamp } from './scoring';
 export const DEMO_REST_MS = 900;
 
 /** Relative share of the pace each kind of zone gets. */
-const WEIGHT: Record<WordZone['kind'], number> = { stop: 0.55, tuner: 1.3, vowel: 1.6 };
+const WEIGHT: Record<WordZone['kind'], number> = { stop: 0.55, tuner: 1.3, vowel: 1.6, liquid: 1.3, fricative: 0.55, nasal: 0.55 };
 
 export interface DemoFrame {
   /** Zone being demonstrated, -1 during the rest. */

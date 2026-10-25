@@ -20,6 +20,7 @@ export interface Step {
   word: string;
   segments: Segment[];
   note: NoteSpec;
+  caveat?: string;
 }
 
 /**
@@ -30,5 +31,5 @@ export const FIRST_BEATMAP: Step[] = [
   { id: 'ah', word: 'ah', segments: [{ letters: 'ah', sounds: ['ah'] }], note: { kind: 'hold', vowel: 'ah', holdMs: 700 } },
   { id: 'hi', word: 'hi', segments: [{ letters: 'h', cue: 'breath only' }, { letters: 'i', sounds: ['ah', 'ee'] }], note: { kind: 'glide', from: 'ah', to: 'ee' } },
   { id: 'how', word: 'how', segments: [{ letters: 'h', cue: 'breath only' }, { letters: 'ow', sounds: ['ah', 'oo'] }], note: { kind: 'glide', from: 'ah', to: 'oo' } },
-  { id: 'we', word: 'we', segments: [{ letters: 'w', sounds: ['oo'] }, { letters: 'e', sounds: ['ee'] }], note: { kind: 'glide', from: 'oo', to: 'ee' } },
+  { id: 'we', word: 'we', segments: [{ letters: 'w', cue: 'letter cue' }, { letters: 'e', sounds: ['oo', 'ee'] }], note: { kind: 'glide', from: 'oo', to: 'ee' } },
 ];

@@ -3,7 +3,7 @@
 
 /* Plot overlay */
 .game-zone polygon { fill: #2e64f5; fill-opacity: .05; stroke: #9db5ef; stroke-width: 1.2; stroke-dasharray: 4 4; transition: fill-opacity .2s ease, stroke .2s ease; }
-.game-zone text { font-family: "Avenir Next", "Segoe UI", sans-serif; font-weight: 600; letter-spacing: -.3px; fill: #7f97c4; }
+.game-zone text { font-family: "Avenir Next", "Segoe UI", sans-serif; font-weight: 600; letter-spacing: -.3px; fill: #586b87; }
 .game-zone.is-active polygon { fill-opacity: .1; stroke: #2e64f5; stroke-width: 1.8; stroke-dasharray: none; }
 .game-zone.is-active text { fill: #355ca5; }
 .game-zone.is-reached polygon { fill: var(--hit); fill-opacity: .14; stroke: var(--hit); stroke-width: 1.8; stroke-dasharray: none; }
@@ -21,7 +21,7 @@
 .game-copy h2[data-outcome="unheard"] { color: #586b87; }
 
 .game-phases { list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 16px 0 0; padding: 0; }
-.game-phases li { display: flex; flex-direction: column; align-items: center; padding: 10px 4px 9px; border: 1px solid var(--line); border-radius: 12px; color: #8a99ad; }
+.game-phases li { display: flex; flex-direction: column; align-items: center; padding: 10px 4px 9px; border: 1px solid var(--line); border-radius: 12px; color: #586b87; }
 .game-phases strong { font-family: "Avenir Next", sans-serif; font-size: 20px; font-weight: 600; letter-spacing: -.8px; }
 .game-phases small { font-size: 10px; margin-top: 2px; }
 .game-phases li.is-active { border-color: var(--blue); color: #355ca5; background: #f6f9ff; }
@@ -50,7 +50,7 @@
 .game-word span { display: flex; flex-direction: column; align-items: center; }
 .game-word b { font-family: "Avenir Next", "Segoe UI", sans-serif; font-size: 56px; line-height: 1; font-weight: 600; letter-spacing: -2.5px; color: var(--ink); padding: 0 2px 8px; border-bottom: 3px solid var(--blue); }
 .game-word small { font-size: 10px; margin-top: 7px; color: #355ca5; font-weight: 600; white-space: nowrap; }
-.game-word .is-cue b { color: #b3c1d6; border-bottom: 3px dotted #cfd9e8; }
+.game-word .is-cue b { color: #586b87; border-bottom: 3px dotted #cfd9e8; }
 .game-word .is-cue small { color: var(--muted); font-weight: 400; white-space: normal; max-width: 64px; text-align: center; line-height: 1.35; }
 
 .game-mic { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); margin: 0 0 14px; }
@@ -77,3 +77,42 @@
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 @media (max-width: 720px) { .game-word b { font-size: 48px; } }
+
+@media (max-width: 720px) {
+  .game-panel { grid-row: 1; }
+  .game-word { padding-top: 12px; }
+}
+
+/* Lesson controls retain the mapper's quiet palette and large keyboard targets. */
+.game-lesson { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: var(--muted); }
+.game-lesson select { width: 100%; min-width: 0; padding: 10px 7px; border: 1px solid #bdcbe0; border-radius: 8px; color: var(--ink); background: white; font-size: 12px; }
+.game-description, .game-caveat, .game-calibration-note, .game-last-result, .game-lock { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 12px 0; }
+.game-caveat { padding-left: 10px; border-left: 2px solid #c4d0e2; }
+.game-lock { padding: 12px; background: #f2f6fc; border-radius: 8px; color: var(--ink); }
+.game-last-result { color: #0d5e5d; }
+.game-text-button { border: 0; padding: 12px 0; background: transparent; color: #355ca5; text-align: left; text-decoration: underline; font-size: 12px; }
+.game-phases { grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); }
+.game-live-cue { padding: 0 4px 14px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.game-live-cue .game-strip { margin-top: 0; }
+.game-current { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr); align-items: center; gap: 22px; }
+.game-current .game-word { padding: 16px 0 4px; gap: 9px; }
+.game-current .game-copy { margin: 14px 0; }
+.game-current .game-window { margin-bottom: 0; }
+.game-workspace.is-playing .game-panel { justify-content: flex-start; }
+.game-workspace.is-playing .game-boundary { margin-top: 20px; }
+.game-workspace.is-playing .game-mic { margin-top: 20px; }
+.game-approach { transition: rx 25ms linear, ry 25ms linear, opacity 25ms linear; }
+
+@media (max-width: 720px) {
+  .game-workspace.is-playing .game-panel { grid-row: auto; }
+  .game-current { grid-template-columns: 1fr; gap: 0; }
+  .game-current .game-word { padding-top: 10px; }
+  .game-current .game-word b { font-size: 40px; }
+  .game-current .game-copy h2 { font-size: 17px; }
+  .game-current .game-copy { margin: 10px 0; }
+  .game-live-cue { margin-bottom: 14px; }
+  .app-shell:has(.game-workspace.is-playing) .intro { padding: 18px 0; }
+  .app-shell:has(.game-workspace.is-playing) .intro h1 { font-size: 25px; }
+  .app-shell:has(.game-workspace.is-playing) .intro-copy { display: none; }
+  .app-shell:has(.game-workspace.is-playing) .intro .eyebrow { display: none; }
+}

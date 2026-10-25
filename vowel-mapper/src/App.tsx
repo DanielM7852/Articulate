@@ -2,6 +2,10 @@ import { useMemo, useRef, useState } from 'react';
 import { DEFAULT_SETTINGS } from './audio/estimator';
 import { VowelPlot } from './components/VowelPlot';
 import { GameMode, type FrameListener } from './game/GameMode';
+import type { GameCalibrations } from './game/lessons';
+import type { VoiceProfile } from './game/targets';
+import { ConsonantCuePreview } from './components/ConsonantCuePreview';
+import { ReferenceCheck } from './reference/ReferenceCheck';
 import { useVowelSession } from './useVowelSession';
 
 const trackingCopy = {
@@ -14,10 +18,15 @@ const trackingCopy = {
   invalid: ['Unsupported audio', 'Try desktop Chrome and check your microphone input.'],
 } as const;
 
+/** Developer-only reference check, reached with ?check. */
+const showCheck = new URLSearchParams(window.location.search).has('check');
+
 export default function App() {
   const [ceilingHz, setCeilingHz] = useState(DEFAULT_SETTINGS.ceilingHz);
   const settings = useMemo(() => ({ ...DEFAULT_SETTINGS, ceilingHz }), [ceilingHz]);
-  const [mode, setMode] = useState<'map' | 'game'>('map');
+  const [mode, setMode] = useState<'map' | 'game' | 'check'>(showCheck ? 'check' : 'map');
+  const [gameCalibrations, setGameCalibrations] = useState<GameCalibrations>({ base: null, extra: {} });
+  const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
   const gameFrames = useRef<FrameListener | null>(null);
   const session = useVowelSession(settings, { onFrame: (frame) => gameFrames.current?.(frame) });
   const active = session.phase === 'running' || session.phase === 'requesting';
@@ -44,19 +53,25 @@ export default function App() {
         <div className="mode-switch" role="group" aria-label="Mode">
           <button type="button" aria-pressed={mode === 'map'} onClick={() => setMode('map')}>Map</button>
           <button type="button" aria-pressed={mode === 'game'} onClick={() => setMode('game')}>Game</button>
+          {showCheck && <button type="button" aria-pressed={mode === 'check'} onClick={() => setMode('check')}>Check</button>}
         </div>
         {mode === 'map' ? <>
           <p className="eyebrow">Vowel explorer</p>
           <h1 id="page-title">See your voice<br className="mobile-break" /> take shape.</h1>
           <p className="intro-copy">Hold a vowel. Watch its position change as you move between sounds.</p>
+        </> : mode === 'check' ? <>
+          <p className="eyebrow">Reference check · developer tool</p>
+          <h1 id="page-title">Does the reference<br className="mobile-break" /> fit your voice?</h1>
+          <p className="intro-copy">About three minutes in each place. Record each word once, then copy the results into the chat.</p>
         </> : <>
-          <p className="eyebrow">Zone game</p>
-          <h1 id="page-title">Glide between<br className="mobile-break" /> the zones you set.</h1>
-          <p className="intro-copy">Set three zones with your own voice, then move between them to say short words. Everything is shown on screen; nothing depends on hearing.</p>
+          <p className="eyebrow">Vowel game</p>
+          <h1 id="page-title">Move your vowels<br className="mobile-break" /> toward the targets.</h1>
+          <p className="intro-copy">A short voice check sizes the targets to your voice. Then hold each vowel and watch which ring you reach. Everything is shown on screen; nothing depends on hearing.</p>
         </>}
       </section>
 
-      {mode === 'game' && <GameMode session={session} frames={gameFrames} point={point} tracking={tracking} />}
+      {mode === 'game' && <GameMode calibrations={gameCalibrations} setCalibrations={setGameCalibrations} voiceProfile={voiceProfile} setVoiceProfile={setVoiceProfile} session={session} frames={gameFrames} point={point} tracking={tracking} />}
+      {mode === 'check' && <ReferenceCheck session={session} frames={gameFrames} point={point} tracking={tracking} />}
       {mode === 'map' && <div className="workspace">
         <section className="map-panel" aria-labelledby="map-title">
           <div className="panel-heading">
@@ -102,6 +117,7 @@ export default function App() {
           <label className="ceiling-control">Analysis ceiling<select aria-label="Analysis ceiling" value={ceilingHz} disabled={active} onChange={(event) => setCeilingHz(Number(event.target.value))}><option value="5000">5,000 Hz</option><option value="5500">5,500 Hz · default</option><option value="6000">6,000 Hz</option></select></label>
         </div>
         <p>Changing the ceiling can help different voices. These measurements are experimental; accepted frames are not a pronunciation score. Unreliable frames are excluded. Nasal cues are experimental half-second medians over voiced frames (bands 80–400, 400–1,200, 1,200–3,000 Hz); they do not affect tracking.</p>
+        <ConsonantCuePreview />
       </details>
       <footer><span>Articulate / 2D mapper prototype</span><p>This maps vowel acoustics, not exact tongue position. No audio is saved or uploaded.</p></footer>
     </main>

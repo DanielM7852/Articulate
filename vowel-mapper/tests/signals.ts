@@ -58,3 +58,34 @@ export function noiseSignal(length: number): Float32Array {
     return (state / 0xffffffff * 2 - 1) * 0.12;
   });
 }
+
+/** Like vowelSignal, but the resonators move: `formants(u)` gives Hz at normalised time u, as in a word's glide. */
+export function glideSignal({ formants, sampleRate = 48000, pitch = 120, seconds = 1.2 }: {
+  formants: (u: number) => number[];
+  sampleRate?: number;
+  pitch?: number;
+  seconds?: number;
+}): Float32Array {
+  const data = new Float64Array(Math.round(sampleRate * seconds));
+  let phase = 0;
+  for (let i = 0; i < data.length; i++) {
+    phase += pitch / sampleRate;
+    if (phase >= 1) { data[i] = 1; phase -= 1; }
+  }
+  formants(0).forEach((_, index) => {
+    const radius = Math.exp(-Math.PI * (70 + 30 * index) / sampleRate);
+    let previous = 0;
+    let before = 0;
+    for (let i = 0; i < data.length; i++) {
+      const a = 2 * radius * Math.cos(2 * Math.PI * formants(i / (data.length - 1))[index] / sampleRate);
+      const next = data[i] + a * previous - radius * radius * before;
+      before = previous;
+      previous = next;
+      data[i] = next;
+    }
+  });
+  const peak = data.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
+  // 20 ms fades so the onset and offset are not clicks.
+  const fade = sampleRate * 0.02;
+  return Float32Array.from(data, (value, i) => value / peak * 0.55 * Math.min(1, i / fade, (data.length - i) / fade));
+}

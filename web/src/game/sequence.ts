@@ -245,6 +245,9 @@ export class WordAttempt {
         return this.handleTuner(run, item);
       case 'vowel':
         return this.handleVowel(run, item);
+      default:
+        // liquid / fricative / nasal zones belong to the ghost-path engine, never to this sequencer.
+        return null;
     }
   }
 

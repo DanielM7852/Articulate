@@ -1,0 +1,131 @@
+{
+ "id": "h95-tracker-scaled",
+ "version": 1,
+ "status": "experimental",
+ "description": "American English vowel reference (Hillenbrand et al. 1995, Michigan talkers) re-measured by the app's tracker, shifted by one speaker factor.",
+ "space": "natural log Hz",
+ "k": 2.0,
+ "calibrationVowels": [
+  "ae",
+  "eh",
+  "er"
+ ],
+ "calibrationWords": {
+  "eh": "head",
+  "ae": "had",
+  "er": "heard"
+ },
+ "targets": {
+  "iy": {
+   "centre": [
+    6.0443386571463895,
+    7.8929105196432765
+   ],
+   "centreHz": [
+    421.71876454677147,
+    2678.227621977246
+   ],
+   "radius": [
+    0.14444866376669782,
+    0.10960381256234852
+   ]
+  },
+  "ah": {
+   "centre": [
+    6.747164272066337,
+    7.318183116015043
+   ],
+   "centreHz": [
+    851.6403148866627,
+    1507.46259549021
+   ],
+   "radius": [
+    0.14395685979015968,
+    0.1676418267310192
+   ]
+  },
+  "uw": {
+   "centre": [
+    6.3081883615914185,
+    7.245465391745713
+   ],
+   "centreHz": [
+    549.049368344526,
+    1401.7340996781822
+   ],
+   "radius": [
+    0.6740631091986142,
+    0.7072923697379349
+   ]
+  }
+ },
+ "vowelMeans": {
+  "iy": [
+   6.0443386571463895,
+   7.8929105196432765
+  ],
+  "ih": [
+   6.199218397128189,
+   7.717676951738587
+  ],
+  "ei": [
+   6.249806268403193,
+   7.794588432983364
+  ],
+  "eh": [
+   6.523118643809038,
+   7.619129750250109
+  ],
+  "ae": [
+   6.542236872779537,
+   7.673918504806933
+  ],
+  "ah": [
+   6.747164272066337,
+   7.318183116015043
+  ],
+  "aw": [
+   6.624034832060603,
+   7.074906551522222
+  ],
+  "oa": [
+   6.353813709828417,
+   6.983834895262095
+  ],
+  "oo": [
+   6.279254790381506,
+   7.186897127868719
+  ],
+  "uw": [
+   6.3081883615914185,
+   7.245465391745713
+  ],
+  "uh": [
+   6.561426243346474,
+   7.239695627833524
+  ],
+  "er": [
+   6.287861476501629,
+   7.331977326294072
+  ]
+ },
+ "caveats": [
+  "/u/ region overlaps /\u028a/ 'hood' and /o/ 'hoed'",
+  "Not a correctness standard; one regional variety",
+  "Validated offline on hand-labelled citation words only"
+ ],
+ "provenance": {
+  "archiveSha256": "2560548591e3a726c88549b6dc9d226995616c26874d601c69fee8b9eee9d730",
+  "estimatorSha256": "cd8feb87a323b741a3e283ed5af96c647b24f597752b608d7e9b1a030df3cc94",
+  "commit": "f7f3074",
+  "tokens": 1526,
+  "labels": "listener majority vote",
+  "verdict": {
+   "P1": false,
+   "P2": false,
+   "P3": false,
+   "P4": true,
+   "centralisation_ratio": 0.13002300987292426
+  }
+ }
+}
