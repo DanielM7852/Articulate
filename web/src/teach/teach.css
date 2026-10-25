@@ -303,8 +303,8 @@
 
 .console-bar {
   display: grid;
-  grid-template-columns: auto auto minmax(180px, 240px) minmax(180px, 1fr);
-  gap: 12px 20px;
+  grid-template-columns: auto auto minmax(220px, 240px) minmax(0, 1fr);
+  gap: 12px 16px;
   align-items: center;
   padding: 16px 24px;
   border-bottom: 1px solid var(--color-line);
@@ -370,9 +370,10 @@
 
 .console-room {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: end;
+  min-width: 0;
 }
 
 .console-room label,
@@ -386,6 +387,7 @@
 .console-identity {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .console-mode {
@@ -623,8 +625,220 @@
 }
 */
 
-.console:has(.console-main--live:not([hidden])) .console-mode {
+.console:has(.console-main--live:not([hidden])) .console-mode,
+.console:has(.console-main--school:not([hidden])) .console-mode {
   display: none;
+}
+
+.school {
+  padding: 28px 24px 48px;
+  display: grid;
+  gap: 20px;
+}
+
+.school-head {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+}
+
+.school-head h1,
+.school-measure h2 {
+  margin: 0;
+  color: var(--color-navy);
+  font-weight: 400;
+}
+
+.school-head h1 {
+  font-family: var(--font-serif);
+  font-size: 32px;
+}
+
+.school-kicker {
+  margin: 0;
+  color: var(--color-warn);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.school-head p,
+.school-result,
+.school-measure p {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.school-db {
+  font-weight: 700;
+  color: var(--color-navy);
+}
+
+.school-head .btn {
+  width: max-content;
+  margin-top: 4px;
+}
+
+.school-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: start;
+}
+
+.school-db-bar {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-navy);
+  border-radius: var(--radius-pill);
+  color: var(--color-navy);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* 2026-10-25: overflow-x auto put the twelve live rooms behind a horizontal scrollbar. */
+.school-board {
+  overflow-x: visible;
+}
+
+.school-rooms {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.school-room {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  min-width: 0;
+  padding: 8px 4px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.school-room button {
+  border: 0;
+  background: transparent;
+  color: var(--color-navy);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.school-room button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-pill);
+}
+
+.school-dots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 72px;
+}
+
+.school-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-navy-soft);
+}
+
+.school-room.is-lit {
+  border-color: var(--color-navy);
+  background: var(--color-cream);
+}
+
+.school-room.is-live .school-dots i {
+  background: var(--color-navy);
+}
+
+.school-room.is-lit .school-dots i {
+  background: var(--color-navy);
+}
+
+.school-ack {
+  margin: 0;
+  color: var(--color-navy);
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.school-room.is-dim {
+  opacity: 0.45;
+}
+
+.school-count,
+.school-updates {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.school-room.is-lit .school-updates {
+  color: var(--color-navy);
+  font-weight: 700;
+}
+
+.school-result {
+  margin-top: 12px;
+}
+
+.school-measure {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.school-measure h2 {
+  font-size: 16px;
+}
+
+.school-measure svg {
+  width: 100%;
+  height: auto;
+}
+
+.school-measure line,
+.school-measure polyline {
+  fill: none;
+  stroke: var(--color-navy);
+  stroke-width: 2;
+}
+
+.school-measure circle {
+  fill: var(--color-navy);
+}
+
+.school-measure text {
+  fill: var(--color-muted);
+  font-size: 11px;
+}
+
+.school-measure ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .school-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .live-stages,

@@ -1,4 +1,6 @@
-export type ConsoleTab = 'classroom' | 'live';
+// 2026-10-25: tabs were classroom and live only.
+// export type ConsoleTab = 'classroom' | 'live';
+export type ConsoleTab = 'classroom' | 'live' | 'school';
 
 export type ConsoleLocation = {
   tab: ConsoleTab;
@@ -15,7 +17,9 @@ const COMMAND_PREFIX = 'articulate.console.command.';
 export function readLocation(hash = window.location.hash): ConsoleLocation {
   const raw = hash || '#/classroom';
   const [path, query = ''] = raw.split('?');
-  const tab: ConsoleTab = path === '#/live' || path === '#/dashboard' ? 'live' : 'classroom';
+  // 2026-10-25: an unknown path opened the classroom. School is its own path.
+  // const tab: ConsoleTab = path === '#/live' || path === '#/dashboard' ? 'live' : 'classroom';
+  const tab: ConsoleTab = path === '#/live' || path === '#/dashboard' ? 'live' : path === '#/school' ? 'school' : 'classroom';
   const params = new URLSearchParams(query);
   return {
     tab,

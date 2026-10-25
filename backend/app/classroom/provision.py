@@ -120,6 +120,24 @@ async def open_dev_session(settings: Settings, role: str, name: str, classroom: 
     return {**record, "uri": owner["uri"], "database": owner["database"], "label": "development identity"}
 
 
+SCALE_ROOMS = tuple(f"scale-{index}" for index in range(1, 13))
+
+
+async def open_scale_school(settings: Settings) -> dict[str, Any]:
+    """One teacher and one learner in each scale room. Reuses the development roster."""
+    owner = load_owner(settings)
+    if owner is None:
+        raise ClassroomError("classroom database is not configured", 503)
+    rooms = []
+    for classroom in SCALE_ROOMS:
+        rooms.append({
+            "classroomId": classroom,
+            "teacher": await open_dev_session(settings, "teacher", "ada", classroom),
+            "learner": await open_dev_session(settings, "learner", "lea", classroom),
+        })
+    return {"database": owner["database"], "uri": owner["uri"], "rooms": rooms}
+
+
 async def commit_verified_summary(settings: Settings, args: list[Any]) -> bool:
     owner = load_owner(settings)
     if owner is None:

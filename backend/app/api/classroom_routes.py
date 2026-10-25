@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.classroom.owner import browser_database_uri, dev_classroom_enabled, load_owner
 from uuid import uuid4
 
-from app.classroom.provision import ClassroomError, commit_verified_summary, open_dev_session
+from app.classroom.provision import ClassroomError, commit_verified_summary, open_dev_session, open_scale_school
 
 router = APIRouter()
 
@@ -55,6 +55,24 @@ async def classroom_session(body: DevSessionRequest, request: Request) -> dict:
         return session
     except ClassroomError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
+
+
+@router.post("/v1/dev/classroom/scale")
+async def classroom_scale(request: Request) -> dict:
+    """Mint the synthetic scale rooms on the local classroom database."""
+    owner = load_owner(request.app.state.settings)
+    if owner is None or not dev_classroom_enabled(owner):
+        raise HTTPException(404, "development classroom identity is local only")
+    try:
+        school = await open_scale_school(request.app.state.settings)
+    except ClassroomError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    uri = _visible_uri(request, school["uri"])
+    for room in school["rooms"]:
+        room["teacher"]["uri"] = uri
+        room["learner"]["uri"] = uri
+    school["uri"] = uri
+    return school
 
 
 class SyntheticSeed(BaseModel):

@@ -5,6 +5,7 @@ import { personName } from '../classroom/labels';
 import { loadSession, saveSession, type DevSession } from '../classroom/session';
 import { Dashboard } from './Dashboard';
 import LiveSystem from './LiveSystem';
+import School from './School';
 import { type RoomStatus } from './consoleModel';
 import { readLocation, subscribeLocation, writeLocation, type ConsoleLocation } from './consoleLocation';
 
@@ -100,6 +101,9 @@ export function Console() {
           <button type="button" aria-current={location.tab === 'classroom' ? 'page' : undefined} onClick={() => go({ tab: 'classroom' })}>
             Classroom
           </button>
+          <button type="button" aria-current={location.tab === 'school' ? 'page' : undefined} onClick={() => go({ tab: 'school' })}>
+            School
+          </button>
           <button type="button" aria-current={location.tab === 'live' ? 'page' : undefined} onClick={() => go({ tab: 'live' })}>
             Live system
           </button>
@@ -162,6 +166,9 @@ export function Console() {
             <IdentityForm role="teacher" onReady={(next) => { setSession(next); setClassroomDraft(next.classroomId); }} />
           </main>
         )}
+      </div>
+      <div className="console-main console-main--school" hidden={location.tab !== 'school'}>
+        <School />
       </div>
       {openedLive && (
         <div className="console-main console-main--live" hidden={location.tab !== 'live'}>
