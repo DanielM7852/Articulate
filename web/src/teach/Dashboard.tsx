@@ -17,6 +17,7 @@ import {
 import { emit } from '../telemetry/client';
 import { classReach, presenceWord, type RoomStatus } from './consoleModel';
 import { readLocation, recallCommand, rememberCommand, rememberLearnerLabel, writeLocation, type ConsoleLocation } from './consoleLocation';
+import { lessonSeen, publishLearnerNames, useLiveStatus, type LearnerLive, type SavedSeen } from './liveStatus';
 
 type BoardRow = {
   profileId: string;
@@ -104,6 +105,7 @@ export function Dashboard({
   const [query, setQuery] = useState('');
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const selected = location.learner || null;
+  const live = useLiveStatus();
 
   useEffect(() => {
     if (!session) return;
@@ -266,6 +268,10 @@ export function Dashboard({
   }, [status, ready, updatedAt, onStatus]);
 
   useEffect(() => {
+    publishLearnerNames(new Map(rows.map((row) => [row.profileId, personName(row.displayName)])));
+  }, [rows]);
+
+  useEffect(() => {
     if (!learner) return;
     rememberLearnerLabel(learner.profileId, `${personName(learner.displayName)} · ${exerciseName(learner.exercise)}`);
   }, [learner]);
@@ -355,6 +361,7 @@ export function Dashboard({
               <span className="teach-row__name">{personName(row.displayName)}</span>
               <span className="teach-row__exercise">{exerciseName(row.exercise)}</span>
               <span className="teach-row__meta">{presenceWord(row.presence)}{row.presence === 'disconnected' ? '' : ` · ${freshness(row)}`}</span>
+              <LiveLine status={live.learners.get(row.profileId) ?? null} presence={row.presence} />
               <Outcome row={row} />
               <span className={`teach-pill teach-pill--${deliveryTone(row)}`}>{deliveryLabel(row)}</span>
               {row.helpRequested && <span className="teach-row__meta">Asked for help{row.helpNote ? `: ${row.helpNote}` : ''}</span>}
@@ -390,10 +397,12 @@ export function Dashboard({
                 {learner.visible && learner.lessonRevision > 0 && <p className="small">Last change: {plainChange(learner.visible)}</p>}
                 {learner.lessonSource === 'learner' && <p className="fine">This person’s lesson stays ahead of a class assignment.</p>}
               </section>
-              <Delivery learner={learner} onFollow={() => {
-                const command = recallCommand(learner.profileId, learner.lessonRevision);
-                onFollow(command, String(learner.lessonRevision));
-              }} />
+              <Delivery
+                learner={learner}
+                status={live.learners.get(learner.profileId) ?? null}
+                saved={live.saved}
+                onFollow={() => onFollow(commandFor(learner), String(learner.lessonRevision))}
+              />
               <section aria-labelledby="recent-evidence">
                 <h3 id="recent-evidence" className="teach-h">Recent evidence</h3>
                 {attempts.length === 0 && <p className="small">No attempts yet.</p>}
@@ -483,6 +492,7 @@ function Preview({ draft, changes, same }: { current: LessonSettings | null; dra
   );
 }
 
+/* 2026-10-25: the delivery steps lit only from the classroom summary.
 function Delivery({ learner, onFollow }: { learner: BoardRow; onFollow: () => void }) {
   const steps = spacetimeSteps(learner);
   const during = (learner.presence === 'recording' || learner.presence === 'analyzing') && (learner.ackPhase === 'pending' || learner.ackPhase === 'received');
@@ -501,6 +511,129 @@ function Delivery({ learner, onFollow }: { learner: BoardRow; onFollow: () => vo
       </div>
       {during && <p className="small">Applies after this recording.</p>}
     </section>
+  );
+}
+*/
+
+/** The command id this console saved for the learner's current lesson, if it saved it. */
+function commandFor(row: BoardRow): string {
+  const own = recallCommand(row.profileId, row.lessonRevision);
+  if (own || row.lessonSource !== 'classroom') return own;
+  return recallCommand(`class:${row.classroomId}`, row.lessonRevision);
+}
+
+function streamTime(at: number): string {
+  return new Date(at).toLocaleTimeString();
+}
+
+/**
+ * The classroom summary drives the steps. The system stream can also light a step, with its own caption, and when
+ * the two disagree one line says so. The stream only speaks for a learner whose tab announced its profile.
+ */
+function Delivery({
+  learner,
+  status,
+  saved,
+  onFollow,
+}: {
+  learner: BoardRow;
+  status: LearnerLive | null;
+  saved: Map<string, SavedSeen>;
+  onFollow: () => void;
+}) {
+  const name = personName(learner.displayName);
+  const revision = learner.lessonRevision;
+  const commandId = revision > 0 ? commandFor(learner) : '';
+  const match = revision > 0 ? lessonSeen(status, commandId, revision) : null;
+  const seen = match?.seen ?? null;
+  const savedSeen = commandId ? saved.get(commandId) ?? null : null;
+  const how = match?.byRevision ? 'Seen on the system stream, matched by revision' : 'Seen on the system stream';
+  const stream: Record<string, { at: number; text: string } | null> = {
+    Saved: savedSeen ? { at: savedSeen.at, text: `This console saved revision ${savedSeen.revision}.` } : null,
+    Received: seen?.received !== undefined ? { at: seen.received, text: `${name}’s tab reported receiving revision ${revision}.` } : null,
+    Applied: seen?.applied !== undefined
+      ? { at: seen.applied, text: `${name}’s tab reported applying revision ${revision}.` }
+      : seen?.failed !== undefined
+        ? { at: seen.failed, text: `${name}’s tab reported that revision ${revision} could not be applied.` }
+        : null,
+  };
+  const steps = spacetimeSteps(learner).map((step) => {
+    const extra = stream[step.title];
+    if (!extra) return { ...step, caption: null };
+    const failedOnly = step.title === 'Applied' && seen?.applied === undefined;
+    // A failure report never captions a step the summary shows as applied; the disagreement line covers it.
+    if (failedOnly && step.state === 'done') return { ...step, caption: null };
+    const lit = step.state === 'done' ? step : { ...step, state: failedOnly ? 'now' as const : 'done' as const, text: extra.text };
+    return { ...lit, caption: `${how} · ${streamTime(extra.at)}` };
+  });
+  const during = (learner.presence === 'recording' || learner.presence === 'analyzing') && (learner.ackPhase === 'pending' || learner.ackPhase === 'received');
+  const disagreement = deliveryDisagreement(learner, status, seen, Boolean(savedSeen));
+  return (
+    <section className="teach-path" aria-label="Lesson delivery">
+      <div className="teach-actions">
+        <ol className="teach-steps">
+          {steps.map((step) => (
+            <li key={step.title} className={`teach-step teach-step--${step.state}`}>
+              <span className="teach-step__title">{step.title}</span>
+              <span>{step.text}</span>
+              {step.caption && <span className="teach-step__stream">{step.caption}</span>}
+            </li>
+          ))}
+        </ol>
+        <button type="button" className="btn btn--sm" disabled={learner.lessonRevision <= 0} onClick={onFollow}>Follow this lesson</button>
+      </div>
+      {during && <p className="small">Applies after this recording.</p>}
+      {disagreement && <p className="teach-disagree">{disagreement}</p>}
+    </section>
+  );
+}
+
+/**
+ * One line when the classroom summary and the system stream disagree about this lesson. Silence on the stream
+ * counts only when the stream watched this lesson (it saw the save or another stage) and the learner's tab has
+ * announced its profile.
+ */
+function deliveryDisagreement(row: BoardRow, status: LearnerLive | null, seen: { received?: number; applied?: number; failed?: number } | null, savedSeen: boolean): string | null {
+  if (row.lessonRevision <= 0) return null;
+  const summaryReceived = row.ackPhase === 'received' || row.ackPhase === 'applied';
+  const summaryApplied = row.ackPhase === 'applied';
+  const summaryFailed = row.ackPhase === 'failed';
+  const streamReceived = seen?.received !== undefined;
+  const streamApplied = seen?.applied !== undefined;
+  const streamFailed = seen?.failed !== undefined;
+  const watched = status !== null && (savedSeen || seen !== null);
+  if (streamApplied && !summaryApplied) return 'The system stream shows applied. The classroom summary does not yet.';
+  if (streamFailed && !streamApplied && !summaryFailed) return 'The system stream shows the lesson could not be applied. The classroom summary does not.';
+  if (summaryApplied && !streamApplied && watched) return 'The classroom summary says applied. The system stream has not shown that from this learner’s tab.';
+  if (summaryFailed && !streamFailed && watched) return 'The classroom summary says the lesson could not be applied. The system stream has not shown that from this learner’s tab.';
+  if (streamReceived && !summaryReceived && !summaryFailed) return 'The system stream shows received. The classroom summary does not yet.';
+  if (summaryReceived && !streamReceived && watched) return 'The classroom summary says received. The system stream has not shown that from this learner’s tab.';
+  return null;
+}
+
+const LIVE_PRESENT = new Set(['idle', 'recording', 'analyzing']);
+
+/**
+ * What the system stream knows about this learner's tab, next to the classroom presence. Nothing until a tab has
+ * announced the profile; "No live tab" when the classroom says present but no announced tab sent anything in 60 s.
+ */
+function LiveLine({ status, presence }: { status: LearnerLive | null; presence: string }) {
+  if (!status) return null;
+  if (status.tabs === 0) {
+    return LIVE_PRESENT.has(presence) ? <span className="teach-live" data-state="none">No live tab</span> : null;
+  }
+  const items: { key: string; on: boolean; text: string }[] = [];
+  if (status.camera) items.push({ key: 'camera', on: status.camera === 'on', text: status.camera === 'on' ? 'Camera' : 'Camera off' });
+  if (status.face) items.push({ key: 'face', on: status.face === 'tracking', text: status.face === 'tracking' ? 'Face' : 'Face lost' });
+  if (status.mic) items.push({ key: 'mic', on: status.mic === 'listening', text: status.mic === 'listening' ? 'Mic' : 'Mic closed' });
+  if (status.phones) items.push({ key: 'phones', on: true, text: 'Phones' });
+  return (
+    <span className="teach-live" data-state="live">
+      <span className="teach-live__label">Live tab</span>
+      {items.map((item) => (
+        <span key={item.key} className="teach-live__item" data-on={item.on ? '' : undefined}>{item.text}</span>
+      ))}
+    </span>
   );
 }
 

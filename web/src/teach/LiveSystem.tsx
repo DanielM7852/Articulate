@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import Dashboard from '../screens/Dashboard';
 import type { TelemetryEvent } from '../telemetry/client';
 import { commandOf, observedStages, publicPayload } from './consoleModel';
-import { learnerLabel, type ConsoleLocation } from './consoleLocation';
+import { learnerLabel, readLocation, rememberLearnerLabel, writeLocation, type ConsoleLocation } from './consoleLocation';
+import { useLiveStatus, type LiveStatus } from './liveStatus';
 
 type Item = TelemetryEvent & { commandId: string };
 
@@ -36,6 +37,7 @@ export default function LiveSystem({
     lastAt: null,
   });
   const [scope, setScope] = useState<'system' | 'lesson'>(location.command ? 'lesson' : 'system');
+  const live = useLiveStatus();
 
   useEffect(() => {
     if (location.command) setScope('lesson');
@@ -64,7 +66,8 @@ export default function LiveSystem({
           title={
             stream.conn === 'connecting'
               ? 'System stream connecting. A count of zero is not a connection.'
-              : `${location.learner && !demo ? 'The face and equalizer show only this learner’s tab once it has announced its profile. Other events are the whole public stream.' : 'Events do not name a learner.'} Demo replay is sample traffic and does not change lessons, learners, or acknowledgments.`
+              // 2026-10-25: was 'Events do not name a learner.' when no learner was selected.
+              : `${location.learner && !demo ? 'The face and equalizer show only this learner’s tab once it has announced its profile. Other events are the whole public stream.' : 'Lesson events name a learner once that learner’s tab has announced its profile.'} Demo replay is sample traffic and does not change lessons, learners, or acknowledgments.`
           }
         >
           {stream.conn === 'live' && `Connected · ${stream.count} events`}
@@ -90,7 +93,10 @@ export default function LiveSystem({
         <p>
           {learnerLabel(location.learner)}
           {location.revision ? `. Lesson revision ${location.revision}.` : ''}
+          {/* 2026-10-25: telemetry events carried no attempt id.
           {location.attempt ? ' An attempt is selected. Telemetry events do not include attempt ids, so this view is not filtered to it.' : ''}
+          */}
+          {location.attempt ? ' An attempt is selected. The graph’s cards and packets are limited to it. Events without an attempt id still show.' : ''}
         </p>
         <button type="button" className="text-link" onClick={onBack}>Back to classroom</button>
       </div>
@@ -101,6 +107,8 @@ export default function LiveSystem({
             paused={paused}
             demo={demo}
             learner={location.learner}
+            // 2026-10-25: the live graph's optional attempt prop is landing separately; this spread compiles before and after it does.
+            {...({ attempt: location.attempt } as object)}
           onEvent={(event) => {
             const commandId = commandOf(event.payload);
             setEvents((current) => [{ ...event, commandId, payload: publicPayload(event.payload) }, ...current].slice(0, 40));
@@ -126,10 +134,17 @@ export default function LiveSystem({
           </li>
         </ol>
         <p className="fine">
+          {/* 2026-10-25: events named neither a learner nor an attempt.
           {location.learner && !demo
             ? 'The face and the equalizer show only the selected learner’s tab, once that tab has announced its classroom profile. Every other event on the graph is still the whole public system stream, and events do not name an attempt.'
             : 'The graph is the public system stream. Events do not name a learner or an attempt, so lip mesh and the equalizer are not attributed to the selected learner.'}
           {location.attempt ? ' Attempt filtering is not available.' : ''}
+          */}
+          {location.learner && !demo
+            ? 'The face and the equalizer show only the selected learner’s tab, once that tab has announced its classroom profile. Every other event on the graph is still the whole public system stream.'
+            : 'The graph is the public system stream. Lip mesh and the equalizer are not attributed to a learner here.'}
+          {' Lesson events below name the learner once that learner’s tab has announced its classroom profile.'}
+          {location.attempt ? ' The graph is limited to the selected attempt. Events without an attempt id still show.' : ''}
           {' '}
           {scope === 'lesson'
             ? 'Showing events whose command id matches the lesson you followed. Other traffic stays on the graph.'
@@ -143,6 +158,7 @@ export default function LiveSystem({
                 <time dateTime={new Date(event.at).toISOString()}>{new Date(event.at).toLocaleTimeString()}</time>
                 {' '}{event.label}
               </p>
+              <EventLearner event={event} live={live} />
               <p className="fine">{event.source} to {event.target} · {event.kind}{event.id.startsWith('demo-') ? ' · demo' : ''}</p>
               <details>
                 <summary>Payload</summary>
@@ -153,5 +169,30 @@ export default function LiveSystem({
         </ul>
       </details>
     </section>
+  );
+}
+
+/** For a lesson event whose tab announced a classroom profile: the learner, as a link to that learner and lesson. */
+function EventLearner({ event, live }: { event: Item; live: LiveStatus }) {
+  if (!event.kind.startsWith('lesson.')) return null;
+  const pid = live.attributed.get(event.id);
+  if (!pid) return null;
+  const remembered = learnerLabel(pid);
+  const name = live.names.get(pid) ?? (remembered !== 'Selected learner' ? remembered : `Profile ${pid.slice(0, 8)}`);
+  const revision = typeof event.payload.revision === 'number' ? String(event.payload.revision) : '';
+  return (
+    <p className="live-learner">
+      <button
+        type="button"
+        className="text-link"
+        onClick={() => {
+          rememberLearnerLabel(pid, name);
+          writeLocation({ ...readLocation(), learner: pid, attempt: '', revision, command: event.commandId });
+        }}
+      >
+        {name}
+      </button>
+      {revision ? <span> · revision {revision}</span> : null}
+    </p>
   );
 }
