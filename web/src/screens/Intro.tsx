@@ -38,8 +38,6 @@ const DISPERSE_MS = 1100;
 const PAPER = '#faf9f6';
 /** As the morph starts the stage eases from the paper back to its own gradient. */
 const BACKDROP_MS = 700;
-/** The dotted ribbon holds this long (its 200 ms crossfade with the picture included) before the morph. */
-const HOLD_MS = 300;
 /** Speech that has not started by now (no voice, blocked audio) falls back to reading time. */
 const START_TIMEOUT_MS = 6000;
 
@@ -178,12 +176,10 @@ export default function Intro() {
   // The landing page has left: it fades while the head is built.
   const pageGone = phase !== 'idle' && phase !== 'forming';
   const mounted = useRef(true);
-  const holdTimer = useRef(0);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false; // a shape that resolves after this is ignored
-      window.clearTimeout(holdTimer.current);
     };
   }, []);
 
@@ -199,8 +195,8 @@ export default function Intro() {
     setPhase('assembling');
   };
 
-  // Begin: the guide's dots take the ribbon picture's place (measured now, where it sits on screen), hold a
-  // moment, then morph into her head. The stage takes the paper colour so the overlay can turn see-through.
+  // Begin: the guide's dots take the ribbon picture's place (measured now, where it sits on screen) and
+  // morph straight into her head. The stage takes the paper colour so the overlay can turn see-through.
   // Without a ready particle guide, or if the picture cannot be read, the overlay simply fades as before.
   const begin = () => {
     if (phase !== 'idle') return; // the overlay is also inert from here on
@@ -220,10 +216,9 @@ export default function Intro() {
         assemble();
         return;
       }
+      // The dots take the picture's place and start moving at once; the 200 ms crossfade runs over the morph's start.
       setDotted(true);
-      holdTimer.current = window.setTimeout(() => {
-        if (mounted.current) assemble();
-      }, HOLD_MS);
+      assemble();
     };
     g.setStartShapeFromImage({ src: sculpturalVoice, rect, fit: 'cover' }).then(settle, () => settle(false));
   };
