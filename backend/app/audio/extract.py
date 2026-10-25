@@ -13,6 +13,7 @@ cannot treat them as measurements.
 
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -120,19 +121,54 @@ def frames_from_f0_track(
     return frames, None if median_f0 is None else round(median_f0, 5)
 
 
-def _emit_pitch_result(f0: np.ndarray, elapsed_s: float) -> None:
+def f0_summary(f0: np.ndarray) -> dict[str, float | None]:
+    """Mean/min/max F0 over voiced frames (finite and > 0) and the voiced share in percent (0..100)."""
+    f0 = np.asarray(f0, dtype=np.float64)
+    voiced = f0[np.isfinite(f0) & (f0 > 0)]
+    return {
+        "f0Mean": round(float(voiced.mean()), 1) if voiced.size else None,
+        "f0Min": round(float(voiced.min()), 1) if voiced.size else None,
+        "f0Max": round(float(voiced.max()), 1) if voiced.size else None,
+        "voicedPct": round(100.0 * voiced.size / f0.size, 1) if f0.size else 0.0,
+    }
+
+
+def emit_pitch_extract(seconds: float | None, method: str, label: str) -> None:
+    """Dashboard edge backend -> pitch before an F0 pass. Never raises."""
     try:
-        voiced = f0[np.isfinite(f0)]
-        payload = {
-            "f0Mean": round(float(voiced.mean()), 1) if voiced.size else None,
-            "f0Min": round(float(voiced.min()), 1) if voiced.size else None,
-            "f0Max": round(float(voiced.max()), 1) if voiced.size else None,
-            "voicedPct": round(100.0 * voiced.size / f0.size, 1) if f0.size else 0.0,
-            "latencyMs": round(elapsed_s * 1000),
-        }
-        telemetry.emit("pitch", "backend", "pitch.result", "pitch extracted", payload)
+        telemetry.emit("backend", "pitch", "pitch.extract", label, {"seconds": seconds, "method": method})
     except Exception:  # noqa: BLE001
         pass
+
+
+def emit_pitch_result(summary: dict[str, Any], elapsed_s: float, method: str, label: str | None = None) -> None:
+    """Dashboard edge pitch -> backend after a successful F0 pass. Never raises.
+
+    `summary` is f0_summary() plus optional f1Hz/f2Hz medians (left out of the payload when None).
+    The default label is "f0 <mean> Hz".
+    """
+    try:
+        payload: dict[str, Any] = {
+            "f0Mean": summary.get("f0Mean"),
+            "f0Min": summary.get("f0Min"),
+            "f0Max": summary.get("f0Max"),
+            "voicedPct": summary.get("voicedPct", 0.0),
+            "latencyMs": round(elapsed_s * 1000),
+            "method": method,
+        }
+        for key in ("f1Hz", "f2Hz"):
+            if summary.get(key) is not None:
+                payload[key] = summary[key]
+        if label is None:
+            mean = payload["f0Mean"]
+            label = "no voiced pitch" if mean is None else f"f0 {round(mean)} Hz"
+        telemetry.emit("pitch", "backend", "pitch.result", label, payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _emit_pitch_result(f0: np.ndarray, elapsed_s: float) -> None:
+    emit_pitch_result(f0_summary(f0), elapsed_s, "pyin", "pitch extracted")
 
 
 def extract_pitch(samples: np.ndarray, sample_rate: int, settings: Settings) -> PitchContour:
@@ -142,7 +178,7 @@ def extract_pitch(samples: np.ndarray, sample_rate: int, settings: Settings) -> 
 
     frame_length, hop_length = frame_settings(sample_rate)
     seconds = round(len(samples) / float(sample_rate), 2) if sample_rate else None
-    telemetry.emit("backend", "pitch", "pitch.extract", "extract pitch", {"seconds": seconds})
+    emit_pitch_extract(seconds, "pyin", "extract pitch")
     started = time.perf_counter()
     f0, voiced_flag, voiced_probability = librosa.pyin(
         np.asarray(samples, dtype=np.float64),

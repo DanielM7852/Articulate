@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 
+from app.audio.extract import f0_summary
 from app.live.schemas import WordZoneResult
 
 logger = logging.getLogger(__name__)
@@ -70,16 +71,33 @@ def _formants_at(formant: Any, t: float) -> tuple[float | None, float | None, fl
     return f1, f2, f3
 
 
-def measure_word(wav: bytes, zones: list[WordZoneResult]) -> dict[str, Any] | None:
-    """Acoustics block for the word coach, or None on any failure or a non-PCM16 WAV. Never raises."""
+def wav_seconds(wav: bytes) -> float | None:
+    """Clip length from the WAV header, or None when it cannot be read. Never raises."""
     try:
-        return _measure(wav, zones)
+        with wave.open(io.BytesIO(wav), "rb") as handle:
+            rate = handle.getframerate()
+            return round(handle.getnframes() / rate, 2) if rate else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def measure_word(
+    wav: bytes, zones: list[WordZoneResult], pitch_out: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Acoustics block for the word coach, or None on any failure or a non-PCM16 WAV. Never raises.
+
+    When `pitch_out` is given and the Praat pitch pass ran, it is filled with f0_summary() of that pass
+    (f0Mean, f0Min, f0Max, voicedPct) plus median f1Hz/f2Hz over the vowel and tuner zones when they were
+    measured. It is for telemetry only and never part of the returned block.
+    """
+    try:
+        return _measure(wav, zones, pitch_out)
     except Exception as exc:  # noqa: BLE001 - evidence is optional
         logger.debug("word acoustics skipped: %s", type(exc).__name__)
         return None
 
 
-def _measure(wav: bytes, zones: list[WordZoneResult]) -> dict[str, Any] | None:
+def _measure(wav: bytes, zones: list[WordZoneResult], pitch_out: dict[str, Any] | None = None) -> dict[str, Any] | None:
     import parselmouth
 
     samples, rate = _read_pcm16(wav)
@@ -100,6 +118,8 @@ def _measure(wav: bytes, zones: list[WordZoneResult]) -> dict[str, Any] | None:
     p_freq = np.asarray(pitch.selected_array["frequency"])
     voiced = p_freq > 0
     voiced_ms = int(round(int(voiced.sum()) * STEP_S * 1000))
+    if pitch_out is not None:
+        pitch_out.update(f0_summary(p_freq))
 
     intensity = sound.to_intensity(minimum_pitch=200, time_step=STEP_S)
     i_times = np.asarray(intensity.xs())
@@ -163,11 +183,15 @@ def _measure(wav: bytes, zones: list[WordZoneResult]) -> dict[str, Any] | None:
 
     zone_out: dict[str, dict[str, Any]] = {}
     vowel_f3: list[float] = []
+    all_f1: list[float] = []
+    all_f2: list[float] = []
     for z in zones:
         w = windows.get(z.zoneId)
         if w is None or z.kind not in ("vowel", "tuner"):
             continue
         f1s, f2s, f3s, count = formant_lists(*w)
+        all_f1.extend(f1s)
+        all_f2.extend(f2s)
         if z.kind == "vowel":
             vowel_f3.extend(f3s)
         zone_out[z.zoneId] = {
@@ -177,6 +201,9 @@ def _measure(wav: bytes, zones: list[WordZoneResult]) -> dict[str, Any] | None:
             "voicedMs": int(round(count * STEP_S * 1000)),
         }
     vowel_med = _median(vowel_f3)
+    if pitch_out is not None:
+        pitch_out["f1Hz"] = _hz(_median(all_f1))
+        pitch_out["f2Hz"] = _hz(_median(all_f2))
 
     for z in zones:
         w = windows.get(z.zoneId)

@@ -161,7 +161,7 @@ def payload(text):
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])
 def test_acoustics_in_word_message_when_audio_sent(tmp_path, monkeypatch, provider):
-    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones: CLEAR)
+    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones, *_: CLEAR)
     if provider == "anthropic":
         fake = FakeClient(word_decision())
         r = anthropic_client(tmp_path, fake).post("/v1/live/coach", json=body())
@@ -177,7 +177,7 @@ def test_acoustics_in_word_message_when_audio_sent(tmp_path, monkeypatch, provid
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])
 def test_no_acoustics_without_audio(tmp_path, monkeypatch, provider):
-    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones: pytest.fail("measured without audio"))
+    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones, *_: pytest.fail("measured without audio"))
     if provider == "anthropic":
         fake = FakeClient(word_decision())
         anthropic_client(tmp_path, fake).post("/v1/live/coach", json=body(audio=False))
@@ -198,7 +198,7 @@ def test_real_measurement_reaches_the_model(tmp_path):
 
 
 def test_setting_off_skips_acoustics(tmp_path, monkeypatch):
-    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones: pytest.fail("measured while disabled"))
+    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones, *_: pytest.fail("measured while disabled"))
     fake = FakeClient(word_decision())
     anthropic_client(tmp_path, fake, word_acoustics_enabled=False).post("/v1/live/coach", json=body())
     assert "acoustics" not in payload(anthropic_text(fake.calls[0]))
@@ -206,7 +206,7 @@ def test_setting_off_skips_acoustics(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])
 def test_unclear_speech_with_usable_board_skips_the_model(tmp_path, monkeypatch, provider):
-    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones: UNCLEAR)
+    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones, *_: UNCLEAR)
     fake = FakeClient(word_decision()) if provider == "anthropic" else FakeOpenAI(word_decision())
     c = anthropic_client(tmp_path, fake) if provider == "anthropic" else client_for(tmp_path, fake)
     data = c.post("/v1/live/coach", json=body()).json()
@@ -217,14 +217,14 @@ def test_unclear_speech_with_usable_board_skips_the_model(tmp_path, monkeypatch,
 
 
 def test_unclear_speech_with_unclear_board_quality_is_unchanged(tmp_path, monkeypatch):
-    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones: UNCLEAR)
+    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones, *_: UNCLEAR)
     fake = FakeClient(word_decision())
     r = anthropic_client(tmp_path, fake).post("/v1/live/coach", json=body(quality="unclear", reason="silence"))
     assert r.json()["word"]["verdict"] == "insufficient"
 
 
 def test_measure_raising_or_timing_out_coaches_without_acoustics(tmp_path, monkeypatch):
-    def boom(wav, zones):
+    def boom(wav, zones, *_):
         raise RuntimeError("praat")
 
     monkeypatch.setattr(orchestrator, "measure_word", boom)
@@ -233,7 +233,7 @@ def test_measure_raising_or_timing_out_coaches_without_acoustics(tmp_path, monke
     assert r.json()["source"] == "agent" and "acoustics" not in payload(anthropic_text(fake.calls[0]))
 
     monkeypatch.setattr(orchestrator, "_ACOUSTICS_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones: time.sleep(0.4) or CLEAR)
+    monkeypatch.setattr(orchestrator, "measure_word", lambda wav, zones, *_: time.sleep(0.4) or CLEAR)
     fake = FakeClient(word_decision())
     r = anthropic_client(tmp_path, fake).post("/v1/live/coach", json=body())
     assert r.json()["source"] == "agent" and "acoustics" not in payload(anthropic_text(fake.calls[0]))

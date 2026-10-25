@@ -204,10 +204,10 @@ class InkSessionImpl implements InkSession {
           return;
         }
         this.ws = ws;
-        emit('mic', 'stt', 'stt.open', 'speech-to-text socket open', {});
+        emit('mic', 'stt', 'stt.open', 'speech-to-text socket open', { provider: 'cartesia' });
         ws.addEventListener('message', (e) => this.onMessage(e));
         ws.addEventListener('close', () => {
-          emit('mic', 'stt', 'stt.close', 'speech-to-text socket closed', {});
+          emit('mic', 'stt', 'stt.close', 'speech-to-text socket closed', { provider: 'cartesia' });
           this.settle?.();
         });
         for (const q of this.queue) ws.send(q);
@@ -228,7 +228,7 @@ class InkSessionImpl implements InkSession {
     if (m.type === 'transcript') {
       if (m.is_final && typeof m.text === 'string') this.text += m.text;
       if (typeof m.text === 'string' && m.text) {
-        emit('stt', 'ui', 'stt.transcript', 'transcript', { text: m.text.slice(0, 80), final: m.is_final === true });
+        emit('stt', 'ui', 'stt.transcript', 'transcript', { text: m.text.slice(0, 80), final: m.is_final === true, provider: 'cartesia' });
       }
     } else if (m.type === 'flush_done') {
       this.settle?.();

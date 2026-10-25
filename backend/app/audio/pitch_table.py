@@ -9,11 +9,13 @@ import asyncio
 import io
 import logging
 import math
+import time
 import wave
 from typing import Any
 
 import numpy as np
 
+from app.audio.extract import emit_pitch_extract, emit_pitch_result, f0_summary
 from app.config import Settings
 from app.integrations.cartesia import cached_speech_wav
 
@@ -54,8 +56,12 @@ def _finite(value: float) -> float | None:
     return round(float(value), 1)
 
 
-def extract_table(samples: np.ndarray, rate: int) -> dict[str, Any] | None:
-    """One row per 10 ms: time, pitch, F1, F2, voiced. Missing measurements stay null."""
+def extract_table(samples: np.ndarray, rate: int, pitch_out: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """One row per 10 ms: time, pitch, F1, F2, voiced. Missing measurements stay null.
+
+    When `pitch_out` is given it is filled with f0_summary() over every frame (not only the stored rows),
+    for telemetry only.
+    """
     if samples.size < int(rate * 0.06):
         return None
     import parselmouth
@@ -86,6 +92,8 @@ def extract_table(samples: np.ndarray, rate: int) -> dict[str, Any] | None:
             f2 = None
         measured.append({"tMs": round(t * 1000), "f0Hz": hz, "f1Hz": f1, "f2Hz": f2, "voiced": hz is not None})
     voiced_rows = [row for row in measured if row["voiced"]]
+    if pitch_out is not None:
+        pitch_out.update(f0_summary(np.array([row["f0Hz"] or 0.0 for row in measured], dtype=np.float64)))
     step = max(1, math.ceil(len(measured) / MAX_ROWS))
     return {
         "rows": measured[::step][:MAX_ROWS],
@@ -142,14 +150,21 @@ def cue_line(word: str, cue: str) -> str:
 
 def compare_wav(settings: Settings, wav: bytes, sound: str, word: str | None = None) -> dict[str, Any] | None:
     """Learner table plus the Cartesia reference table for this word, when a key is configured."""
+    stats: dict[str, Any] = {}
     try:
         samples, rate = read_pcm16(wav)
-        learner = extract_table(samples, rate)
+        emit_pitch_extract(round(samples.size / rate, 2) if rate else None, "praat", "praat measure")
+        started = time.perf_counter()
+        learner = extract_table(samples, rate, stats)
     except Exception as exc:  # noqa: BLE001
         logger.warning("pitch table skipped: %s", type(exc).__name__)
         return None
     if learner is None:
         return None
+    if stats:
+        emit_pitch_result(
+            {**stats, "f1Hz": learner.get("f1Hz"), "f2Hz": learner.get("f2Hz")}, time.perf_counter() - started, "praat"
+        )
     word = word or REFERENCE_WORDS.get(sound, sound)
     reference = _reference_table(settings, word)
     cue = choose_cue(learner, reference)

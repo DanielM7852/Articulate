@@ -13,7 +13,8 @@ from typing import Any
 import httpx
 
 from app import telemetry
-from app.audio.word_acoustics import measure_word
+from app.audio.extract import emit_pitch_extract, emit_pitch_result
+from app.audio.word_acoustics import measure_word, wav_seconds
 from app.config import Settings
 from app.integrations.spacetime import SpacetimeClient, unwrap, uuid_literal
 from app.live import llm
@@ -222,10 +223,16 @@ async def _measure_acoustics(settings: Settings, body: LiveCoachRequest, wav: by
     """Praat measurements of the attempt WAV, or None when disabled, absent, failed or too slow. Never raises."""
     if wav is None or not settings.word_acoustics_enabled or body.word is None:
         return None
+    pitch: dict[str, Any] = {}
+    emit_pitch_extract(wav_seconds(wav), "praat", "praat measure")
+    started = time.perf_counter()
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(measure_word, wav, list(body.word.zones)), _ACOUSTICS_TIMEOUT_S
+        result = await asyncio.wait_for(
+            asyncio.to_thread(measure_word, wav, list(body.word.zones), pitch), _ACOUSTICS_TIMEOUT_S
         )
+        if result is not None and pitch:
+            emit_pitch_result(dict(pitch), time.perf_counter() - started, "praat")
+        return result
     except Exception as exc:  # noqa: BLE001 - acoustics are optional evidence
         name = type(exc).__name__
         if name not in _acoustics_warned:
