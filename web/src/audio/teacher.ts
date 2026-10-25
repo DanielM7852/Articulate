@@ -190,6 +190,11 @@ class Impl implements TeacherSpeech {
   private sources: AudioBufferSourceNode[] = [];
   private startAt = 0;
   private nextAt = 0;
+  // Silences inserted when a chunk arrived after the queue ran dry, in AudioContext time; the audio
+  // stream position skips them, so Cartesia's timestamps stay aligned with what is heard.
+  private gaps: { from: number; to: number }[] = [];
+  private gap = 0; // total of gaps, in seconds
+  private lastClock = -Infinity; // clock() never goes backwards once started
   private streamDone = false;
   private carry: Uint8Array = new Uint8Array(0);
   private sampleRate = 24000;
@@ -226,7 +231,32 @@ class Impl implements TeacherSpeech {
   private rawClock(): number {
     if (!this.started) return -1;
     if (this.source === 'browser') return (performance.now() - this.browserStart) / 1000;
-    return this.ctx ? this.ctx.currentTime - this.startAt : -1;
+    if (!this.ctx) return -1;
+    // Negative only during the pre-roll before the first sample is heard (lip sync reads that as "not
+    // started"); after that it never drops below 0 or goes backwards, even if the output latency changes.
+    const t = this.streamPosition(this.heardTime(this.ctx));
+    if (t > this.lastClock) this.lastClock = t;
+    return this.lastClock;
+  }
+
+  /** AudioContext time of the sample reaching the listener now (the scheduling clock minus output latency). */
+  private heardTime(ctx: AudioContext): number {
+    return ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0);
+  }
+
+  /**
+   * Seconds of Cartesia audio played by context time `at`: wall time since the first chunk, minus the
+   * silences where the queue ran dry, and frozen at the end of the queued audio while it waits.
+   */
+  private streamPosition(at: number): number {
+    const t = Math.min(at, this.nextAt);
+    if (this.gap === 0) return t - this.startAt;
+    let skipped = 0;
+    for (const g of this.gaps) {
+      if (t <= g.from) break;
+      skipped += Math.min(t, g.to) - g.from;
+    }
+    return t - this.startAt - skipped;
   }
 
   // ---- lifecycle
@@ -281,7 +311,8 @@ class Impl implements TeacherSpeech {
   private tick(): void {
     if (this.ended) return;
     const t = this.rawClock();
-    if (this.source === 'cartesia' && this.streamDone && this.ctx && this.ctx.currentTime >= this.nextAt) {
+    // Finish once the last queued sample has been heard, so the frozen clock lands on the full stream length.
+    if (this.source === 'cartesia' && this.streamDone && this.ctx && this.heardTime(this.ctx) >= this.nextAt) {
       this.finish('finished');
       return;
     }
@@ -432,6 +463,11 @@ class Impl implements TeacherSpeech {
     source.buffer = buffer;
     source.connect(ctx.destination);
     const at = Math.max(this.nextAt, ctx.currentTime + LEAD_S);
+    if (this.started && at > this.nextAt) {
+      // Late chunk (network jitter): the speaker falls silent until `at`; the stream clock skips it.
+      this.gaps.push({ from: this.nextAt, to: at });
+      this.gap += at - this.nextAt;
+    }
     if (!this.started) {
       this.startAt = at;
       this.markStarted();

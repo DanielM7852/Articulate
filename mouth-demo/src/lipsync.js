@@ -17,10 +17,17 @@ const CHANNELS = [
 ];
 const INDEX = Object.fromEntries(CHANNELS.map((n, i) => [n, i]));
 
-// Compact viseme spec: left/right pairs share one value.
+// Side-cutaway weights (cutaway.setBlend), carried as extra lanes after the blend shapes so the
+// same spring smooths them. Only the CHANNELS lanes are ever written to the driver.
+const CUT_KEYS = ["ah", "oo", "ee", "tongue", "velar"];
+const N_SHAPES = CHANNELS.length;
+const LANES = N_SHAPES + CUT_KEYS.length;
+const CUT = Object.fromEntries(CUT_KEYS.map((k, i) => [k, N_SHAPES + i]));
+
+// Compact viseme spec: left/right pairs share one value; `cut` holds the cutaway weights.
 const PAIRS = { press: "mouthPress", smile: "mouthSmile", stretch: "mouthStretch", lower: "mouthLowerDown", upper: "mouthUpperUp" };
-function viseme(spec) {
-  const out = new Float32Array(CHANNELS.length);
+function viseme(spec, cut = {}) {
+  const out = new Float32Array(LANES);
   for (const [k, v] of Object.entries(spec)) {
     if (PAIRS[k]) {
       out[INDEX[`${PAIRS[k]}Left`]] = v;
@@ -29,25 +36,27 @@ function viseme(spec) {
       out[INDEX[k]] = v;
     }
   }
+  for (const [k, v] of Object.entries(cut)) out[CUT[k]] = v;
   return out;
 }
 
 // Jaw floors at 0.06 for everything but bilabials, so the mouth never shuts mid-word.
+// Bilabials and labiodentals keep the cutaway neutral: the tongue rests and the lips do the work.
 const V = {
   rest: viseme({}),
-  open: viseme({ jawOpen: 0.5, lower: 0.25, upper: 0.1 }), // ah, a, ae, schwa
-  mid: viseme({ jawOpen: 0.32, stretch: 0.22, smile: 0.1, lower: 0.12 }), // eh, ey
-  spread: viseme({ jawOpen: 0.14, smile: 0.4, stretch: 0.3 }), // ee, ih, y
-  round: viseme({ jawOpen: 0.35, mouthFunnel: 0.55, mouthPucker: 0.35 }), // aw, o
-  pucker: viseme({ jawOpen: 0.12, mouthPucker: 0.85, mouthFunnel: 0.6 }), // oo, w
+  open: viseme({ jawOpen: 0.5, lower: 0.25, upper: 0.1 }, { ah: 1 }), // ah, a, ae, schwa
+  mid: viseme({ jawOpen: 0.32, stretch: 0.22, smile: 0.1, lower: 0.12 }, { ah: 0.5, ee: 0.3 }), // eh, ey
+  spread: viseme({ jawOpen: 0.14, smile: 0.4, stretch: 0.3 }, { ee: 1 }), // ee, ih, y
+  round: viseme({ jawOpen: 0.35, mouthFunnel: 0.55, mouthPucker: 0.35 }, { oo: 0.7, ah: 0.3 }), // aw, o
+  pucker: viseme({ jawOpen: 0.12, mouthPucker: 0.85, mouthFunnel: 0.6 }, { oo: 1 }), // oo, w
   bilabial: viseme({ jawOpen: 0.02, mouthClose: 0.65, press: 0.5 }), // p b m
   labiodental: viseme({ jawOpen: 0.1, mouthRollLower: 0.6, upper: 0.2 }), // f v
-  postalv: viseme({ jawOpen: 0.15, mouthPucker: 0.5, mouthFunnel: 0.5 }), // sh zh ch j
-  sibilant: viseme({ jawOpen: 0.06, smile: 0.25, stretch: 0.2 }), // s z
-  tongue: viseme({ jawOpen: 0.18, lower: 0.08 }), // t d n l th
-  velar: viseme({ jawOpen: 0.2, lower: 0.06 }), // k g ng h
-  r: viseme({ jawOpen: 0.15, mouthPucker: 0.3, mouthFunnel: 0.2 }),
-  other: viseme({ jawOpen: 0.2, lower: 0.06 }), // unknown symbol
+  postalv: viseme({ jawOpen: 0.15, mouthPucker: 0.5, mouthFunnel: 0.5 }, { oo: 0.5, tongue: 0.3 }), // sh zh ch j
+  sibilant: viseme({ jawOpen: 0.06, smile: 0.25, stretch: 0.2 }, { ee: 0.5, tongue: 0.4 }), // s z
+  tongue: viseme({ jawOpen: 0.18, lower: 0.08 }, { tongue: 1 }), // t d n l th
+  velar: viseme({ jawOpen: 0.2, lower: 0.06 }, { velar: 1 }), // k g ng h
+  r: viseme({ jawOpen: 0.15, mouthPucker: 0.3, mouthFunnel: 0.2 }, { oo: 0.4 }),
+  other: viseme({ jawOpen: 0.2, lower: 0.06 }, { ah: 0.2 }), // unknown symbol
 };
 
 const GROUPS = {
@@ -107,9 +116,10 @@ const clean = (list, keyOk) => (Array.isArray(list) ? list.filter((x) => x && ke
 const byStart = (a, b) => a.start - b.start;
 
 export function createLipSync({ driver, isBlocked = () => false, emit = () => {} }) {
-  const values = new Float32Array(CHANNELS.length);
-  const vel = new Float32Array(CHANNELS.length);
-  const target = new Float32Array(CHANNELS.length);
+  const values = new Float32Array(LANES);
+  const vel = new Float32Array(LANES);
+  const target = new Float32Array(LANES);
+  const poseOut = { ah: 0, oo: 0, ee: 0, tongue: 0, velar: 0 }; // reused by pose(), no per-frame garbage
   let session = null;
   let owning = false; // we have written shapes the driver still holds
 
@@ -123,7 +133,8 @@ export function createLipSync({ driver, isBlocked = () => false, emit = () => {}
       target.set(visemeFor(t < (prev.end + next.start) / 2 ? prev.p : next.p));
       return true;
     }
-    if (prev && !next && t - prev.end < GAP_HOLD_S / 2) { target.set(visemeFor(prev.p)); return true; }
+    // Past the last phoneme received so far: more may still be streaming in, so hold it until end().
+    if (prev && !next && (!s.ended || t - prev.end < GAP_HOLD_S / 2)) { target.set(visemeFor(prev.p)); return true; }
     if (!prev && next && next.start - t < GAP_HOLD_S / 2) { target.set(visemeFor(next.p)); return true; }
     target.fill(0);
     return true;
@@ -146,13 +157,16 @@ export function createLipSync({ driver, isBlocked = () => false, emit = () => {}
     const e = swing * amp;
     target[INDEX.jawOpen] = 0.08 + 0.34 * e;
     target[INDEX.mouthLowerDownLeft] = target[INDEX.mouthLowerDownRight] = 0.14 * e;
-    if (flavour < 0.3) { target[INDEX.mouthPucker] = 0.3 * e; target[INDEX.mouthFunnel] = 0.2 * e; }
-    else if (flavour > 0.65) { target[INDEX.mouthSmileLeft] = target[INDEX.mouthSmileRight] = 0.2 * e; }
+    target[CUT.ah] = 0.8 * e;
+    if (flavour < 0.3) { target[INDEX.mouthPucker] = 0.3 * e; target[INDEX.mouthFunnel] = 0.2 * e; target[CUT.oo] = 0.2 * e; }
+    else if (flavour > 0.65) { target[INDEX.mouthSmileLeft] = target[INDEX.mouthSmileRight] = 0.2 * e; target[CUT.ee] = 0.2 * e; }
   };
 
   const computeTarget = (s, t) => {
     const ph = s.phonemes;
-    const phonemeMode = ph.length && t >= ph[0].start - GAP_HOLD_S && t <= ph[ph.length - 1].end + GAP_HOLD_S;
+    // Sticky once phonemes arrive: until end() the timeline may only be partly streamed, so never
+    // drop to the word-only fallback between batches. Sessions with no phonemes (browser TTS) use words.
+    const phonemeMode = ph.length > 0 && t >= ph[0].start - GAP_HOLD_S && (!s.ended || t <= ph[ph.length - 1].end + GAP_HOLD_S);
     if (phonemeMode) fillPhoneme(s, t);
     else fillWord(s, t);
   };
@@ -208,6 +222,17 @@ export function createLipSync({ driver, isBlocked = () => false, emit = () => {}
   return {
     get speaking() { return !!session; },
 
+    // Smoothed cutaway weights in [0, 1] for this frame (read after update). All zero while a cue
+    // owns the mouth or once speech has settled. Returns the same object every call.
+    pose() {
+      const off = isBlocked();
+      for (let j = 0; j < CUT_KEYS.length; j++) {
+        const v = values[N_SHAPES + j];
+        poseOut[CUT_KEYS[j]] = off || !(v > 0) ? 0 : v > 1 ? 1 : v;
+      }
+      return poseOut;
+    },
+
     speak({ clock, timeline } = {}) {
       if (session) { session.stop(); }
       const s = {
@@ -256,7 +281,7 @@ export function createLipSync({ driver, isBlocked = () => false, emit = () => {}
         releaseDriver();
         return;
       }
-      for (let i = 0; i < CHANNELS.length; i++) driver.setShape(CHANNELS[i], Math.max(0, values[i]));
+      for (let i = 0; i < N_SHAPES; i++) driver.setShape(CHANNELS[i], Math.max(0, values[i]));
       owning = true;
     },
 

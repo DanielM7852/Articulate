@@ -1,60 +1,187 @@
-/* ---------- Intro: one Go button over the empty stage ----------
- * Only the ambient particles show until the tap; the button then fades while the head assembles.
+/* ---------- Intro: landing overlay over the stage ----------
+ * Once the guide is ready its dots draw the ribbon (data-dotted): the overlay turns see-through over a
+ * paper-coloured stage and the picture steps aside. Begin fades the overlay while the ribbon morphs into
+ * the head. It stacks above the guide (z 2) and below the floating access toggles (.ob-bar--float, z 3).
  */
-.intro-go {
+.intro-landing {
+  --gutter: clamp(24px, 5vw, 72px);
   position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 3;
-  width: 168px;
-  height: 168px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--color-navy);
-  color: #fff;
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  translate: -50% -50%;
-  box-shadow: 0 6px 0 var(--color-navy-deep), 0 24px 56px rgba(23, 47, 78, 0.26);
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
   transition:
     opacity 420ms var(--ease-out),
-    transform 420ms var(--ease-out),
-    box-shadow 110ms var(--ease-out),
+    background-color 300ms ease;
+}
+/* The stage's staggered entrance fills opacity, which would block the fade-out. */
+.ob-content.intro > .intro-landing {
+  animation: none;
+}
+.intro-landing[data-gone] {
+  opacity: 0;
+  pointer-events: none;
+}
+.intro-landing[data-dotted] {
+  background-color: transparent;
+}
+.intro-landing[data-dotted] .intro-landing__sculpture {
+  opacity: 0; /* still laid out: the dots are placed on its box */
+}
+.intro-landing__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 108px;
+  padding: 0 var(--gutter);
+}
+.intro-landing__head img {
+  display: block;
+  width: 30px;
+  height: 32px;
+}
+.intro-landing__brand {
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1;
+}
+.intro-landing__body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 26px;
+  margin: 0 var(--gutter);
+  padding-top: 50px;
+  border-top: 1px solid #cdd3d8;
+  min-height: 0;
+}
+.intro-landing__title {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(40px, 5.83vw, 84px);
+  line-height: 1.21;
+  color: var(--color-navy);
+}
+.intro-landing__art {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  align-self: end;
+  position: relative;
+  width: 100%;
+  max-width: 845px;
+  aspect-ratio: 845 / 359;
+  margin-top: 12%;
+}
+.intro-landing__art img {
+  position: absolute;
+  display: block;
+}
+.intro-landing__contour {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+.intro-landing__sculpture {
+  left: 11.48%; /* 97 / 845 */
+  top: -10.6%; /* -38 / 359 */
+  width: 87.57%; /* 740 / 845 */
+  height: 122.56%; /* 440 / 359 */
+  object-fit: cover;
+  transition: opacity 600ms ease; /* crossfades with the dots' own fade-in */
+}
+.intro-landing__invite {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 30px;
+  padding-bottom: 24px;
+  position: relative;
+  z-index: 2;
+}
+.intro-landing__invite p {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.65;
+  color: #606a70;
+}
+.intro-landing__begin {
+  width: 192px;
+  height: 60px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--color-navy);
+  color: var(--color-ivory);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform var(--dur-press) var(--ease-out),
     background-color 150ms ease;
 }
-.intro-go:active:not(:disabled) {
-  transform: translateY(4px);
-  box-shadow: 0 2px 0 var(--color-navy-deep), 0 12px 28px rgba(23, 47, 78, 0.2);
+.intro-landing__begin:active {
+  transform: scale(0.97);
 }
-.intro-go:focus-visible {
-  box-shadow: var(--focus-ring), 0 6px 0 var(--color-navy-deep), 0 24px 56px rgba(23, 47, 78, 0.26);
-}
-.intro-go[data-gone] {
-  opacity: 0;
-  transform: scale(0.9);
-  pointer-events: none;
-  cursor: default;
+.intro-landing__begin:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 @media (hover: hover) and (pointer: fine) {
-  .intro-go:hover:not(:disabled) {
+  .intro-landing__begin:hover {
     background: #284a7a;
   }
 }
-@media (max-width: 720px) {
-  .intro-go {
-    width: 136px;
-    height: 136px;
-    font-size: 28px;
+.intro-landing__close {
+  flex: none;
+  display: block;
+  width: calc(100% - 2 * var(--gutter));
+  max-width: 1296px;
+  height: auto;
+  margin: 0 var(--gutter) 32px;
+}
+@media (max-width: 860px) {
+  .intro-landing__head {
+    height: 84px;
+  }
+  .intro-landing__body {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    padding-top: 28px;
+    padding-bottom: 28px;
+  }
+  .intro-landing__art {
+    order: 2;
+    margin-top: 6%;
+    align-self: stretch;
+    justify-self: auto;
+    max-width: none;
+  }
+  .intro-landing__invite {
+    order: 3;
+    padding-bottom: 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .intro-go {
-    transition: opacity 200ms ease, background-color 150ms ease;
+  .intro-landing {
+    transition: opacity 200ms ease;
   }
-  .intro-go:active:not(:disabled),
-  .intro-go[data-gone] {
+  .intro-landing__begin:active {
     transform: none;
   }
 }
