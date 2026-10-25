@@ -1,4 +1,5 @@
 import '../../__tests__/harness';
+import './demoCues.test';
 import './ghost.test';
 import './phoneMap.test';
 import './plan.test';

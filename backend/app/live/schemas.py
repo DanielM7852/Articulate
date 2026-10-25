@@ -485,7 +485,7 @@ class WordAskAttempt(BaseModel):
 
 
 class WordAskRequest(BaseModel):
-    """A learner's question about the word lesson, relayed by Ava's ask_coach tool."""
+    """A learner's question about the word lesson, relayed by Ava's think_it_through tool."""
 
     model_config = ConfigDict(extra="ignore")
 

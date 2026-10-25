@@ -44,31 +44,33 @@ def test_model_and_eagerness_are_configurable():
 
 def test_tools_are_the_persona_tools():
     names = [t["name"] for t in TOOLS]
-    assert names == ["get_coaching", "start_practice", "end_practice", "learner_attempt", "stay_quiet", "ask_coach"]
+    assert names == ["review_attempt", "start_practice", "end_practice", "learner_attempt", "stay_quiet", "think_it_through", "show_demo", "lesson_control"]
     assert all(t["type"] == "function" for t in TOOLS)
     coaching = TOOLS[0]["parameters"]
     assert coaching["required"] == ["attempt_id"]
-    assert CLIENT_TOOLS == {"start_practice", "end_practice", "learner_attempt", "stay_quiet"}
+    assert CLIENT_TOOLS == {
+        "start_practice", "end_practice", "learner_attempt", "stay_quiet", "show_demo", "lesson_control",
+    }
     by_name = {t["name"]: t["parameters"] for t in TOOLS}
     empty = {"type": "object", "properties": {}, "additionalProperties": False}
     assert by_name["learner_attempt"] == empty and by_name["stay_quiet"] == empty
-    assert by_name["ask_coach"]["required"] == ["question"]
+    assert by_name["think_it_through"]["required"] == ["question"]
     json.dumps(TOOLS)  # serialisable as sent
 
 
 def test_instructions_carry_the_persona_rules():
     text = instructions("Ava").lower()
-    for rule in ("one or two short sentences", "never judge pronunciation", "never say \"listen\", \"hear\"",
-                 "stay silent", "get_coaching", "captions", "digits"):
+    for rule in ("one or two short sentences", "cannot perceive how an attempt sounded", "never say \"listen\", \"hear\"",
+                 "stay silent", "review_attempt", "captions", "digits"):
         assert rule in text, rule
 
 
 def test_instructions_classify_turns_and_route_through_tools():
     text = instructions("Ava")
-    for token in ("[app]", "learner_attempt", "stay_quiet", "ask_coach", "start_practice", "end_practice",
-                  "truck", "three words or fewer", "untrusted", "Claude speech coach"):
+    for token in ("[app]", "learner_attempt", "stay_quiet", "think_it_through", "start_practice", "end_practice",
+                  "truck", "three words or fewer", "untrusted"):
         assert token in text, token
-    assert len(text.split()) < 900
+    assert len(text.split()) < 1300
 
 
 def test_client_secret_request_wraps_session_with_ttl():

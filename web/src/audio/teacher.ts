@@ -178,9 +178,44 @@ function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
+/** Sent on every streamed input; we push whole punctuated sentences, so there is nothing to wait for. */
+const STREAM_MAX_BUFFER_DELAY_MS = 0;
+
+export interface TeacherStream extends TeacherSpeech {
+  /** Append one complete sentence. Ignored (no throw) after end() or once ended/cancelled. Empty/whitespace ignored.
+   *  Returns true when the sentence was accepted and queued for synthesis, false when it was ignored. */
+  push(sentence: string): boolean;
+  /** No more text. Closes the Cartesia context (empty transcript, continue:false). With zero pushes, finishes at once ('finished'). Idempotent. */
+  end(): void;
+  /** Pushed sentences in order with their character offset in `text`. */
+  readonly segments: readonly { text: string; start: number }[];
+  /** Words whose audio has started (words[i].start <= clock()), joined with single spaces; '' before playback starts. After cancel uses the frozen clock. */
+  heardText(): string;
+}
+
 type Listener = (...args: never[]) => void;
 
-class Impl implements TeacherSpeech {
+/** Timestamps on a continued context should be cumulative; if a block restarts near 0, treat it as per-input and offset it. */
+class TimeBase {
+  private offset = 0;
+  private lastRawEnd = 0;
+  adjust(starts: number[], ends: number[]): void {
+    if (starts.length && starts[0] + 0.05 < this.lastRawEnd) {
+      // A new input restarted near 0: offset by everything before it, and measure this input from scratch so its
+      // later blocks (which continue from this one) are not offset again.
+      this.offset += this.lastRawEnd;
+      this.lastRawEnd = 0;
+    }
+    for (let i = 0; i < starts.length; i++) {
+      if (ends[i] > this.lastRawEnd || starts[i] > this.lastRawEnd) this.lastRawEnd = Math.max(ends[i], starts[i]);
+    }
+    if (this.offset) {
+      for (let i = 0; i < starts.length; i++) { starts[i] += this.offset; ends[i] += this.offset; }
+    }
+  }
+}
+
+class Impl implements TeacherStream {
   source: 'cartesia' | 'browser' = 'cartesia';
   readonly words: TimedWord[] = [];
   readonly phonemes: TimedPhoneme[] = [];
@@ -221,8 +256,26 @@ class Impl implements TeacherSpeech {
 
   private frozen: number | null = null;
 
-  constructor(readonly text: string, private readonly speed: number | undefined) {
+  // streaming (one Cartesia context per reply)
+  readonly segments: { text: string; start: number }[] = [];
+  private joined = '';
+  private outbox: { transcript: string; cont: boolean }[] = [];
+  private sentIdx = 0;
+  private wsOpen = false;
+  private endCalled = false;
+  private wordBase = new TimeBase();
+  private phonemeBase = new TimeBase();
+  private pendingUtterances = 0;
+  private browserT = 0;
+  private browserSpoke = false;
+  private fallbackReason = '';
+
+  constructor(private readonly fixedText: string, private readonly speed: number | undefined, private readonly stream = false) {
     this.done = new Promise<void>((resolve) => { this.resolveDone = resolve; });
+  }
+
+  get text(): string {
+    return this.stream ? this.joined : this.fixedText;
   }
 
   on(ev: TeacherEvent, fn: Listener): () => void {
@@ -275,7 +328,84 @@ class Impl implements TeacherSpeech {
   // ---- lifecycle
 
   begin(): void {
-    void this.runBakedOrLive();
+    if (this.stream) void this.runCartesia();
+    else void this.runBakedOrLive();
+  }
+
+  push(sentence: string): boolean {
+    if (!this.stream || this.ended || this.endCalled) return false;
+    const t = sentence.trim();
+    if (!t) return false;
+    const lead = this.segments.length ? ' ' : '';
+    this.segments.push({ text: t, start: this.joined.length + lead.length });
+    this.joined += lead + t;
+    if (this.source === 'browser') {
+      this.speakBrowserChunk(t);
+      return true;
+    }
+    this.outbox.push({ transcript: lead + t, cont: true });
+    this.flushOutbox();
+    return true;
+  }
+
+  end(): void {
+    if (!this.stream || this.ended || this.endCalled) return;
+    this.endCalled = true;
+    if (this.segments.length === 0) {
+      this.teardownTransport(false);
+      this.finish('finished');
+      return;
+    }
+    if (this.source === 'browser') {
+      if (this.pendingUtterances === 0) this.finish('finished');
+      return;
+    }
+    this.outbox.push({ transcript: '', cont: false });
+    this.flushOutbox();
+  }
+
+  heardText(): string {
+    const t = this.clock();
+    const out: string[] = [];
+    for (const w of this.words) {
+      if (w.start > t) break;
+      if (w.text) out.push(w.text);
+    }
+    return out.join(' ');
+  }
+
+  private flushOutbox(): void {
+    const ws = this.ws;
+    const info = this.info;
+    if (!ws || !info || !this.wsOpen || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      while (this.sentIdx < this.outbox.length) {
+        const m = this.outbox[this.sentIdx];
+        const body = this.requestBody(info, m.transcript, m.cont);
+        body.max_buffer_delay_ms = STREAM_MAX_BUFFER_DELAY_MS;
+        if (this.sentIdx === 0) emit('ui', 'tts', 'tts.speak', 'speak line', { chars: m.transcript.length, voice: info.voice_id });
+        ws.send(JSON.stringify(body));
+        this.sentIdx++;
+      }
+    } catch {
+      this.failTransport('Cartesia connection error.');
+    }
+  }
+
+  private requestBody(info: TokenResponse, transcript: string, cont: boolean): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      model_id: info.model_id,
+      transcript,
+      voice: { mode: 'id', id: info.voice_id },
+      output_format: { container: 'raw', encoding: 'pcm_f32le', sample_rate: this.sampleRate },
+      context_id: this.contextId,
+      language: 'en',
+      add_timestamps: true,
+      add_phoneme_timestamps: true,
+      continue: cont,
+    };
+    if (this.speed !== undefined && Math.abs(this.speed - 1) > 0.01) body.generation_config = { speed: this.speed };
+    return body;
   }
 
   /** Fixed scripted lines play from a prebaked file (no TTS credits); everything else, or any failure, goes live. */
@@ -362,7 +492,7 @@ class Impl implements TeacherSpeech {
     if (this.ended) return;
     const t = this.rawClock();
     // Finish once the last queued sample has been heard, so the frozen clock lands on the full stream length.
-    if (this.source === 'cartesia' && this.streamDone && this.ctx && this.heardTime(this.ctx) >= this.nextAt) {
+    if (this.source === 'cartesia' && this.streamDone && (!this.stream || this.endCalled) && this.ctx && this.heardTime(this.ctx) >= this.nextAt) {
       this.finish('finished');
       return;
     }
@@ -424,20 +554,17 @@ class Impl implements TeacherSpeech {
     this.ws = ws;
     this.info = info;
     this.gotMessage = false;
+    this.wsOpen = false;
+    this.sentIdx = 0;
     const send = () => {
-      const body: Record<string, unknown> = {
-        model_id: info.model_id,
-        transcript: this.text,
-        voice: { mode: 'id', id: info.voice_id },
-        output_format: { container: 'raw', encoding: 'pcm_f32le', sample_rate: this.sampleRate },
-        context_id: this.contextId,
-        language: 'en',
-        add_timestamps: true,
-        add_phoneme_timestamps: true,
-        continue: false,
-      };
-      if (this.speed !== undefined && Math.abs(this.speed - 1) > 0.01) body.generation_config = { speed: this.speed };
-      emit('ui', 'tts', 'tts.speak', 'speak line', { chars: this.text.length, voice: info.voice_id });
+      if (this.ws !== ws) return;
+      if (this.stream) {
+        this.wsOpen = true;
+        this.flushOutbox();
+        return;
+      }
+      const body = this.requestBody(info, this.fixedText, false);
+      emit('ui', 'tts', 'tts.speak', 'speak line', { chars: this.fixedText.length, voice: info.voice_id });
       ws.send(JSON.stringify(body));
     };
     ws.onopen = send;
@@ -455,6 +582,7 @@ class Impl implements TeacherSpeech {
       setTimeout(() => {
         if (this.ended || this.gotMessage || this.ws !== ws) return;
         this.ws = null;
+        this.wsOpen = false;
         ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
         try { ws.close(); } catch { /* ignore */ }
         try {
@@ -538,6 +666,8 @@ class Impl implements TeacherSpeech {
   }
 
   private markStreamDone(): void {
+    // A stream's context stays open until end(): an early done must not park the socket and drop later pushes.
+    if (this.stream && !this.endCalled) return;
     this.streamDone = true;
     emit('tts', 'ui', 'tts.audio', 'speech audio received', { ms: Math.round((this.samplesTotal / this.sampleRate) * 1000) });
     const ws = this.ws;
@@ -555,9 +685,12 @@ class Impl implements TeacherSpeech {
     if (!b || !Array.isArray(b.words)) return;
     const starts = Array.isArray(b.start) ? b.start : [];
     const ends = Array.isArray(b.end) ? b.end : [];
+    const ss = b.words.map((_, i) => num(starts[i]));
+    const es = b.words.map((_, i) => num(ends[i]));
+    if (this.stream) this.wordBase.adjust(ss, es);
     const added: TimedWord[] = [];
     b.words.forEach((w, i) => {
-      const item = { text: String(w), start: num(starts[i]), end: num(ends[i]) };
+      const item = { text: String(w), start: ss[i], end: es[i] };
       this.words.push(item);
       added.push(item);
     });
@@ -569,9 +702,12 @@ class Impl implements TeacherSpeech {
     if (!b || !Array.isArray(b.phonemes)) return;
     const starts = Array.isArray(b.start) ? b.start : [];
     const ends = Array.isArray(b.end) ? b.end : [];
+    const ss = b.phonemes.map((_, i) => num(starts[i]));
+    const es = b.phonemes.map((_, i) => num(ends[i]));
+    if (this.stream) this.phonemeBase.adjust(ss, es);
     const added: TimedPhoneme[] = [];
     b.phonemes.forEach((p, i) => {
-      const item = { p: String(p), start: num(starts[i]), end: num(ends[i]) };
+      const item = { p: String(p), start: ss[i], end: es[i] };
       this.phonemes.push(item);
       added.push(item);
     });
@@ -584,6 +720,8 @@ class Impl implements TeacherSpeech {
       this.teardownTransport(false);
       this.words.length = 0;
       this.phonemes.length = 0;
+      this.wordBase = new TimeBase();
+      this.phonemeBase = new TimeBase();
       this.startBrowser(message);
       return;
     }
@@ -592,6 +730,7 @@ class Impl implements TeacherSpeech {
     try { this.ws?.close(); } catch { /* ignore */ }
     this.ws = null;
     this.streamDone = true;
+    this.endCalled = true; // no more audio can arrive: later pushes are ignored and playback ends with the queue
     if (!this.started) this.finish('finished');
   }
 
@@ -608,27 +747,48 @@ class Impl implements TeacherSpeech {
       return;
     }
     this.source = 'browser';
+    this.fallbackReason = reason;
+    if (this.stream && this.segments.length === 0 && this.endCalled) { this.finish('finished'); return; }
+    this.speakBrowserChunk(this.text);
+  }
+
+  /** Speak one piece of text as its own utterance on the running browser clock (queued behind earlier ones). */
+  private speakBrowserChunk(text: string): void {
+    if (this.ended || !text) return;
     const rate = this.speed ?? 1;
-    const parts = [...this.text.matchAll(/\S+/g)];
+    const parts = [...text.matchAll(/\S+/g)];
     const weights = parts.map((m) => m[0].length + 1);
     const total = weights.reduce((a, b) => a + b, 0) || 1;
-    const duration = Math.max(0.5, this.text.length / (14 * rate));
+    const duration = Math.max(0.5, text.length / (14 * rate));
+    const base = this.words.length;
     const starts: number[] = [];
-    let t = 0;
+    let t = this.browserT;
     parts.forEach((m, i) => {
       const len = (weights[i] / total) * duration;
       starts.push(m.index ?? 0);
       this.words.push({ text: m[0], start: t, end: t + len });
       t += len;
     });
-    if (this.words.length) this.emit('timeline', { words: [...this.words], phonemes: [] });
+    const fromT = this.browserT;
+    this.browserT = t;
+    if (parts.length) this.emit('timeline', { words: this.words.slice(base).map((w) => ({ ...w })), phonemes: [] });
 
-    const u = new SpeechSynthesisUtterance(this.text);
+    const u = new SpeechSynthesisUtterance(text);
     u.rate = rate;
     this.utterance = u;
+    this.pendingUtterances++;
     u.onstart = () => {
-      this.browserStart = performance.now();
-      this.markStarted();
+      if (!this.started) {
+        this.browserStart = performance.now();
+        this.markStarted();
+      } else {
+        // Realign this utterance's guessed timings to the running clock.
+        const shift = this.rawClock() - fromT;
+        if (Math.abs(shift) > 0.01) {
+          for (let i = base; i < base + parts.length; i++) { this.words[i].start += shift; this.words[i].end += shift; }
+          this.browserT += shift;
+        }
+      }
     };
     u.onboundary = (e: SpeechSynthesisEvent) => {
       if (this.ended || e.name === 'sentence') return;
@@ -639,16 +799,22 @@ class Impl implements TeacherSpeech {
       }
       if (idx < 0) return;
       this.boundarySeen = true;
+      const gi = base + idx;
       const now = this.rawClock();
-      this.words[idx].start = Math.max(0, now);
-      if (idx > 0 && this.words[idx - 1].end > now) this.words[idx - 1].end = now;
-      if (idx !== this.lastWord) {
-        this.lastWord = idx;
-        this.emit('word', idx);
+      this.words[gi].start = Math.max(0, now);
+      if (gi > 0 && this.words[gi - 1].end > now) this.words[gi - 1].end = now;
+      if (gi !== this.lastWord) {
+        this.lastWord = gi;
+        this.emit('word', gi);
       }
     };
     u.onend = () => {
-      if (this.words.length) this.words[this.words.length - 1].end = Math.max(this.words[this.words.length - 1].start, this.rawClock());
+      if (parts.length) {
+        const last = this.words[base + parts.length - 1];
+        last.end = Math.max(last.start, this.rawClock());
+      }
+      this.pendingUtterances--;
+      if (this.stream && !(this.endCalled && this.pendingUtterances === 0)) return;
       this.finish('finished');
     };
     u.onerror = (e: SpeechSynthesisErrorEvent) => {
@@ -658,20 +824,31 @@ class Impl implements TeacherSpeech {
       this.finish('finished');
     };
     try {
-      speechSynthesis.cancel();
+      if (!this.browserSpoke) speechSynthesis.cancel();
+      this.browserSpoke = true;
       speechSynthesis.speak(u);
     } catch {
-      this.emit('error', `${reason} Browser speech failed.`);
+      this.emit('error', `${this.fallbackReason} Browser speech failed.`);
       this.finish('finished');
     }
   }
 }
 
-export function speakTeacher(text: string, opts?: { speed?: number }): TeacherSpeech {
+/** Shared start sequence: cancel whatever is current, clamp the speed, make the speech current and begin. */
+function beginSpeech(text: string, stream: boolean, opts?: { speed?: number }): Impl {
   current?.cancel();
   const speed = opts?.speed === undefined ? undefined : Math.min(1.5, Math.max(0.6, opts.speed));
-  const speech = new Impl(text, speed);
+  const speech = new Impl(text, speed, stream);
   current = speech;
   speech.begin();
   return speech;
+}
+
+export function speakTeacher(text: string, opts?: { speed?: number }): TeacherSpeech {
+  return beginSpeech(text, false, opts);
+}
+
+/** Open one Cartesia context for a whole reply; push sentences as they are written, then end(). */
+export function speakTeacherStream(opts?: { speed?: number }): TeacherStream {
+  return beginSpeech('', true, opts);
 }

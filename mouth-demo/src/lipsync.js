@@ -19,7 +19,7 @@ const INDEX = Object.fromEntries(CHANNELS.map((n, i) => [n, i]));
 
 // Side-cutaway weights (cutaway.setBlend), carried as extra lanes after the blend shapes so the
 // same spring smooths them. Only the CHANNELS lanes are ever written to the driver.
-const CUT_KEYS = ["ah", "oo", "ee", "tongue", "velar"];
+const CUT_KEYS = ["ah", "oo", "ee", "tongue", "velar", "r"];
 const N_SHAPES = CHANNELS.length;
 const LANES = N_SHAPES + CUT_KEYS.length;
 const CUT = Object.fromEntries(CUT_KEYS.map((k, i) => [k, N_SHAPES + i]));
@@ -57,7 +57,7 @@ const V = {
   sibilant: viseme({ jawOpen: 0.06, smile: 0.25, stretch: 0.2 }, { ee: 0.5, tongue: 0.4 }), // s z
   tongue: viseme({ jawOpen: 0.18, lower: 0.08 }, { tongue: 1 }), // t d n l th
   velar: viseme({ jawOpen: 0.2, lower: 0.06 }, { velar: 1 }), // k g ng h
-  r: viseme({ jawOpen: 0.15, mouthPucker: 0.3, mouthFunnel: 0.2 }, { oo: 0.4 }),
+  r: viseme({ jawOpen: 0.15, mouthPucker: 0.3, mouthFunnel: 0.2 }, { r: 1 }),
   other: viseme({ jawOpen: 0.2, lower: 0.06 }, { ah: 0.2 }), // unknown symbol
 };
 
@@ -121,7 +121,7 @@ export function createLipSync({ driver, isBlocked = () => false, emit = () => {}
   const values = new Float32Array(LANES);
   const vel = new Float32Array(LANES);
   const target = new Float32Array(LANES);
-  const poseOut = { ah: 0, oo: 0, ee: 0, tongue: 0, velar: 0 }; // reused by pose(), no per-frame garbage
+  const poseOut = { ah: 0, oo: 0, ee: 0, tongue: 0, velar: 0, r: 0 }; // reused by pose(), no per-frame garbage
   let session = null;
   let owning = false; // we have written shapes the driver still holds
 

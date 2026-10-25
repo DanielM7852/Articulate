@@ -1,4 +1,5 @@
 import { expect, test } from '../../game/__tests__/harness';
+import { THINKING_FILLERS } from '../../realtime/fillers';
 import { BAKED_LINES, GREETING, QUIZ_LINES, WELCOME_BACK } from '../bakedLines';
 import { lookupBaked, phonemesFromBlock, wordsFromBlock, type BakedManifest } from '../bakedVoice';
 
@@ -22,10 +23,10 @@ test('baked lookup: speed other than 1 goes live', () => {
   expect(lookupBaked(m, 'Hello there.', 1.2)).toBe(null);
 });
 
-test('baked lines: six distinct lines', () => {
-  expect(BAKED_LINES.length).toBe(6);
-  expect(new Set(BAKED_LINES).size).toBe(6);
-  expect(BAKED_LINES.length).toBe(GREETING.length + WELCOME_BACK.length + QUIZ_LINES.length);
+test('baked lines: all distinct lines', () => {
+  const total = GREETING.length + WELCOME_BACK.length + QUIZ_LINES.length + THINKING_FILLERS.length;
+  expect(BAKED_LINES.length).toBe(total);
+  expect(new Set(BAKED_LINES).size).toBe(total);
 });
 
 test('timestamp blocks convert like the live path', () => {
