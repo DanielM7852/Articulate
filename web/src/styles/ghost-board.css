@@ -36,6 +36,17 @@
   stroke-width: 3.5;
   stroke-dasharray: 7 6;
 }
+/* Progressive fill: an overlay copy of the active line (pathLength 1) drawn in by the board's rAF loop, whole on success. */
+.gb-fill {
+  fill: none;
+  stroke: var(--color-navy);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.gb-fill-layer[data-success='true'] .gb-fill {
+  stroke: var(--color-success);
+}
 .gb-part-label {
   font-family: var(--font-serif);
   font-size: 20px;
@@ -111,6 +122,32 @@
   stroke-width: 3.5;
 }
 
+/* Path end: a subtle open ring always, and on success a check in a circle that pops in. */
+.gb-end {
+  pointer-events: none;
+}
+.gb-end-ring {
+  fill: none;
+  stroke: var(--color-navy-mist);
+  stroke-width: 2.5;
+  opacity: 0.7;
+}
+.gb-end-disc {
+  fill: var(--color-success);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: gb-end-pop 360ms var(--ease-out);
+}
+.gb-end-check {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  animation: gb-end-check 300ms var(--ease-out) 120ms both;
+}
+
 /* Liquid: a small tag on the path. Advisory, so it never turns pass or fail colours. */
 .gb-liquid-dot {
   fill: var(--color-cream);
@@ -170,6 +207,16 @@
   background: var(--color-navy);
 }
 
+@keyframes gb-end-pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+@keyframes gb-end-check {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
 @keyframes gb-approach {
   0%, 100% { transform: scale(1.25); opacity: 0.15; }
   50% { transform: scale(1); opacity: 0.6; }
@@ -184,6 +231,10 @@
   .gb-stop-burst {
     animation: none;
     opacity: 0.8;
+  }
+  .gb-end-disc,
+  .gb-end-check {
+    animation: none;
   }
 }
 

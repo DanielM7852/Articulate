@@ -49,7 +49,7 @@ interface Sub {
   maxId: bigint;
 }
 
-const disabled = import.meta.env.VITE_TELEMETRY === 'off';
+const disabled = import.meta.env?.VITE_TELEMETRY === 'off'; // env is undefined outside Vite (tsx test runs)
 
 let conn: DbConnection | null = null;
 let ready = false;

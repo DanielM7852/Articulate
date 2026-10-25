@@ -16,8 +16,11 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
-.recap h1:focus {
+.recap h1:focus,
+.recap h1:focus-visible {
+  /* focus is moved to the title for screen readers; it is not a Tab stop */
   outline: none;
+  box-shadow: none;
 }
 .recap-eyebrow {
   font-size: 14px;
@@ -206,7 +209,5 @@
   .recap-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 }
 
-/* Focus moves to the title for screen readers; it is not a Tab stop, so no ring. */
-.recap-title:focus { outline: none; }
 .recap-dl dd + dt { margin-top: 6px; }
 .recap-dl dt { font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; }

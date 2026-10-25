@@ -53,8 +53,10 @@ button.wl-pill {
 .wl-status {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
 }
 .wl-status-text {
+  white-space: nowrap;
   font-size: 14px;
   font-weight: 600;
   color: var(--color-navy);
@@ -91,6 +93,37 @@ button.wl-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
+}
+/* "Give feedback": a toggle (not an attempt). Pressed = the learner is talking to Ava, with a pulsing live dot. */
+.wl-feedback {
+  border: 1.5px solid var(--color-line);
+}
+.wl-feedback:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.wl-feedback[aria-pressed='true'] {
+  border-color: var(--color-navy);
+  background: var(--color-navy-soft);
+  color: var(--color-navy);
+}
+.wl-feedback-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-navy);
+  animation: wl-feedback-pulse 1.4s ease-in-out infinite;
+}
+@keyframes wl-feedback-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wl-feedback-dot {
+    animation: none;
+  }
 }
 /* Header: the word picker and the voice-check redo link share the row with the heading. */
 .wl-words {
@@ -101,10 +134,6 @@ button.wl-pill {
   height: 34px;
   font-size: 13px;
   text-transform: capitalize;
-}
-.wl-redo {
-  height: 36px;
-  font-size: 13px;
 }
 @media (max-width: 720px) {
   .wl-words {
@@ -120,4 +149,9 @@ button.wl-pill {
 .wl-replay:disabled {
   cursor: default;
   opacity: 0.6;
+}
+
+/* The lesson footer carries the status plus four controls: give it more room than the onboarding column. */
+.ob-actions-inner:has(.wl-ctas) {
+  max-width: min(1040px, 100%);
 }

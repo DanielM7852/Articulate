@@ -1,6 +1,7 @@
 import { expect, test } from '../../game/__tests__/harness';
 import { THINKING_FILLERS } from '../../realtime/fillers';
 import { BAKED_LINES, GREETING, QUIZ_LINES, WELCOME_BACK } from '../bakedLines';
+import { PART_SOUND_LINES } from '../../game/ghost/partSounds';
 import { lookupBaked, phonemesFromBlock, wordsFromBlock, type BakedManifest } from '../bakedVoice';
 
 const entry = { file: '/voice/x.wav', durationS: 1, words: [{ text: 'hi', start: 0, end: 0.5 }], phonemes: [{ p: 'h', start: 0, end: 0.1 }] };
@@ -24,7 +25,7 @@ test('baked lookup: speed other than 1 goes live', () => {
 });
 
 test('baked lines: all distinct lines', () => {
-  const total = GREETING.length + WELCOME_BACK.length + QUIZ_LINES.length + THINKING_FILLERS.length;
+  const total = GREETING.length + WELCOME_BACK.length + QUIZ_LINES.length + THINKING_FILLERS.length + PART_SOUND_LINES.length;
   expect(BAKED_LINES.length).toBe(total);
   expect(new Set(BAKED_LINES).size).toBe(total);
 });

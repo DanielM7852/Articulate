@@ -270,7 +270,12 @@ class Impl implements TeacherStream {
   private browserSpoke = false;
   private fallbackReason = '';
 
-  constructor(private readonly fixedText: string, private readonly speed: number | undefined, private readonly stream = false) {
+  constructor(
+    private readonly fixedText: string,
+    private readonly speed: number | undefined,
+    private readonly stream = false,
+    private readonly fallbackText?: string,
+  ) {
     this.done = new Promise<void>((resolve) => { this.resolveDone = resolve; });
   }
 
@@ -749,7 +754,7 @@ class Impl implements TeacherStream {
     this.source = 'browser';
     this.fallbackReason = reason;
     if (this.stream && this.segments.length === 0 && this.endCalled) { this.finish('finished'); return; }
-    this.speakBrowserChunk(this.text);
+    this.speakBrowserChunk(this.fallbackText ?? this.text);
   }
 
   /** Speak one piece of text as its own utterance on the running browser clock (queued behind earlier ones). */
@@ -835,16 +840,17 @@ class Impl implements TeacherStream {
 }
 
 /** Shared start sequence: cancel whatever is current, clamp the speed, make the speech current and begin. */
-function beginSpeech(text: string, stream: boolean, opts?: { speed?: number }): Impl {
+function beginSpeech(text: string, stream: boolean, opts?: { speed?: number; fallbackText?: string }): Impl {
   current?.cancel();
   const speed = opts?.speed === undefined ? undefined : Math.min(1.5, Math.max(0.6, opts.speed));
-  const speech = new Impl(text, speed, stream);
+  const speech = new Impl(text, speed, stream, opts?.fallbackText);
   current = speech;
   speech.begin();
   return speech;
 }
 
-export function speakTeacher(text: string, opts?: { speed?: number }): TeacherSpeech {
+/** fallbackText: what the browser voice says instead if Cartesia fails (for a transcript with inline IPA markup). */
+export function speakTeacher(text: string, opts?: { speed?: number; fallbackText?: string }): TeacherSpeech {
   return beginSpeech(text, false, opts);
 }
 

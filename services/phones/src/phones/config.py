@@ -18,7 +18,7 @@ class Settings:
     model_id: str = field(default_factory=lambda: os.environ.get("PHONES_MODEL_ID", "KoelLabs/xlsr-english-01"))
     models_dir: Path = field(default_factory=lambda: Path(os.environ.get("PHONES_MODELS_DIR", ROOT / "models")))
     engines_dir: Path = field(default_factory=lambda: Path(os.environ.get("PHONES_ENGINES_DIR", ROOT / "engines")))
-    # "auto" = tensorrt -> torch-fp16 -> torch-cpu. Or force one of: tensorrt, torch-fp16, torch-cpu.
+    # "auto" = tensorrt -> torch-fp16 -> torch-mps -> torch-cpu. Or force one of: tensorrt, torch-fp16, torch-mps, torch-cpu.
     backend: str = field(default_factory=lambda: os.environ.get("PHONES_BACKEND", "auto"))
     sample_rate: int = 16000
     hop_ms: float = field(default_factory=lambda: _f("PHONES_HOP_MS", 100))
