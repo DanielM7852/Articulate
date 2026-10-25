@@ -22,6 +22,9 @@ def make_settings(tmp_path, **overrides) -> Settings:
     data = {
         "store_dir": str(tmp_path / "store"),
         "anthropic_api_key": None,
+        "openai_api_key": None,
+        # Existing live tests inject a fake Anthropic client; OpenAI tests pass live_coach_provider="openai".
+        "live_coach_provider": "anthropic",
         "moss_project_id": None,
         "moss_project_key": None,
         "cartesia_api_key": None,

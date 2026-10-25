@@ -92,7 +92,7 @@ async def answer_word_question(deps: LiveDeps, body: WordAskRequest) -> WordAskR
         try:
             draft = await llm.ask(
                 deps.settings,
-                deps.anthropic_client,
+                deps.llm_client,
                 WORD_ASK_SYSTEM,
                 _user_message(body),
                 WordAskDraft,

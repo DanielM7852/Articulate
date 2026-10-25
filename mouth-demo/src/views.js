@@ -15,9 +15,13 @@ export function createViews({ camera, controls, canvas }) {
   const goal = new THREE.Vector3();
   const tmp = new THREE.Vector3();
   const sph = new THREE.Spherical();
+  const shiftQuat = new THREE.Quaternion();
 
   let anchorObj = null;
   const anchorOffset = new THREE.Vector3();
+  const sideShift = new THREE.Vector3(); // head-local: moves the pivot from the mouth to the head's middle in side view
+  let headDepth = 0;
+  let headHeight = 0;
   let worldUp = 0.015;
   let currentView = "front";
   let anim = null; // { from, to, elapsed, duration, resolve, distance }
@@ -31,6 +35,10 @@ export function createViews({ camera, controls, canvas }) {
     anchorObj.updateWorldMatrix(true, false);
     goal.copy(anchorOffset);
     anchorObj.localToWorld(goal);
+    if (currentView === "side" && sideShift.lengthSq() > 0) {
+      tmp.copy(sideShift).applyQuaternion(anchorObj.getWorldQuaternion(shiftQuat));
+      goal.add(tmp);
+    }
     goal.y += worldUp;
     return true;
   }
@@ -40,11 +48,20 @@ export function createViews({ camera, controls, canvas }) {
     anchorObj = object3D;
     anchorOffset.copy(localOffset);
     worldUp = opts.worldUp ?? 0.015;
+    if (opts.sideShift) sideShift.copy(opts.sideShift);
+    headDepth = opts.headDepth ?? 0;
+    headHeight = opts.headHeight ?? 0;
     if (first && updateGoal()) pivot.copy(goal);
   }
 
   function distanceFor() {
-    return 0.55 * Math.max(1, 0.9 / camera.aspect) * zoom;
+    const base = 0.55 * Math.max(1, 0.9 / camera.aspect) * zoom;
+    if (currentView !== "side" || headDepth <= 0) return base;
+    // side view: the whole head (depth x height, plus hair margin) must fit the visible frame
+    const halfFov = THREE.MathUtils.degToRad(camera.fov) / 2;
+    const fitW = (headDepth * 1.8) / (2 * Math.tan(halfFov) * camera.aspect);
+    const fitH = (headHeight * 1.1) / (2 * Math.tan(halfFov));
+    return Math.max(base, fitW, fitH);
   }
 
   function setZoom(z) {

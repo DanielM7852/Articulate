@@ -41,6 +41,36 @@ export interface BlendshapeCategory {
 
 const INNER_LIP = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191];
 
+const OUTER_LIP = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185];
+const FACE_OVAL = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148,
+  176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+];
+const MESH_ORDER = [...OUTER_LIP, ...INNER_LIP, ...FACE_OVAL, 33, 133, 362, 263, 1];
+
+/**
+ * 81 face-mesh points (outer lip, inner lip, face oval, eyes, nose tip) as a flat [x,y,...] int
+ * array in 0..255, normalised into a nose-centred square of half-size 1.6 x inter-ocular distance.
+ * Returns null when a landmark is missing.
+ */
+export function meshPoints(L: Point3D[] | { x: number; y: number }[]): number[] | null {
+  for (const i of MESH_ORDER) if (!L[i]) return null;
+  const mid = (a: number, b: number) => ({ x: (L[a].x + L[b].x) / 2, y: (L[a].y + L[b].y) / 2 });
+  const le = mid(33, 133);
+  const re = mid(362, 263);
+  const iod = Math.hypot(le.x - re.x, le.y - re.y);
+  if (!(iod > 1e-6)) return null;
+  const half = 1.6 * iod;
+  const nose = L[1];
+  const out: number[] = [];
+  for (const i of MESH_ORDER) {
+    const nx = (L[i].x - nose.x) / half; // -1..1
+    const ny = (L[i].y - nose.y) / half;
+    out.push(clamp(Math.round(((nx + 1) / 2) * 255), 0, 255), clamp(Math.round(((ny + 1) / 2) * 255), 0, 255));
+  }
+  return out;
+}
+
 const ORAL_BLENDSHAPES = new Set([
   'jawOpen', 'jawForward', 'jawLeft', 'jawRight', 'mouthPucker', 'mouthFunnel', 'mouthClose',
   'mouthSmileLeft', 'mouthSmileRight', 'mouthStretchLeft', 'mouthStretchRight',

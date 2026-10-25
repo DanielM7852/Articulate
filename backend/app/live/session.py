@@ -283,7 +283,7 @@ async def _ask(deps: LiveDeps, payload: str) -> tuple[TalkDraft | None, int]:
     try:
         draft = await llm.ask(
             s,
-            deps.anthropic_client,
+            deps.llm_client,
             tp.TALK_SYSTEM.format(therapist=s.live_therapist_name),
             payload,
             TalkDraft,

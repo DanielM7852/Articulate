@@ -2,6 +2,7 @@ import { EH_RADIUS_V1, REFERENCE_V1 } from '@vowel-mapper/reference/data';
 import type { GhostMarker, GhostPart, GhostPathModel, GhostPoint, GhostSegment } from './types';
 import { GHOST_WORDS, type GhostWordSpec } from './words';
 import { validateGhostModel } from './validate';
+import { pullToward } from '../../vowel/pull';
 
 /**
  * Model pronunciations ("ghost paths"). Every word ships a 'synthetic' model built from reference
@@ -74,7 +75,11 @@ const smoothstep = (x: number) => {
   return c * c * (3 - 2 * c);
 };
 
-function sampleStretch(keys: Key[], ms: number): { f1: number; f2: number; spread: number } {
+function sampleStretch(
+  keys: Key[],
+  ms: number,
+  targets: Record<string, Formants>,
+): { f1: number; f2: number; spread: number } {
   let i = keys.findIndex((key) => ms <= key.to);
   if (i < 0) i = keys.length - 1;
   const here = keys[i];
@@ -96,8 +101,8 @@ function sampleStretch(keys: Key[], ms: number): { f1: number; f2: number; sprea
     w = smoothstep((ms - (here.to - half)) / (2 * half));
   }
   const mix = (a: number, b: number) => a * (1 - w) + b * w;
-  const a = TARGET_LN[from.target];
-  const b = TARGET_LN[to.target];
+  const a = targets[from.target];
+  const b = targets[to.target];
   const slack = 4 * w * (1 - w);
   return {
     f1: mix(a.f1, b.f1),
@@ -119,7 +124,11 @@ interface WordTimeline {
 
 const round = (n: number, digits: number) => Math.round(n * 10 ** digits) / 10 ** digits;
 
-function buildSynthetic(spec: GhostWordSpec, line: WordTimeline): GhostPathModel {
+function buildSynthetic(
+  spec: GhostWordSpec,
+  line: WordTimeline,
+  targets: Record<string, Formants> = TARGET_LN,
+): GhostPathModel {
   const { durationMs } = line;
   const segments: GhostSegment[] = line.stretches.map((keys) => {
     const start = keys[0].from;
@@ -127,7 +136,7 @@ function buildSynthetic(spec: GhostWordSpec, line: WordTimeline): GhostPathModel
     const points: GhostPoint[] = [];
     const spread: number[] = [];
     for (let ms = start; ms <= end + 1e-6; ms += STEP_MS) {
-      const s = sampleStretch(keys, ms);
+      const s = sampleStretch(keys, ms, targets);
       points.push({ t: round(ms / durationMs, 5), f1: round(Math.exp(s.f1), 1), f2: round(Math.exp(s.f2), 1) });
       spread.push(round(s.spread, 5));
     }
@@ -231,10 +240,47 @@ export function registerGhostModel(model: GhostPathModel): boolean {
 
 for (const model of REPLACEMENTS) registerGhostModel(model);
 
-export function ghostModel(word: string): GhostPathModel {
+/** Which model targets take which stored learner vowel (the warm-up's eee, head and had). */
+const PULL_ANCHOR = { iy: 'i', eh: 'eh', ae: 'ae' } as const;
+
+/** Factor-0 reference (Hz) and pull radius (ln units) for one anchored target, for readouts. */
+export function ghostPullReference(id: 'i' | 'eh' | 'ae'): { ref: Formants; r: number } {
+  const k = id === 'i' ? 'iy' : id;
+  return { ref: { f1: Math.exp(TARGET_LN[k].f1), f2: Math.exp(TARGET_LN[k].f2) }, r: SPREAD[k] };
+}
+
+export interface GhostPersonal {
+  factor: number;
+  anchors?: Partial<Record<'i' | 'eh' | 'ae', Formants>>;
+}
+
+/**
+ * The model for a word. With `personal.anchors`, the synthetic iy/eh/ae targets move toward the learner's
+ * held vowels by at most one radius (pullToward) from the factor-sized reference, so the board's
+ * sizeModel(model, factor) lands them on the pulled point. Recorded replacements ignore `personal`.
+ */
+export function ghostModel(word: string, personal?: GhostPersonal): GhostPathModel {
   const model = registry.get(word);
   if (!model) throw new Error(`No ghost model for "${word}"`);
-  return model;
+  const anchors = personal?.anchors;
+  if (!personal || !anchors || model !== SYNTHETIC[word]) return model;
+  const targets: Record<string, Formants> = { ...TARGET_LN };
+  let pulledAny = false;
+  for (const [k, id] of Object.entries(PULL_ANCHOR)) {
+    const anchor = anchors[id];
+    if (!anchor) continue;
+    const scale = Math.exp(personal.factor);
+    const sized = { f1: Math.exp(TARGET_LN[k].f1) * scale, f2: Math.exp(TARGET_LN[k].f2) * scale };
+    const pulled = pullToward(sized, anchor, SPREAD[k]);
+    targets[k] = {
+      f1: TARGET_LN[k].f1 + Math.log(pulled.f1 / sized.f1),
+      f2: TARGET_LN[k].f2 + Math.log(pulled.f2 / sized.f2),
+    };
+    pulledAny = true;
+  }
+  if (!pulledAny) return model;
+  const built = buildSynthetic(GHOST_WORDS[word], TIMELINES[word], targets);
+  return { ...built, provenance: `${built.provenance}; personal pull ≤1 radius toward the learner's held iy/eh/ae` };
 }
 
 export const GHOST_WORD_LIST = Object.keys(GHOST_WORDS);

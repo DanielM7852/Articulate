@@ -28,7 +28,9 @@ import {
   setPresence,
 } from "./classroom";
 
-// No public tables. Browsers call owned metric reducers or the authenticated Python gateway.
+// No public tables except telemetry_event: a capped (400 rows) stream of derived numbers
+// and short labels for the backend dashboard, with no identities, media or transcripts.
+// Browsers otherwise call owned metric reducers or the authenticated Python gateway.
 const backend = table(
   { name: "backend", public: false },
   { id: t.u32().primaryKey(), identity: t.identity() },
@@ -480,6 +482,47 @@ export const push_metrics = db.reducer(
       frames: frames_json,
       received_at: ctx.timestamp,
     });
+  },
+);
+
+const telemetryNodes = [
+  "camera", "mediapipe", "mic", "audio", "stt", "tts",
+  "backend", "pitch", "sparc", "db", "claude", "ui",
+];
+const telemetryKindRe = /^[a-z]+(\.[a-z_]+)+$/;
+const TELEMETRY_KEEP = 400;
+
+export const emit_telemetry = db.reducer(
+  {
+    source: t.string(),
+    target: t.string(),
+    kind: t.string(),
+    label: t.string(),
+    payload_json: t.string(),
+  },
+  (ctx, { source, target, kind, label, payload_json }) => {
+    if (!telemetryNodes.includes(source)) throw new Error("unknown source node");
+    if (!telemetryNodes.includes(target)) throw new Error("unknown target node");
+    if (!telemetryKindRe.test(kind)) throw new Error("invalid kind");
+    if (label.length > 120) throw new Error("label too long (max 120)");
+    if (byteLength(payload_json) > 2048) throw new Error("payload too large");
+    parseJsonObject(payload_json, "payload_json");
+    ctx.db.telemetryEvent.insert({
+      id: 0n,
+      at: ctx.timestamp,
+      source,
+      target,
+      kind,
+      label,
+      payload: payload_json,
+    });
+    const excess = Number(ctx.db.telemetryEvent.count()) - TELEMETRY_KEEP;
+    if (excess <= 0) return;
+    // Auto-inc ids grow monotonically, so the lowest ids are the oldest rows.
+    const ids: bigint[] = [];
+    for (const row of ctx.db.telemetryEvent.iter()) ids.push(row.id);
+    ids.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const id of ids.slice(0, excess)) ctx.db.telemetryEvent.id.delete(id);
   },
 );
 

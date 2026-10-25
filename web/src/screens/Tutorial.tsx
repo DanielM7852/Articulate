@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Mic, TriangleAlert } from 'lucide-react';
 import type { VowelPoint } from '@vowel-mapper/audio/tracker';
@@ -9,7 +9,8 @@ import { CaptionBar, useNarration } from '../components/Narration';
 import { OnboardingFrame, ONBOARDING_STEPS } from '../components/Onboarding';
 import { VowelGraph } from '../components/VowelGraph';
 import { useAppState } from '../state/AppState';
-import { HOLD_GOAL_SEC, TARGETS, inTarget } from '../vowel/targets';
+import { HOLD_GOAL_SEC, inTarget, targetsFor, type VowelTarget } from '../vowel/targets';
+import { useStoredVoice } from '../audio/useStoredVoice';
 
 /**
  * The guide explains the graph once, with "ee":
@@ -32,7 +33,6 @@ const LINES: Record<Phase, string> = {
   done: 'That’s it. Let’s practice.',
 };
 
-const TARGET = TARGETS.i;
 const DEMO_START = { f1: 620, f2: 1500 };
 const GLIDE_MS = 2600;
 const YOU_HOLD_SEC = 1.5;
@@ -41,9 +41,11 @@ const YOU_HOLD_SEC = 1.5;
  * A scripted cursor for the explanation: glides into the ee region, then rests there.
  * The hold only counts once `holding`; `paused` freezes it on its own clock.
  */
-function useDemoCursor(active: boolean, holding: boolean, paused: boolean) {
+function useDemoCursor(active: boolean, holding: boolean, paused: boolean, target: VowelTarget) {
   const flags = useRef({ holding, paused });
   flags.current = { holding, paused };
+  const targetRef = useRef(target);
+  targetRef.current = target;
   const [state, setState] = useState<{ point: VowelPoint | null; trace: VowelPoint[]; holdSec: number }>({
     point: null,
     trace: [],
@@ -72,12 +74,12 @@ function useDemoCursor(active: boolean, holding: boolean, paused: boolean) {
       const e = 1 - Math.pow(1 - t, 3);
       const wobble = t < 1 ? Math.sin(elapsed / 90) * 0.03 * (1 - t) : Math.sin(elapsed / 160) * 0.012;
       const point: VowelPoint = {
-        f1: DEMO_START.f1 * Math.exp((Math.log(TARGET.f1 / DEMO_START.f1) + wobble) * e),
-        f2: DEMO_START.f2 * Math.exp((Math.log(TARGET.f2 / DEMO_START.f2) - wobble) * e),
+        f1: DEMO_START.f1 * Math.exp((Math.log(targetRef.current.f1 / DEMO_START.f1) + wobble) * e),
+        f2: DEMO_START.f2 * Math.exp((Math.log(targetRef.current.f2 / DEMO_START.f2) - wobble) * e),
         timestampMs: elapsed,
         segment: 0,
       };
-      if (flags.current.holding && inTarget(point, TARGET)) arrivedAt ??= elapsed;
+      if (flags.current.holding && inTarget(point, targetRef.current)) arrivedAt ??= elapsed;
       else arrivedAt = null;
       setState((s) => ({
         point,
@@ -96,9 +98,11 @@ export default function Tutorial() {
   const { completeOnboarding } = useAppState();
   const narration = useNarration();
   const mic = useMicrophone();
-  const live = useVowelTracking(mic.stream, TARGET);
+  const voice = useStoredVoice();
+  const targets = useMemo(() => targetsFor(voice), [voice]);
+  const live = useVowelTracking(mic.stream, targets.i);
   const [phase, setPhase] = useState<Phase>('watch');
-  const demo = useDemoCursor(phase === 'dot' || phase === 'ring', phase === 'ring', narration.paused);
+  const demo = useDemoCursor(phase === 'dot' || phase === 'ring', phase === 'ring', narration.paused, targets.i);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
@@ -163,6 +167,7 @@ export default function Tutorial() {
             tracking={graph.tracking}
             statusLabel={solo ? (live.tracking ? 'Tracking your vowel' : 'Listening') : phase === 'watch' ? 'Watch the guide' : 'Example'}
             holdSec={Math.min(graph.holdSec, HOLD_GOAL_SEC)}
+            targets={targets}
             emptyHint={solo ? 'Hold “ee” and your sound appears here.' : 'Watch the example.'}
           />
           {micBlocked && micMessage && (

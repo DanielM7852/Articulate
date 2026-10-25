@@ -42,6 +42,8 @@ function viseme(spec, cut = {}) {
 
 // Jaw floors at 0.06 for everything but bilabials, so the mouth never shuts mid-word.
 // Bilabials and labiodentals keep the cutaway neutral: the tongue rests and the lips do the work.
+// ARKit's mouthClose lifts the lower lip by as much as jawOpen drops it, so it only shuts the lips when
+// it equals jawOpen; above that the lower lip passes over the upper one (also clamped in update()).
 const V = {
   rest: viseme({}),
   open: viseme({ jawOpen: 0.5, lower: 0.25, upper: 0.1 }, { ah: 1 }), // ah, a, ae, schwa
@@ -49,7 +51,7 @@ const V = {
   spread: viseme({ jawOpen: 0.14, smile: 0.4, stretch: 0.3 }, { ee: 1 }), // ee, ih, y
   round: viseme({ jawOpen: 0.35, mouthFunnel: 0.55, mouthPucker: 0.35 }, { oo: 0.7, ah: 0.3 }), // aw, o
   pucker: viseme({ jawOpen: 0.12, mouthPucker: 0.85, mouthFunnel: 0.6 }, { oo: 1 }), // oo, w
-  bilabial: viseme({ jawOpen: 0.02, mouthClose: 0.65, press: 0.5 }), // p b m
+  bilabial: viseme({ jawOpen: 0.1, mouthClose: 0.1, press: 0.4 }), // p b m
   labiodental: viseme({ jawOpen: 0.1, mouthRollLower: 0.6, upper: 0.2 }), // f v
   postalv: viseme({ jawOpen: 0.15, mouthPucker: 0.5, mouthFunnel: 0.5 }, { oo: 0.5, tongue: 0.3 }), // sh zh ch j
   sibilant: viseme({ jawOpen: 0.06, smile: 0.25, stretch: 0.2 }, { ee: 0.5, tongue: 0.4 }), // s z
@@ -282,6 +284,7 @@ export function createLipSync({ driver, isBlocked = () => false, emit = () => {}
         return;
       }
       for (let i = 0; i < N_SHAPES; i++) driver.setShape(CHANNELS[i], Math.max(0, values[i]));
+      driver.setShape("mouthClose", Math.max(0, Math.min(values[INDEX.mouthClose], values[INDEX.jawOpen])));
       owning = true;
     },
 

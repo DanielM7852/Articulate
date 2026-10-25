@@ -53,14 +53,22 @@ const SCALP = { hairlineDrop: 0.085, soft: 0.011, temple: 0.045, nape: 0.17 }; /
 const SCATTER = {
   radius: 0.03, // metres: Gaussian width of the field
   reach: 2.0, // dots farther than reach * radius from the ray are left alone (the field is under 2% there)
-  outward: 0.011, // metres of radial displacement at the centre: a thinning, not a hole (keep below radius)
-  lift: 0.007, // metres toward the viewer at the centre
-  drag: 0.5, // seconds: how much of the pointer's velocity becomes displacement (the wake)
+  // Displacement amounts sit at about 6% of the original tuning (0.011, 0.007, 0.5, 0.06): the same field and
+  // spring, a much gentler stir.
+  outward: 0.00068, // metres of radial displacement at the centre: a thinning, not a hole (keep below radius)
+  lift: 0.0004, // metres toward the viewer at the centre
+  drag: 0.03, // seconds: how much of the pointer's velocity becomes displacement (the wake)
   swirl: 0.45, // m/s of curl-like drift per metre of displacement
   k: 90,
   c: 11,
-  maxOffset: 0.06,
-  settle: 1.5e-4
+  maxOffset: 0.0036,
+  settle: 1.5e-4,
+  // Only the surface facing the viewer is stirred (normal . ray below -facing): the far side and inner surfaces
+  // (mouth, eye sockets) stay put behind the depth prepass.
+  facing: 0.1,
+  // A dot never goes into the surface, where the prepass would hide it and leave a hole: a slide along the
+  // surface also lifts it off by ride x the slide, so it rides over creases (nose, lips) instead of sinking.
+  ride: 0.6
 };
 const PREPASS_OFFSET = { factor: 2, units: 4 };
 // dot size from the skin texture: darker texels (lips, brows, nostrils) get bigger dots, like the hologram style
@@ -115,7 +123,7 @@ const SHAPE = {
   toneWeight: 0.35, // dots per sample: toneWeight + tone, so darker samples carry more dots
   coverage: 0.72, // share of the picture's area the dots cover on average; sets their radius from their density
   minPx: 1.0, // device px: smallest dot drawn on the picture; smaller ones are drawn at this size, fainter
-  appearMs: 200 // the picture fades in when it is first shown (crossfading with the image it replaces)
+  appearMs: 80 // the picture fades in when it is first shown (under the image it replaces, which fades over 200 ms)
 };
 const DISSOLVE = { spread: 0.6, random: 0.3, out: 0.07, outZ: 0.3, up: 0.16, curl: 0.035, fadeStart: 0.1, fadeEnd: 0.9, shrink: 0.45 };
 const REDUCED_FADE_MS = 300; // reduced motion: a plain crossfade, no travel
@@ -975,13 +983,29 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       const pz = hz - t * dz;
       const d2 = px * px + py * py + pz * pz;
       if (d2 >= reach2) continue;
+      const nx = normals[i * 3];
+      const ny = normals[i * 3 + 1];
+      const nz = normals[i * 3 + 2];
+      if (nx * dx + ny * dy + nz * dz > -SCATTER.facing) continue; // far side or an inner surface: left alone
       const g = Math.exp(-d2 * inv); // Gaussian falloff: no edge
       const d = Math.sqrt(d2);
       const radial = (SCATTER.outward * g) / Math.max(d, 1e-4);
       const lift = SCATTER.lift * g;
-      target[i * 3] = px * radial - dx * lift + wx * g;
-      target[i * 3 + 1] = py * radial - dy * lift + wy * g;
-      target[i * 3 + 2] = pz * radial - dz * lift + wz * g;
+      let tx = px * radial - dx * lift + wx * g;
+      let ty = py * radial - dy * lift + wy * g;
+      let tz = pz * radial - dz * lift + wz * g;
+      // keep it out of the surface: at least ride x its slide along it, off it
+      const tn = tx * nx + ty * ny + tz * nz;
+      const slide = Math.sqrt(Math.max(0, tx * tx + ty * ty + tz * tz - tn * tn));
+      const up = SCATTER.ride * slide - tn;
+      if (up > 0) {
+        tx += nx * up;
+        ty += ny * up;
+        tz += nz * up;
+      }
+      target[i * 3] = tx;
+      target[i * 3 + 1] = ty;
+      target[i * 3 + 2] = tz;
       touched[i] = frameId;
       activate(i);
     }
@@ -1026,6 +1050,22 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         offset[i * 3 + j] = no;
         vel[i * 3 + j] = v;
         if (Math.abs(no) > SCATTER.settle || Math.abs(v) > SCATTER.settle * 20 || Math.abs(tg) > SCATTER.settle) settled = false;
+      }
+      // the spring's overshoot on the way home must not carry the dot into the surface either
+      const nx = normals[i * 3];
+      const ny = normals[i * 3 + 1];
+      const nz = normals[i * 3 + 2];
+      const on = offset[i * 3] * nx + offset[i * 3 + 1] * ny + offset[i * 3 + 2] * nz;
+      if (on < 0) {
+        offset[i * 3] -= on * nx;
+        offset[i * 3 + 1] -= on * ny;
+        offset[i * 3 + 2] -= on * nz;
+        const vn = vel[i * 3] * nx + vel[i * 3 + 1] * ny + vel[i * 3 + 2] * nz;
+        if (vn < 0) {
+          vel[i * 3] -= vn * nx;
+          vel[i * 3 + 1] -= vn * ny;
+          vel[i * 3 + 2] -= vn * nz;
+        }
       }
       if (settled) {
         offset[i * 3] = offset[i * 3 + 1] = offset[i * 3 + 2] = 0;
@@ -1215,8 +1255,10 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   function syncShape(dtMs) {
     camera.updateMatrixWorld();
     uniforms.uShapeMatrix.value.copy(camera.matrixWorld);
-    if (showingShape()) shape.alpha = reduced ? 1 : Math.min(1, shape.alpha + Math.max(0, dtMs || 0) / SHAPE.appearMs);
-    else if (!(fly.anim && fly.mode === 0)) shape.alpha = 0; // the head is up: the next showing fades in again
+    // the fade-in keeps running into the morph, so a morph started at once (no hold on the picture) is still seen
+    const morphing = fly.anim && fly.mode === 0;
+    if (showingShape() || morphing) shape.alpha = reduced ? 1 : Math.min(1, shape.alpha + Math.max(0, dtMs || 0) / SHAPE.appearMs);
+    else shape.alpha = 0; // the head is up: the next showing fades in again
     uniforms.uShapeAlpha.value = shape.alpha;
   }
 

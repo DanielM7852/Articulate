@@ -22,6 +22,19 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-5-5"
+    # Live coaching provider. "openai" runs every live model call on GPT; "anthropic" keeps the Claude path.
+    live_coach_provider: Literal["anthropic", "openai"] = "openai"
+    # Praat measurements of the word attempt WAV, added to the word coach message (both providers).
+    word_acoustics_enabled: bool = True
+    openai_api_key: str | None = None  # same OPENAI_API_KEY the realtime session reads
+    live_openai_model: str = "gpt-5.4-mini"  # decide, word coach without audio, session, ask
+    live_openai_background_model: str = "gpt-5.5"  # notes and insight
+    live_openai_audio_model: str = "gpt-audio-1.5"  # word coach with the learner's attempt audio
+    # Azure Speech Pronunciation Assessment for the consonant coach. Configured only when key and region are both set.
+    azure_speech_key: str | None = None
+    azure_speech_region: str | None = None  # e.g. "westus2"
+    azure_pronunciation_timeout_s: float = 4.0
+    consonant_azure_pass: float = 60.0  # part score below this can never be got_it
     spacetime_uri: str = "https://maincloud.spacetimedb.com"
     spacetime_database: str | None = None
     spacetime_token: str | None = None
@@ -80,6 +93,8 @@ class Settings(BaseSettings):
     max_sample_rate_hz: int = 48_000
     analysis_version: str = "pitch-v1"
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    # Built web/dist to serve at / (single-container hosting). Blank or a missing directory keeps the API-only app.
+    static_dir: str = ""
 
     # Engineering comparison thresholds. See docs/backend-contract.md.
     ending_direction_st: float = 1.5
@@ -116,6 +131,14 @@ class Settings(BaseSettings):
     @property
     def anthropic_configured(self) -> bool:
         return bool(self.anthropic_api_key)
+
+    @property
+    def openai_configured(self) -> bool:
+        return bool(self.openai_api_key)
+
+    @property
+    def azure_configured(self) -> bool:
+        return bool(self.azure_speech_key and self.azure_speech_region)
 
     @property
     def spacetime_configured(self) -> bool:

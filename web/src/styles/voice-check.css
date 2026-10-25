@@ -63,3 +63,27 @@
     transition: none;
   }
 }
+.vc-steps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vc-steps li {
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--color-muted);
+  background: var(--color-navy-soft);
+}
+.vc-steps li.now {
+  color: #fff;
+  background: var(--color-navy);
+}
+.vc-steps li.done {
+  color: var(--color-navy);
+  font-weight: 650;
+}

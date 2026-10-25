@@ -3,6 +3,8 @@
  * The access token is only held in memory and never logged (it appears only in the socket URL).
  */
 
+import { emit } from '../../telemetry/client';
+
 export class Resampler {
   private acc = 0;
   private filled = 0;
@@ -202,8 +204,12 @@ class InkSessionImpl implements InkSession {
           return;
         }
         this.ws = ws;
+        emit('mic', 'stt', 'stt.open', 'speech-to-text socket open', {});
         ws.addEventListener('message', (e) => this.onMessage(e));
-        ws.addEventListener('close', () => this.settle?.());
+        ws.addEventListener('close', () => {
+          emit('mic', 'stt', 'stt.close', 'speech-to-text socket closed', {});
+          this.settle?.();
+        });
         for (const q of this.queue) ws.send(q);
         this.queue = [];
         if (this.finalizing) this.sendFinalize();
@@ -221,6 +227,9 @@ class InkSessionImpl implements InkSession {
     try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === 'transcript') {
       if (m.is_final && typeof m.text === 'string') this.text += m.text;
+      if (typeof m.text === 'string' && m.text) {
+        emit('stt', 'ui', 'stt.transcript', 'transcript', { text: m.text.slice(0, 80), final: m.is_final === true });
+      }
     } else if (m.type === 'flush_done') {
       this.settle?.();
     } else if (m.type === 'error') {

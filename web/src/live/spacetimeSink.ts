@@ -1,6 +1,7 @@
 import { DbConnection } from '../module_bindings';
 import type { SoundId } from '../state/types';
 import type { MetricSink } from './metricSink';
+import { readToken, saveToken } from './stdbToken';
 
 /**
  * MetricSink backed by the SpacetimeDB TypeScript client SDK (module `articulate-live`).
@@ -24,29 +25,12 @@ export interface SpacetimeSinkOptions {
   onStatus?: (status: SinkStatus) => void;
 }
 
-const TOKEN_KEY = 'articulate.stdb.token';
 const DEFAULT_URI = 'wss://maincloud.spacetimedb.com';
 const DEFAULT_DB = 'articulate-live';
 const TIMEOUT_MS = 3000;
 const MAX_FRAMES = 200;
 const MAX_BYTES = 32768;
 const RECONNECT_DELAY_MS = 2000;
-
-function readToken(): string | undefined {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function saveToken(token: string): void {
-  try {
-    localStorage.setItem(TOKEN_KEY, token);
-  } catch {
-    /* storage unavailable; identity is just not remembered */
-  }
-}
 
 function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {

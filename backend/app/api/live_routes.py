@@ -14,8 +14,9 @@ from fastapi.responses import JSONResponse
 from app import telemetry
 from app.audio.pitch_table import compare_wav, features_from_table, phrase_cue
 from app.integrations.spacetime import SpacetimeError
-from app.live import insight
+from app.live import insight, llm
 from app.live.articulation import annotate_attempts, extract_features
+from app.live.consonant import ConsonantRequest, ConsonantResponse, coach_consonant
 from app.live.coordination import Coordination
 from app.live.identity import authorize_profile, issue_identity, read_identity
 from app.live.notes import update_notes
@@ -147,6 +148,7 @@ def _deps(request: Request) -> LiveDeps:
     return LiveDeps(
         settings=state.settings,
         anthropic_client=getattr(state, "live_client", None) or runtime.anthropic(),
+        openai_client=getattr(state, "live_openai_client", None) or runtime.openai(),
         transport=transport,
         history=getattr(state, "live_history", None) or runtime.history(transport),
         spacetime=runtime.spacetime(transport),
@@ -159,7 +161,8 @@ ACCEPTED = {202: {"description": "Durable job accepted; poll the returned status
 @router.post("/coach", response_model=LiveCoachResponse, responses=ACCEPTED)
 async def live_coach(body: LiveCoachRequest, request: Request, background: BackgroundTasks) -> LiveCoachResponse:
     if _shared(request, body.profileId):
-        return await _coordination(request).submit("attempt.coach", body.model_dump())
+        # Attempt audio is used for one model call on the local path only; it never enters a job row.
+        return await _coordination(request).submit("attempt.coach", body.model_dump(exclude={"attemptAudio"}))
     return await coach_attempt(_deps(request), body, background.add_task)
 
 
@@ -168,6 +171,14 @@ async def live_word_ask(body: WordAskRequest, request: Request) -> WordAskRespon
     """A learner's question from Ava's ask_coach tool. Always 200 with a validated line (model or fallback)."""
     authorize_profile(request, body.profileId)
     return await answer_word_question(_deps(request), body)
+
+
+@router.post("/consonant", response_model=ConsonantResponse)
+async def live_consonant(body: ConsonantRequest, request: Request) -> ConsonantResponse:
+    """One recorded attempt at the tr or ck of "track", coached by the OpenAI audio model. Always 200 once validated."""
+    if body.profileId is not None:
+        authorize_profile(request, body.profileId)
+    return await coach_consonant(_deps(request), body)
 
 
 @router.post("/notes", response_model=LearnerNotes, responses=ACCEPTED)
@@ -279,7 +290,8 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
         if features is None:
             await sink.set(attempt_id, profile_id, sound, "none")
             return
-        model_client = getattr(state, "live_client", None) or runtime.anthropic()
+        injected = getattr(state, "live_openai_client" if llm.is_openai(state.settings) else "live_client", None)
+        model_client = injected or runtime.model_client()
         # 2026-10-24: a Parselmouth-only table has no SPARC claim, so the cue is spoken from the measured difference.
         if features.get("source") == "parselmouth":
             cue = (table or {}).get("cue")

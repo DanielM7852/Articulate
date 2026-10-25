@@ -189,7 +189,10 @@ async def main() -> None:
     runtime = LiveRuntime(settings)
     client = runtime.spacetime()
     assert client is not None
-    deps = LiveDeps(settings, anthropic_client=runtime.anthropic(), history=runtime.history(), spacetime=client)
+    deps = LiveDeps(
+        settings, anthropic_client=runtime.anthropic(), openai_client=runtime.openai(),
+        history=runtime.history(), spacetime=client,
+    )
     try:
         await Worker(settings, Coordination(settings, client), deps).run()
     finally:

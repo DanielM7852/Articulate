@@ -387,3 +387,14 @@ export const Sessions = __t.object("Sessions", {
 });
 export type Sessions = __Infer<typeof Sessions>;
 
+export const TelemetryEvent = __t.object("TelemetryEvent", {
+  id: __t.u64(),
+  at: __t.timestamp(),
+  source: __t.string(),
+  target: __t.string(),
+  kind: __t.string(),
+  label: __t.string(),
+  payload: __t.string(),
+});
+export type TelemetryEvent = __Infer<typeof TelemetryEvent>;
+

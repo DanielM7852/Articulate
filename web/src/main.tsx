@@ -12,6 +12,7 @@ import OnYourOwn from './screens/OnYourOwn';
 import WordLesson from './screens/WordLesson';
 import MatchWord from './screens/MatchWord';
 import Dashboard from './screens/Dashboard';
+import ConsonantCoach from './screens/ConsonantCoach';
 import { LessonSync } from './classroom/LessonSync';
 
 /**
@@ -40,6 +41,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/practice" element={<Guard need="tutorial"><PracticeStudio /></Guard>} />
           <Route path="/own" element={<Guard need="tutorial"><OnYourOwn /></Guard>} />
           <Route path="/match" element={<Guard need="tutorial"><MatchWord /></Guard>} />
+          <Route path="/consonants" element={<ConsonantCoach />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/summary" element={<Navigate to="/own" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

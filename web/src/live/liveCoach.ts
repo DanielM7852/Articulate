@@ -2,6 +2,7 @@ import type { WordAttemptResult, ZoneResult } from '../game/types';
 import type { SoundId } from '../state/types';
 import type { AudioFrame, RecordedLipFrame } from './attemptRecorder';
 import { livePost } from './transport';
+import { emit } from '../telemetry/client';
 
 /** Typed wrappers for the live coaching endpoints. Both throw on any failure so callers can fall back. */
 export type CueId = 'round-lips' | 'spread-lips' | 'open-jaw';
@@ -25,6 +26,8 @@ export interface LiveCoachRequest {
   frames: { audio: AudioFrame[]; video: RecordedLipFrame[] } | null;
   /** Word mode: the board's attempt. `sound` is then the word's vowel ("a" for track). */
   word?: WordAttemptResult;
+  /** Word mode: a short 16 kHz mono PCM16 WAV of the attempt (base64, no data: prefix). Omitted when unavailable. */
+  attemptAudio?: { format: 'wav'; data: string; durationMs: number };
 }
 
 /** Server roll-up of a word attempt (backend/app/live/scoring.py score_word). */
@@ -77,6 +80,7 @@ export function profileIdFor(name: string | null | undefined): string {
 }
 
 export function requestLiveCoach(req: LiveCoachRequest, signal?: AbortSignal): Promise<LiveCoachResponse> {
+  emit('ui', 'backend', 'coach.request', 'coach request', { sound: req.sound, mode: req.word ? 'word' : 'sound' });
   return livePost<LiveCoachResponse>('/v1/live/coach', req, signal).then((r) => {
     if (!r || typeof r.caption !== 'string' || typeof r.observation !== 'string') throw new Error('Malformed coach response');
     return r;

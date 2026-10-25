@@ -1,6 +1,7 @@
 """Claude Sonnet 5.5 calls for live coaching and learner notes (structured output, adaptive thinking)."""
 
 import asyncio
+import base64
 import logging
 from typing import TypeVar
 
@@ -67,7 +68,16 @@ Write the one short coaching line Ava says next. Rules:
 - nextAction: "retry" (say the word again), "next_sound" (every zone was hit; the word is done), or "rest" (several attempts with no progress). If the capture was unclear, use retry with cueId null and ask for one clear, steady try.
 - If recent history already coached this same word part twice and it still has not landed, do not repeat that instruction. Ask them to leave the whole word and shape only that one part.
 - observation: 1-2 plain sentences about what the board measured, for the record.
-- evidenceFields: names chosen only from allowedEvidenceFields that support your message."""
+- evidenceFields: names chosen only from allowedEvidenceFields that support your message.
+- acoustics, when present, was measured by code from a recording of this attempt (Praat). It is evidence, not a verdict: use it only to choose which zone's body instruction to give and how to word it. Never say a zone was right, wrong, hit or missed because of it, never claim where the tongue, lips or jaw were, and never write its numbers. liquid f3Drop is the r's lowest F3 divided by this take's vowel F3 (lower means a stronger r colour); fricative cogHz is the spectral centre of gravity (sh is usually lower than s); nasal lowBandRatio is the share of energy below 500 Hz."""
+
+WORD_COACH_AUDIO_NOTE = (
+    "A recording of this attempt is attached. The board's verdicts and evidence are the measurement and they stand: "
+    "never contradict a verdict, never say a zone was hit or missed because of the recording, and never describe how "
+    "the recording sounds. Use the recording only to notice when no clear speech, or a different word, was said "
+    "(then use nextAction retry with cueId null and ask for one clear try of the word), and to choose which body "
+    "instruction from the hints best fits this try."
+)
 
 NOTES_SYSTEM = """You maintain short private coaching notes for one learner practising the vowels ee (i), oo (u) and ah (a).
 You receive their recent attempts (code-computed verdicts and offsets) and the previous notes. Produce updated notes:
@@ -81,16 +91,35 @@ class ModelRefusal(DecisionError):
     pass
 
 
+def is_openai(settings: Settings) -> bool:
+    return settings.live_coach_provider == "openai"
+
+
+def model_configured(settings: Settings, client=None) -> bool:
+    """Whether a live model call can be attempted: an injected client, or the active provider's key."""
+    if client is not None:
+        return True
+    return settings.openai_configured if is_openai(settings) else settings.anthropic_configured
+
+
 def build_client(settings: Settings, timeout_s: float):
     from anthropic import Anthropic
 
     return Anthropic(api_key=settings.anthropic_api_key, max_retries=0, timeout=timeout_s)
 
 
+def build_openai_client(settings: Settings, timeout_s: float):
+    from openai import OpenAI
+
+    return OpenAI(api_key=settings.openai_api_key, max_retries=0, timeout=timeout_s)
+
+
 def _parse(
     client, settings: Settings, system: str, user: str, output_format: type[T], effort: str, max_tokens: int,
-    model: str | None = None, thinking: str = "on", purpose: str = "decide",
+    model: str | None = None, thinking: str = "on", purpose: str = "decide", audio_wav: bytes | None = None,
 ) -> T:
+    if audio_wav:
+        _warn_once("audio:anthropic", "attempt audio is ignored by the Anthropic live path")
     model = model or settings.anthropic_model
     extra, effort = request_options(model, thinking, effort)
     response = telemetry.claude_call(model, purpose, lambda: client.messages.parse(
@@ -112,6 +141,54 @@ def _parse(
     return output_format.model_validate(parsed)
 
 
+_BACKGROUND_PURPOSES = ("notes", "insight")
+
+
+def _parse_openai(
+    client, settings: Settings, system: str, user: str, output_format: type[T], effort: str, max_tokens: int,
+    purpose: str = "decide", audio_wav: bytes | None = None,
+) -> T:
+    if audio_wav:
+        import openai
+
+        model = settings.live_openai_audio_model
+        data = base64.b64encode(audio_wav).decode("ascii")
+        # gpt-audio takes no reasoning_effort and rejects text-only input, so this branch is audio only.
+        kwargs: dict = dict(
+            model=model,
+            modalities=["text"],
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": [
+                    {"type": "text", "text": user},
+                    {"type": "input_audio", "input_audio": {"data": data, "format": "wav"}},
+                ]},
+            ],
+            tools=[openai.pydantic_function_tool(output_format, name="submit")],
+            tool_choice={"type": "function", "function": {"name": "submit"}},
+            max_completion_tokens=max_tokens,
+        )
+    else:
+        model = settings.live_openai_background_model if purpose in _BACKGROUND_PURPOSES else settings.live_openai_model
+        kwargs = dict(
+            model=model,
+            reasoning_effort="high" if effort in ("xhigh", "max") else effort,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            response_format=output_format,
+            max_completion_tokens=max_tokens,
+        )
+    response = telemetry.claude_call(model, purpose, lambda: client.chat.completions.parse(**kwargs), provider="openai")
+    message = response.choices[0].message
+    if getattr(message, "refusal", None):
+        raise ModelRefusal("model_refusal")
+    parsed = telemetry.parsed_of(response)
+    if parsed is None:
+        raise DecisionError("empty_model_output")
+    if isinstance(parsed, output_format):
+        return parsed
+    return output_format.model_validate(parsed)
+
+
 async def ask(
     settings: Settings,
     client,
@@ -124,10 +201,24 @@ async def ask(
     model: str | None = None,
     thinking: str = "on",
     purpose: str = "decide",
+    audio_wav: bytes | None = None,
 ) -> T:
-    """Run one structured call off the event loop with a hard timeout. Raises on any failure."""
+    """Run one structured call off the event loop with a hard timeout. Raises on any failure.
+
+    `client` is the active provider's client. On OpenAI the Claude `model` and `thinking` are ignored.
+    """
+    if is_openai(settings):
+        active = client or build_openai_client(settings, timeout_s)
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                _parse_openai, active, settings, system, user, output_format, effort, max_tokens, purpose, audio_wav
+            ),
+            timeout=timeout_s,
+        )
     active = client or build_client(settings, timeout_s)
     return await asyncio.wait_for(
-        asyncio.to_thread(_parse, active, settings, system, user, output_format, effort, max_tokens, model, thinking, purpose),
+        asyncio.to_thread(
+            _parse, active, settings, system, user, output_format, effort, max_tokens, model, thinking, purpose, audio_wav
+        ),
         timeout=timeout_s,
     )

@@ -72,7 +72,6 @@ kind matches `^[a-z]+(\.[a-z_]+)+$`, label <= 120 chars, payload_json valid JSON
 | ui.join            | ui -> db            | `{sid, ua}` ua = coarse device class: phone, tablet or desktop; label "learner joined" |
 | ui.ping            | ui -> db            | `{sid}` every 20 s while the tab is visible                            |
 | ui.leave           | ui -> db            | `{sid}` on `pagehide`, best effort                                     |
-| ui.quality         | ui -> db            | `{tier, level, reason, gpuTier, fps, renderer, isMobile}` the guide's display tier (full, light, simple), on the first decision and every change; label "quality <tier>". level is the rung (full, full-dpr, full-dots, light, simple); reason e.g. software-renderer, gpu-tier-1, url, user, auto, fps-low, fps-high, fps-fallback, 3d-failed; gpuTier is detect-gpu's 0..3 or null; fps is the average that triggered an automatic step, else null; renderer is the WebGL renderer string truncated to 60 chars |
 
 Rates: lip.frame and audio.frame are throttled to at most 5 per second each by the browser.
 Everything else is one event per occurrence.
@@ -93,8 +92,6 @@ The header shows "N learners live" and the Learner node shows one dot per live s
 
 `web/src/telemetry/client.ts` exports:
 - `emit(source, target, kind, label, payload)` fire-and-forget, no-op when disconnected. Adds `sid`.
-- `emitWhenReady(...)` the same, except an event raised before the connection is ready is held (8 at most)
-  and sent once it is (used for `ui.quality`, decided at startup).
 - `getSessionId(): string` the anonymous per-tab id.
 - `subscribeTelemetry(cb: (e: TelemetryEvent) => void): () => void` live inserts, newest first on backfill.
 - `TelemetryEvent = { id: string; at: number; source; target; kind; label; payload: Record<string, unknown> }`
@@ -114,3 +111,29 @@ spacetime generate --lang typescript --out-dir ../web/src/module_bindings --proj
 ```
 Commit the regenerated `web/src/module_bindings` and open a PR. The hand-written bindings in
 this branch match the generated shape and are a stopgap until then.
+
+## Perception streams (added after PR #13)
+
+Two richer browser events let the dashboard draw the MediaPipe wireframe and a spectrum-reactive
+audio node. Both are throttled to 10 Hz per tab and stay well under the 2048-byte payload cap.
+
+| kind           | source -> target  | payload (JSON)                                                              |
+|----------------|-------------------|-----------------------------------------------------------------------------|
+| lip.mesh       | mediapipe -> db   | `{sid, pts}` pts = flat int array `[x0,y0,x1,y1,...]`, 81 points, 0..255   |
+| audio.spectrum | audio -> db       | `{sid, bins, rms}` bins = 32 ints 0..255, rms 0..1                          |
+
+`lip.mesh` point order (MediaPipe FaceLandmarker indices):
+1. OUTER_LIP, 20 points: 61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185
+2. INNER_LIP, 20 points: 78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191
+3. FACE_OVAL, 36 points: 10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
+4. Eyes, 4 points: 33, 133, 362, 263
+5. Nose tip, 1 point: 1
+
+Coordinates are normalised into a square centred on the nose tip (index 1) with half-size
+1.6 x the inter-ocular distance (midpoints of 33/133 and 362/263), then quantised to 0..255 and
+clamped. x grows to the viewer's right, y grows downward. Emitted only for frames MediaPipe
+accepted (a face was found), whether or not the LipFrame quality flags passed.
+
+`audio.spectrum` bins are 32 log-spaced bands from an AnalyserNode (fftSize 1024, smoothing 0.6)
+over `getByteFrequencyData`, covering roughly 80 Hz to 8 kHz. Emitted whenever a microphone
+stream is open, not only during recording attempts. `rms` is the time-domain RMS of the same block.

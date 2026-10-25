@@ -31,7 +31,9 @@ class LiveRuntime:
         self._http: httpx.AsyncClient | None = None
         self._http_transport: Any = None
         self._history: LearnerHistory | None = None
+        self._openai: Any = None
         self.anthropic_created = 0
+        self.openai_created = 0
         self.http_created = 0
         self._tasks: set[asyncio.Task] = set()
         self._artic_http: httpx.AsyncClient | None = None
@@ -49,6 +51,17 @@ class LiveRuntime:
             self._anthropic = llm.build_client(self.settings, timeout)
             self.anthropic_created += 1
         return self._anthropic
+
+    def openai(self) -> Any:
+        if self._openai is None and self.settings.openai_configured:
+            timeout = max(self.settings.live_coach_timeout_s, SHARED_MODEL_TIMEOUT_S)
+            self._openai = llm.build_openai_client(self.settings, timeout)
+            self.openai_created += 1
+        return self._openai
+
+    def model_client(self) -> Any:
+        """The shared client for the active live provider."""
+        return self.openai() if llm.is_openai(self.settings) else self.anthropic()
 
     def http(self, transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient | None:
         if not self.settings.spacetime_configured:
@@ -168,10 +181,12 @@ class LiveRuntime:
 
     async def _warm_model(self) -> None:
         try:
-            client = await asyncio.to_thread(self.anthropic)
+            openai_mode = llm.is_openai(self.settings)
+            client = await asyncio.to_thread(self.model_client)
             if client is None or not hasattr(client, "models"):
                 return
-            await asyncio.to_thread(client.models.retrieve, self.settings.anthropic_model)
+            model = self.settings.live_openai_model if openai_mode else self.settings.anthropic_model
+            await asyncio.to_thread(client.models.retrieve, model)
             logger.info("live warm-up: model API reachable")
         except Exception as exc:  # noqa: BLE001
             logger.info("live warm-up: model API failed (%s)", type(exc).__name__)
@@ -206,12 +221,13 @@ class LiveRuntime:
                 await self._artic_http.aclose()
             except Exception:  # noqa: BLE001
                 pass
-        close = getattr(self._anthropic, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:  # noqa: BLE001
-                pass
+        for model_client in (self._anthropic, self._openai):
+            close = getattr(model_client, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def get_runtime(app) -> LiveRuntime:

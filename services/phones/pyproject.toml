@@ -1,0 +1,25 @@
+[project]
+name = "articulate-phones"
+version = "0.1.0"
+description = "Local GPU wav2vec2 CTC IPA phone recognition service (TensorRT FP16) with a live WebSocket stream"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "torch>=2.8",            # install the CUDA 12.8 build: --index-url https://download.pytorch.org/whl/cu128
+  "transformers>=4.50",
+  "onnx",
+  "onnxruntime",
+  "tensorrt-cu12>=10.8,<11",
+  "fastapi",
+  "uvicorn[standard]",
+  "numpy",
+  "soundfile",
+  "scipy",
+  "huggingface_hub",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "websockets"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

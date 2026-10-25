@@ -145,7 +145,7 @@ async def compose_line(settings: Settings, client, sound: str, claim: dict, rece
     """Return (say, source): the model's line if it validates ("agent"), else the template ("fallback")."""
     template = template_line(sound, claim)
     validate_insight(template, sound, claim)  # raises claim_not_allowed for a dropped pair; the template must pass
-    if client is None and not settings.anthropic_configured:
+    if not llm.model_configured(settings, client):
         return template, "fallback"
     payload = json.dumps(
         {

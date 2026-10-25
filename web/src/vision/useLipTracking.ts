@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LipFrame } from './lipTelemetry';
+import { emit, throttledEmit } from '../telemetry/client';
 
 export type { LipFrame } from './lipTelemetry';
 export type LipTrackingStatus = 'off' | 'loading' | 'tracking' | 'no-face' | 'error';
@@ -32,6 +33,7 @@ export function useLipTracking(video: HTMLVideoElement | null, enabled: boolean)
       setLatest(null);
       return;
     }
+    emit('camera', 'mediapipe', 'camera.on', 'camera tracking started', {});
     let stopped = false;
     let ready = false;
     let inFlight = false;
@@ -68,6 +70,17 @@ export function useLipTracking(video: HTMLVideoElement | null, enabled: boolean)
           if (w.length > WINDOW_CAP) w.shift();
         }
         subs.current.forEach((fn) => fn(f));
+        const mesh: number[] | undefined = d.mesh;
+        if (mesh) throttledEmit('lip.mesh', 100, 'mediapipe', 'db', 'lip.mesh', 'face mesh', { pts: mesh });
+        throttledEmit('lip.frame', 200, 'mediapipe', 'db', 'lip.frame', 'lip frame', {
+          ok: f.ok,
+          opening: f.lipOpening,
+          width: f.lipWidth,
+          rounding: f.rounding,
+          spread: f.spread,
+          jaw: f.jawDrop,
+          yaw: f.yawDeg,
+        });
         const next: LipTrackingStatus = f.flags.includes('missing_face') ? 'no-face' : 'tracking';
         if (next !== lastStatus) {
           lastStatus = next;
@@ -107,6 +120,7 @@ export function useLipTracking(video: HTMLVideoElement | null, enabled: boolean)
 
     return () => {
       stopped = true;
+      emit('camera', 'mediapipe', 'camera.off', 'camera tracking stopped', {});
       window.clearInterval(timer);
       worker.terminate();
       setStatus('off');

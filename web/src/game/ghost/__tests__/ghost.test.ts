@@ -4,7 +4,7 @@ import { GhostAttempt, isClose, sizeModel, unitWindow } from '../follow';
 import { GHOST_WORD_LIST, ghostModel } from '../models';
 import { chainUnits, partUnits, unitIsPractisable } from '../units';
 import { validateGhostModel } from '../validate';
-import { DEFAULT_FACTOR, voiceFactor } from '../voice';
+import { DEFAULT_FACTOR, anchorsConsistent, frontAnchorOk, vowelAnchor, voiceFactor } from '../voice';
 import { GHOST_WORDS } from '../words';
 import { learnerStream, type StreamOptions } from './streams';
 
@@ -390,4 +390,42 @@ test('voiceFactor: uh + group, ok flag, default', () => {
   expect(short.ok).toBe(false);
   expect(short.factor).toBe(DEFAULT_FACTOR);
   expect(typeof short.reason).toBe('string');
+});
+
+test('vowelAnchor: ln median in Hz, needs 12 formant frames, ignores frames without formants', () => {
+  const frame = (f1?: number, f2?: number): VoiceFrame => ({ timestampMs: 0, rms: 0.1, periodicity: 0.9, voiced: true, f1, f2, burst: false, clipped: false });
+  const good = Array.from({ length: 12 }, (_, i) => frame(300 + i, 2000));
+  const anchor = vowelAnchor([...good, frame(), frame(undefined, 900)])!;
+  expect(anchor.n).toBe(12);
+  expect(anchor.f1).toBeCloseTo(Math.exp((Math.log(305) + Math.log(306)) / 2), 1e-6);
+  expect(anchor.f2).toBeCloseTo(2000, 1e-6);
+  expect(vowelAnchor(good.slice(0, 11))).toBe(null);
+  expect(vowelAnchor([...good.slice(0, 11), frame()])).toBe(null);
+});
+
+test('anchorsConsistent: good set, swapped set, partial set', () => {
+  const i = { f1: 300, f2: 2300, n: 40 };
+  const a = { f1: 750, f2: 1200, n: 40 };
+  const u = { f1: 320, f2: 800, n: 40 };
+  expect(anchorsConsistent({ i, a, u })).toBe(true);
+  expect(anchorsConsistent({ i: a, a: i, u })).toBe(false);
+  expect(anchorsConsistent({ i, a: u, u: a })).toBe(false);
+  expect(anchorsConsistent({ i: a, a: i })).toBe(true);
+  expect(anchorsConsistent({})).toBe(true);
+});
+
+test('frontAnchorOk: eh and a sit below eee, a in front of ah; absent vowels pass', () => {
+  const i = { f1: 300, f2: 2300, n: 40 };
+  const a = { f1: 750, f2: 1200, n: 40 };
+  const eh = { f1: 550, f2: 1850, n: 40 };
+  const ae = { f1: 700, f2: 1650, n: 40 };
+  expect(frontAnchorOk('eh', eh, { i, a })).toBe(true);
+  expect(frontAnchorOk('ae', ae, { i, a })).toBe(true);
+  expect(frontAnchorOk('eh', { f1: 280, f2: 2400, n: 40 }, { i, a })).toBe(false);
+  expect(frontAnchorOk('ae', { f1: 700, f2: 1100, n: 40 }, { i, a })).toBe(false);
+  expect(frontAnchorOk('eh', { f1: 700, f2: 1100, n: 40 }, { i, a })).toBe(true);
+  expect(frontAnchorOk('ae', ae, { i })).toBe(true);
+  expect(frontAnchorOk('ae', { f1: 700, f2: 1100, n: 40 }, { i })).toBe(true);
+  expect(frontAnchorOk('eh', { f1: 280, f2: 1800, n: 40 }, { a })).toBe(true);
+  expect(frontAnchorOk('ae', ae, {})).toBe(true);
 });
