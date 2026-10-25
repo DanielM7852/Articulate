@@ -22,6 +22,7 @@ from app.live.coordination import Coordination
 from app.live.identity import authorize_profile, issue_identity, read_identity
 from app.live.notes import update_notes
 from app.live.orchestrator import LiveDeps, coach_attempt
+from app.live.recap import RecapEmailRequest, RecapLimitError, RecapRequest, RecapStatus, get_service as get_recap_service
 from app.live.runtime import get_runtime
 from app.live.schemas import (
     LearnerNotes,
@@ -419,3 +420,38 @@ async def live_articulation(
         (captureStartMonotonicMs, timeOriginUnixMs), reference, word if reference else None,
     )
     return JSONResponse({"accepted": True}, status_code=202, background=background)
+
+
+@router.post("/recap", response_model=RecapStatus)
+async def live_recap_start(body: RecapRequest, request: Request) -> RecapStatus:
+    """Start (or return) the background recap for a finished word lesson. Idempotent per profile and attempt set."""
+    authorize_profile(request, body.profileId)
+    try:
+        entry = get_recap_service(request.app).start(body.profileId, body.attemptIds, body.word, body.email)
+    except RecapLimitError:
+        raise HTTPException(429, "recap_limit") from None
+    return entry.view()
+
+
+def _recap_entry(request: Request, recap_id: str, profile_id: str):
+    if not valid_profile_id(profile_id):
+        raise HTTPException(422, "profileId must match [A-Za-z0-9_.:@-]{1,64}")
+    authorize_profile(request, profile_id)
+    entry = get_recap_service(request.app).get(recap_id)
+    if entry is None:
+        raise HTTPException(404, "recap_not_found")
+    if entry.profile_id != profile_id:
+        raise HTTPException(403, "profile_mismatch")
+    return entry
+
+
+@router.get("/recap/{recapId}", response_model=RecapStatus)
+async def live_recap_status(recapId: str, profileId: str, request: Request) -> RecapStatus:
+    return _recap_entry(request, recapId, profileId).view()
+
+
+@router.post("/recap/{recapId}/email", response_model=RecapStatus)
+async def live_recap_email(recapId: str, body: RecapEmailRequest, request: Request) -> RecapStatus:
+    entry = _recap_entry(request, recapId, body.profileId)
+    await get_recap_service(request.app).set_email(entry, body.email)
+    return entry.view()

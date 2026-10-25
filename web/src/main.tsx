@@ -15,6 +15,7 @@ import ConsonantCoach from './screens/ConsonantCoach';
 import { LessonSync } from './classroom/LessonSync';
 import { loadSession } from './classroom/session';
 import { OpenLiveConsole } from './teach/OpenLiveConsole';
+import RecapScreen from './screens/RecapScreen';
 
 /**
  * Flow: the guide greets the learner, then the quiz, then a tutorial where the
@@ -44,6 +45,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/own" element={<Guard need="tutorial"><OnYourOwn /></Guard>} />
           <Route path="/match" element={<Guard need="tutorial"><MatchWord /></Guard>} />
           <Route path="/consonants" element={<ConsonantCoach />} />
+          <Route path="/recap/:recapId" element={<RecapScreen />} />
           <Route path="/dashboard" element={<OpenLiveConsole />} />
           <Route path="/summary" element={<Navigate to="/own" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
