@@ -57,6 +57,10 @@ async def _lifespan(app: FastAPI):
     try:
         yield
     finally:
+        for name in ("recap_service", "phrase_service"):
+            service = getattr(app.state, name, None)
+            if service is not None:
+                await service.aclose()
         await telemetry.aclose()
         await runtime.aclose()
 

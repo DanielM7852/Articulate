@@ -1,0 +1,80 @@
+/* ---------- Real-life phrases (phrase-/phrases-) ----------
+ * Reuses the recap page. Word results are always a text label plus a border style, never colour alone.
+ */
+.phrases__about {
+  width: 100%;
+  padding: 14px;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1.5;
+  border: 1px solid var(--color-navy-mist);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  resize: vertical;
+}
+.phrases__help {
+  margin-top: 10px;
+  font-size: 16px;
+  color: var(--color-muted);
+}
+.phrases__count { white-space: nowrap; }
+.phrases__form .btn-row { margin-top: 20px; }
+.phrase__text {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  line-height: 1.35;
+  color: var(--color-navy-deep);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.phrase__word {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 2px 12px 4px;
+  border-radius: var(--radius-control);
+  border: 2px solid transparent;
+}
+.phrase__label {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.phrase__word[data-result='clear'] {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  border-color: var(--color-success-soft);
+}
+.phrase__word[data-result='try_again'] {
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+  border-color: var(--color-warn);
+}
+.phrase__word[data-result='missed'] {
+  background: transparent;
+  color: var(--color-ink);
+  border: 2px dashed var(--color-muted);
+}
+.phrase__tip { font-size: 18px; }
+.phrase__overall { font-size: 20px; font-weight: 600; color: var(--color-navy); }
+.phrase__overall[data-overall='clear'] { color: var(--color-success); }
+.phrase__rec { font-weight: 600; color: var(--color-warn); }
+.phrase__status { display: flex; align-items: center; gap: 8px; color: var(--color-muted); }
+.phrase__spin { animation: recap-spin 900ms linear infinite; }
+.phrase__actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.phrase__mic { min-width: 150px; }
+.phrase__mic--live {
+  background: var(--color-warn-soft);
+  border-color: var(--color-warn);
+  color: var(--color-warn);
+}
+.recap-foot.btn-row { display: flex; gap: 12px; flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) {
+  .phrase__spin { animation: none; }
+}
+@media (max-width: 600px) {
+  .phrase__text { font-size: 26px; }
+}

@@ -1,0 +1,213 @@
+/* ---------- Session recap (recap-) ----------
+ * A calm reading page: one centred column, large type, cards on the cream page.
+ * Everything is text; nothing depends on audio or colour alone (trend has words).
+ */
+.recap {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 56px 24px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+  font-size: 18px;
+  line-height: 1.6;
+}
+.recap :focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.recap h1:focus,
+.recap h1:focus-visible {
+  /* focus is moved to the title for screen readers; it is not a Tab stop */
+  outline: none;
+  box-shadow: none;
+}
+.recap-eyebrow {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  margin-bottom: 12px;
+}
+.recap-title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 40px;
+  line-height: 1.2;
+  color: var(--color-navy-deep);
+}
+.recap-lede {
+  margin-top: 16px;
+  font-size: 20px;
+  max-width: 62ch;
+}
+.recap-h2 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 28px;
+  line-height: 1.25;
+  color: var(--color-navy);
+  margin-bottom: 20px;
+}
+.recap-h3 {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+.recap-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+.recap-list li {
+  padding-left: 20px;
+  border-left: 3px solid var(--color-success);
+}
+.recap-focus,
+.recap-grid {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 16px;
+}
+.recap-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.recap-focus__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.recap-trend {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--color-navy-soft);
+  color: var(--color-navy);
+}
+.recap-trend[data-trend='improving'] {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+.recap-trend[data-trend='harder'] {
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+}
+.recap-habit__min {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+.recap-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px 12px;
+}
+.recap-dl dt {
+  font-weight: 600;
+  color: var(--color-navy);
+}
+.recap-dl dd {
+  margin: 0;
+}
+.recap-targets {
+  color: var(--color-muted);
+  font-size: 16px;
+}
+.recap-steps {
+  margin: 0;
+  padding-left: 1.4em;
+  display: grid;
+  gap: 6px;
+}
+.recap-email {
+  background: var(--color-navy-soft);
+  border-radius: var(--radius-panel);
+  padding: 28px;
+}
+.recap-email__status {
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.recap-email__label {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.recap-email__row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.recap-email__row input {
+  flex: 1 1 260px;
+  height: 50px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 17px;
+  border: 1px solid var(--color-navy-mist);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+.recap-error {
+  margin-top: 10px;
+  color: var(--color-warn);
+  font-size: 16px;
+}
+.recap-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 12vh;
+}
+.recap-state .btn,
+.recap-state .btn-row {
+  margin-top: 24px;
+}
+.recap-state .btn-row .btn {
+  margin-top: 0;
+}
+.recap-spinner {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 16px;
+  border-radius: 50%;
+  border: 3px solid var(--color-navy-mist);
+  border-top-color: var(--color-navy);
+  animation: recap-spin 900ms linear infinite;
+}
+@keyframes recap-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recap-spinner { animation: none; }
+}
+@media (max-width: 600px) {
+  .recap { padding-top: 32px; font-size: 17px; }
+  .recap-title { font-size: 32px; }
+  .recap-dl { grid-template-columns: 1fr; }
+}
+@media (min-width: 760px) {
+  .recap-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+}
+
+.recap-dl dd + dt { margin-top: 6px; }
+.recap-dl dt { font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; }

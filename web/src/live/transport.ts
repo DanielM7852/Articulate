@@ -35,6 +35,14 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** A non-2xx reply from a live endpoint; `.message` keeps the historical "<url> failed (<status>)" text. */
+export class LiveHttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = 'LiveHttpError';
+  }
+}
+
 /** Accept either the local synchronous response or a durable job from any API replica. */
 export async function livePost<T>(url: string, input: object, signal?: AbortSignal): Promise<T> {
   const ctl = new AbortController();
@@ -60,7 +68,7 @@ export async function livePost<T>(url: string, input: object, signal?: AbortSign
       pollMs = Math.min(1500, pollMs * 1.5);
       response = await fetch(`/v1/live/jobs/${job.jobId}`, { credentials: 'same-origin', signal: ctl.signal });
     }
-    if (!response.ok) throw new Error(`${url} failed (${response.status})`);
+    if (!response.ok) throw new LiveHttpError(response.status, `${url} failed (${response.status})`);
     return (await response.json()) as T;
   } finally {
     clearTimeout(timer);

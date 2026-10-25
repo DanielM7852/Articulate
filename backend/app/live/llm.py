@@ -224,3 +224,23 @@ async def ask(
         ),
         timeout=timeout_s,
     )
+
+
+async def ask_claude(
+    settings: Settings,
+    client,
+    system: str,
+    user: str,
+    output_format: type[T],
+    effort: str,
+    timeout_s: float,
+    max_tokens: int,
+    model: str | None = None,
+    purpose: str = "recap",
+) -> T:
+    """Like ask() but always the Anthropic path, whatever LIVE_COACH_PROVIDER says. Raises on any failure."""
+    active = client or build_client(settings, timeout_s)
+    return await asyncio.wait_for(
+        asyncio.to_thread(_parse, active, settings, system, user, output_format, effort, max_tokens, model, "on", purpose),
+        timeout=timeout_s,
+    )
