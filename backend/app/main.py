@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.classroom_routes import router as classroom_router
 from app.api.live_routes import health_router, router as live_router
 from app.api.routes import router
 from app.realtime.routes import router as realtime_router
@@ -91,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Registered ahead of the API router so the built app, not the listening-check page, owns "/".
         app.add_api_route("/", _frontend_index(frontend), methods=["GET", "HEAD"], include_in_schema=False)
     app.include_router(router)
+    app.include_router(classroom_router)
     app.include_router(live_router)
     app.include_router(health_router)
     app.include_router(realtime_router)

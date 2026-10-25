@@ -1,4 +1,4 @@
-import type { Assistance, Attempt, Plan, SoundId } from '../state/types';
+import type { Assistance, Attempt, Plan, Preferences, SoundId } from '../state/types';
 import { SOUNDS } from '../state/types';
 
 /**
@@ -26,7 +26,7 @@ const COACH_URL = (import.meta.env.VITE_COACH_URL as string | undefined) || '/v1
 export async function analyzeAttempt(
   attempt: Attempt,
   history: Attempt[],
-  context?: { learnerId?: string | null; plan?: Plan },
+  context?: { learnerId?: string | null; plan?: Plan; preferences?: Preferences },
 ): Promise<CoachResponse> {
   try {
     const res = await fetch(COACH_URL, {
@@ -37,6 +37,7 @@ export async function analyzeAttempt(
         history,
         learnerId: context?.learnerId || undefined,
         plan: context?.plan,
+        preferences: context?.preferences,
       }),
     });
     if (res.ok) {
@@ -48,6 +49,43 @@ export async function analyzeAttempt(
     /* fall through to local response */
   }
   return localResponse(attempt, history);
+}
+
+export async function proposeLessonPlan(preferences: Preferences, sound: SoundId): Promise<Plan> {
+  try {
+    const res = await fetch('/v1/lesson-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferences, sound }),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { plan?: Plan };
+      const plan = readPlan(body.plan);
+      if (plan) return plan;
+    }
+  } catch {
+    /* the quiz still produces a plan without the model */
+  }
+  return localLessonPlan(preferences, sound);
+}
+
+function localLessonPlan(preferences: Preferences, sound: SoundId): Plan {
+  const pace = preferences.pace ?? 'unhurried';
+  let score = 1;
+  if (preferences.guidance === 'explore') score += 1;
+  else score -= 1;
+  if (preferences.support === 'self') score += 1;
+  else if (preferences.support === 'mouth') score -= 1;
+  if (preferences.routine === 'exploring') score -= 1;
+  else if (preferences.routine === 'regular') score += 1;
+  if (pace === 'unhurried') score -= 1;
+  else if (pace === 'flexible') score += 1;
+  if (preferences.goals.includes('visual')) score -= 1;
+  if (preferences.goals.includes('longer')) score -= 1;
+  if (preferences.goals.includes('conversations')) score += 1;
+  if (score <= 0) return { sound, pace: 'unhurried', assistance: 'cue-target' };
+  if (score === 1) return { sound, pace: pace === 'flexible' ? 'steady' : pace, assistance: 'cue-target' };
+  return { sound, pace, assistance: 'target-only' };
 }
 
 function readPlan(value: Plan | undefined): Plan | undefined {

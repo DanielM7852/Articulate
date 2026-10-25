@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { QUESTIONS, questionLine } from '../audio/bakedLines';
+import { loadSession } from '../classroom/session';
 import {
   AudioLines,
   CalendarDays,
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import { CaptionBar, useNarration } from '../components/Narration';
 import { OnboardingFrame, OptionCard, Segmented, StepHeading, useStepNav } from '../components/Onboarding';
+import { proposeLessonPlan } from '../services/coach';
 import { useAppState } from '../state/AppState';
 import type { Goal, Guidance, Pace, Routine, Support } from '../state/types';
 
@@ -71,14 +73,21 @@ export default function Quiz() {
   const { step: raw } = useParams();
   const step = Number(raw);
   const go = useStepNav();
-  const { preferences, updatePreferences, updatePlan, completeQuiz } = useAppState();
+  const { preferences, updatePreferences, updatePlan, completeQuiz, plan, skipClassroomSurvey } = useAppState();
   const narration = useNarration();
+  const [saving, setSaving] = useState(false);
+  const classroomLearner = loadSession()?.role === 'learner';
+
+  useEffect(() => {
+    if (classroomLearner) skipClassroomSurvey();
+  }, [classroomLearner, skipClassroomSurvey]);
 
   useEffect(() => {
     if (!isStep(step)) return;
     narration.say(questionLine(step));
   }, [step, narration.say]);
 
+  if (classroomLearner) return <Navigate to="/practice" replace />;
   if (!isStep(step)) return <Navigate to="/quiz/1" replace />;
 
   const answered =
@@ -90,12 +99,18 @@ export default function Quiz() {
 
   const next = () => {
     if (step < 3) return go(`/quiz/${step + 1}`);
-    updatePlan({
-      pace: preferences.pace ?? 'unhurried',
-      assistance: preferences.guidance === 'explore' ? 'target-only' : 'cue-target',
+    // 2026-10-24: pace and guidance alone set the plan.
+    // updatePlan({
+    //   pace: preferences.pace ?? 'unhurried',
+    //   assistance: preferences.guidance === 'explore' ? 'target-only' : 'cue-target',
+    // });
+    setSaving(true);
+    void proposeLessonPlan(preferences, plan.sound).then((nextPlan) => {
+      updatePlan(nextPlan);
+      completeQuiz();
+      setSaving(false);
+      go('/lesson');
     });
-    completeQuiz();
-    go('/lesson');
   };
   const back = () => go(step > 1 ? `/quiz/${step - 1}` : '/', 'back');
 
@@ -112,7 +127,7 @@ export default function Quiz() {
       width={720}
       onBack={back}
       caption={<CaptionBar text={narration.caption} />}
-      primary={{ label: 'Continue', onClick: next, disabled: !answered }}
+      primary={{ label: saving ? 'Choosing a start…' : 'Continue', onClick: next, disabled: !answered || saving }}
     >
       <StepHeading title={q.title} hint={q.hint} />
 

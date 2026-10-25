@@ -22,6 +22,13 @@ interface AppState {
   preferences: Preferences;
   plan: Plan;
   attempts: Attempt[];
+  lessonInstruction: string | null;
+  lessonRevision: number;
+  lessonTarget: string | null;
+  lessonCue: string | null;
+  lessonRepetitions: number;
+  /** Teacher turned on a Sonic reference for this lesson. */
+  lessonReference: boolean;
 }
 
 interface AppActions {
@@ -35,6 +42,19 @@ interface AppActions {
   setCamera: (on: boolean) => void;
   updatePreferences: (patch: Partial<Preferences>) => void;
   updatePlan: (patch: Partial<Plan>) => void;
+  applyTeacherLesson: (patch: {
+    instruction: string;
+    revision: number;
+    target: string;
+    assistance: Plan['assistance'];
+    sound: SoundId | null;
+    cue: string;
+    repetitions: number;
+    note: string;
+    reference: boolean;
+  }) => void;
+  /** A classroom sign-in uses the teacher lesson, so the survey is not required. */
+  skipClassroomSurvey: () => void;
   addAttempt: (attempt: Attempt) => void;
   updateAttempt: (attemptId: string, patch: Partial<Attempt>) => void;
   clearAttempts: () => void;
@@ -64,8 +84,14 @@ const defaultState: AppState = {
     assistance: 'cue-target',
     sound: 'i',
   },
-  attempts: [],
-};
+    attempts: [],
+    lessonInstruction: null,
+    lessonRevision: 0,
+    lessonTarget: null,
+    lessonCue: null,
+    lessonRepetitions: 1,
+    lessonReference: false,
+  };
 
 /** Session-only fields: never restored from storage. */
 const SESSION_DEFAULTS = { quizDone: false, onboarded: false, preferences: EMPTY_PREFERENCES } satisfies Partial<AppState>;
@@ -108,6 +134,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     () => ({
       completeQuiz: () => patch({ quizDone: true }),
       completeOnboarding: () => patch({ onboarded: true }),
+      skipClassroomSurvey: () => patch({ quizDone: true, onboarded: true }),
       reset: () => setState(defaultState),
       setCaptions: (on) => patch({ captions: on }),
       // The header speaker toggle is the only audio control, so narration follows it both ways.
@@ -116,6 +143,21 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setCamera: (on) => patch({ camera: on }),
       updatePreferences: (p) => setState((s) => ({ ...s, preferences: { ...s.preferences, ...p } })),
       updatePlan: (p) => setState((s) => ({ ...s, plan: { ...s.plan, ...p } })),
+      applyTeacherLesson: (patch) =>
+        setState((s) => ({
+          ...s,
+          lessonInstruction: patch.instruction,
+          lessonRevision: patch.revision,
+          lessonTarget: patch.target,
+          lessonCue: patch.cue || null,
+          lessonRepetitions: patch.repetitions,
+          lessonReference: patch.reference,
+          plan: {
+            ...s.plan,
+            assistance: patch.assistance,
+            ...(patch.sound ? { sound: patch.sound } : {}),
+          },
+        })),
       addAttempt: (a) => setState((s) => ({ ...s, attempts: [...s.attempts, a] })),
       updateAttempt: (id, p) =>
         setState((s) => ({ ...s, attempts: s.attempts.map((a) => (a.attemptId === id ? { ...a, ...p } : a)) })),

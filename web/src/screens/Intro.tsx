@@ -6,6 +6,8 @@ import { OnboardingFrame, useStepNav } from '../components/Onboarding';
 import { GREETING, WELCOME_BACK } from '../audio/bakedLines';
 import { prepareTeacher, speakTeacher, unlockTeacherAudio, type TeacherSpeech } from '../audio/teacher';
 import type { SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
+import { IdentityForm } from '../classroom/IdentityForm';
+import { loadSession } from '../classroom/session';
 import { useAppState } from '../state/AppState';
 import { useFaceTracking, usePointerLook } from '../vision/useLook';
 import brandMark from '../assets/landing/brand-mark.svg';
@@ -26,6 +28,10 @@ import '../styles/intro.css';
 /** forming: Begin was tapped and the guide's dots are taking the ribbon picture's place. */
 type Phase = 'idle' | 'forming' | 'assembling' | 'talking' | 'leaving';
 type GuideState = 'loading' | 'ready' | 'error';
+
+const CLASSROOM_GREETING = [
+  'Hi, I’m Ava. Your teacher already chose this practice, so we’ll start with that lesson.',
+];
 
 const ASSEMBLE_MS = 1600;
 const DISPERSE_MS = 1100;
@@ -156,7 +162,8 @@ function useGuideVoice(guide: RefObject<MouthReferenceHandle | null>, narration:
 
 export default function Intro() {
   const go = useStepNav();
-  const { onboarded, audio } = useAppState();
+  const { onboarded, audio, skipClassroomSurvey } = useAppState();
+  const [classroomLearner, setClassroomLearner] = useState(() => loadSession()?.role === 'learner');
   const [phase, setPhase] = useState<Phase>('idle');
   const face = useFaceTracking(phase !== 'idle');
   const pointer = usePointerLook(face.status !== 'tracking');
@@ -227,13 +234,18 @@ export default function Intro() {
       if (!current) return;
       guide.current?.clearStartShape(); // the ribbon has become her head; later dissolves are the usual ones
       setPhase('talking');
-      if (onboarded) play(WELCOME_BACK, () => go('/lesson'));
+      if (loadSession()?.role === 'learner') {
+        play(CLASSROOM_GREETING, () => {
+          skipClassroomSurvey();
+          go('/practice');
+        });
+      } else if (onboarded) play(WELCOME_BACK, () => go('/lesson'));
       else play(GREETING, () => setPhase('leaving'));
     });
     return () => {
       current = false;
     };
-  }, [phase, guideState, onboarded, play, go]);
+  }, [phase, guideState, onboarded, classroomLearner, play, go, skipClassroomSurvey]);
 
   // The head dissolves, then the survey.
   useEffect(() => {
@@ -241,7 +253,13 @@ export default function Intro() {
     let current = true;
     const gone = guideState === 'ready' && guide.current ? guide.current.disperse({ durationMs: DISPERSE_MS }) : Promise.resolve(true);
     void gone.then(() => {
-      if (current) go('/quiz/1');
+      if (!current) return;
+      if (loadSession()?.role === 'learner') {
+        skipClassroomSurvey();
+        go('/practice');
+        return;
+      }
+      go('/quiz/1');
     });
     return () => {
       current = false;
@@ -309,9 +327,15 @@ export default function Intro() {
           </div>
           <div className="intro-landing__invite">
             <p>See your voice and explore speech at your own pace.</p>
-            <button type="button" className="intro-landing__begin" onClick={begin}>
-              Begin
-            </button>
+            <div className="intro-landing__actions">
+              {!classroomLearner ? (
+                <IdentityForm compact role="learner" onReady={() => setClassroomLearner(true)} onBegin={begin} />
+              ) : (
+                <button type="button" className="intro-landing__begin" onClick={begin}>
+                  Begin
+                </button>
+              )}
+            </div>
           </div>
         </div>
         <img className="intro-landing__close" src={closingLinework} alt="" aria-hidden="true" />

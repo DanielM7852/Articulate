@@ -42,6 +42,9 @@ export interface Attempt {
   quality: 'usable' | 'unclear';
   qualityReason?: 'silence' | 'clipping' | 'too-short' | 'no-mic';
   recognizedText: string | null;
+  /** Lesson revision that was already applied when this take started. */
+  lessonRevision?: number;
+  referenceVersion?: string;
   feeling?: 'too-hard' | 'okay' | 'ready';
 }
 

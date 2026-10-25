@@ -1,8 +1,8 @@
 # Telemetry stream for the backend dashboard
 
 Every subsystem reports small, non-sensitive events to one public SpacetimeDB table.
-The dashboard page (`/#/dashboard` in `web/`) subscribes to that table and animates
-the system graph. No media, transcripts, profile ids or attempt ids are ever written here.
+The teaching console subscribes to that table from `teach.html#/live`. `/#/dashboard` opens the same section.
+No media, transcripts, or profile ids are written here. A lesson event may add a command id and a revision.
 
 ## Table `telemetry_event` (public)
 
@@ -137,3 +137,25 @@ accepted (a face was found), whether or not the LipFrame quality flags passed.
 `audio.spectrum` bins are 32 log-spaced bands from an AnalyserNode (fftSize 1024, smoothing 0.6)
 over `getByteFrequencyData`, covering roughly 80 Hz to 8 kHz. Emitted whenever a microphone
 stream is open, not only during recording attempts. `rms` is the time-domain RMS of the same block.
+
+## Lesson correlation
+
+`lesson.saved`, `lesson.received`, `lesson.applied`, and `lesson.failed` are ordinary `emit_telemetry`
+events (`ui` to `db`). The payload is `{commandId, revision, scope?}` and does not include a profile id
+or an attempt id. The teacher page emits `lesson.saved` only after `save_lesson` resolves. The learner
+page emits receipt and application only after `ack_lesson` resolves. The classroom summary remains the
+source for Saved, Received, and Applied. If one of these events is missing from the public stream, the
+console says that stage was not observed. It does not invent a packet.
+
+The server does not emit its own row for the reducer. Persisted revision is read from `classroom_board`,
+not from this table.
+
+## Authorization gap
+
+`telemetry_event` is public. Any connected identity can subscribe to it and call `emit_telemetry`.
+A teacher session on the classroom database does not grant or limit this stream, and the teaching
+console does not use the teacher token for it. The Live system tab says so in the page. The inspector
+drops token-like payload fields and session ids. Hiding the tab would not be an access control.
+
+Demo replay reads `telemetry-demo.json` in the browser. It does not call classroom reducers.
+

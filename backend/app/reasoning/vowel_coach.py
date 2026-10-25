@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app import telemetry
 from app.config import Settings
 from app.errors import CoachValidationError
+from app.reasoning.lesson_difficulty import QuizPreferences, wants_easier
 from app.reasoning.learner_progress import (
     LessonPlan,
     LessonProgress,
@@ -80,6 +81,7 @@ class VowelCoachRequest(BaseModel):
     history: list[VowelAttempt] = Field(default_factory=list)
     learnerId: str | None = None
     plan: LessonPlan | None = None
+    preferences: QuizPreferences | None = None
 
 
 class VowelCoachResponse(BaseModel):
@@ -182,12 +184,14 @@ def choose_plan(
     attempt: VowelAttempt,
     current: LessonPlan,
     progress: LessonProgress,
+    preferences: QuizPreferences | None = None,
 ) -> tuple[PlanChoice, dict[PlanChoice, LessonPlan]]:
     """Return the default move and the moves Claude is allowed to pick."""
 
     counts = counts_for(progress, attempt.sound)
     usable = counts.usable + (1 if attempt.quality == "usable" and attempt.attemptId not in progress.counted_attempt_ids else 0)
     unclear_before = counts.unclear
+    easier = wants_easier(preferences)
     options: dict[PlanChoice, LessonPlan] = {"keep": current}
     if attempt.feeling == "too-hard" or unclear_before >= 2:
         options["simplify"] = LessonPlan(sound=current.sound, pace="unhurried", assistance="cue-target")
@@ -197,13 +201,14 @@ def choose_plan(
         and attempt.usableVoicedSec >= 2
         and current.assistance != "none"
         and attempt.feeling != "too-hard"
+        and (not easier or usable >= 2)
     )
     if can_reduce:
         options["reduce"] = current.model_copy(update={"assistance": _LESS_HELP[current.assistance]})
     can_advance = (
         attempt.quality == "usable"
         and current.assistance == "none"
-        and usable >= 2
+        and usable >= (3 if easier else 2)
         and attempt.feeling != "too-hard"
     )
     if can_advance:
@@ -270,7 +275,7 @@ async def coach_attempt(
     if already:
         default, options = "keep", {"keep": stored.plan}
     else:
-        default, options = choose_plan(body.attempt, current, progress)
+        default, options = choose_plan(body.attempt, current, progress, body.preferences)
     grounded = _apply_plan(local_response(body.attempt, body.history), body.attempt, default, options[default])
     choice = default
     if client is not None or settings.anthropic_configured:

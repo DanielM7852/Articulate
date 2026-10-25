@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Head match pipeline</title>
+  <style>
+    :root {
+      --ink: #1c2430;
+      --muted: #5c6775;
+      --line: #d5dbe3;
+      --paper: #f6f4ef;
+      --card: #fff;
+      --navy: #1e3a5f;
+      --measure: #1f6b4a;
+      --decide: #8a5a12;
+      --phrase: #6b3a6b;
+      --store: #1d4e89;
+      --local: #3d4a3a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: 16px/1.45 "Segoe UI", sans-serif;
+    }
+    main { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
+    h1 { font-family: Georgia, serif; font-weight: 400; font-size: 40px; margin: 0 0 8px; }
+    .lede { color: var(--muted); margin: 0 0 28px; max-width: 62ch; }
+    h2 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 36px 0 12px; }
+    .flow { display: grid; gap: 0; }
+    .step {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .step strong { display: block; font-size: 17px; }
+    .step p { margin: 4px 0 0; color: var(--muted); }
+    .arrow {
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .measure { border-top: 4px solid var(--measure); }
+    .decide { border-top: 4px solid var(--decide); }
+    .phrase { border-top: 4px solid var(--phrase); }
+    .store { border-top: 4px solid var(--store); }
+    .local { border-top: 4px solid var(--local); }
+    .hear { border-top: 4px solid var(--navy); }
+    .nums { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+    .nums div { background: var(--paper); border-radius: 8px; padding: 10px 12px; }
+    .nums b { display: block; font-family: Georgia, serif; font-size: 22px; font-weight: 400; }
+    table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 500; font-size: 13px; }
+    tr:last-child td { border-bottom: 0; }
+    .note { margin-top: 14px; color: var(--muted); }
+    @media (max-width: 700px) {
+      .split, .nums { grid-template-columns: 1fr; }
+      h1 { font-size: 32px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Head match</h1>
+    <p class="lede">What happens when you press Hear head, then Say head. The cue is chosen from the two recordings. Claude only rewrites that cue. The table is saved afterward.</p>
+
+    <section class="flow" aria-label="Pipeline">
+      <article class="step hear">
+        <strong>1. Hear head</strong>
+        <p>The browser asks Cartesia to say “head”. The same words drive the mouth so the face speaks with that voice.</p>
+      </article>
+      <div class="arrow" aria-hidden="true">↓</div>
+      <article class="step hear">
+        <strong>2. Say head</strong>
+        <p>The microphone records you as a WAV and posts it to <code>/v1/word-match</code>.</p>
+      </article>
+      <div class="arrow" aria-hidden="true">↓</div>
+      <div class="split">
+        <article class="step measure">
+          <strong>3a. Parselmouth on you</strong>
+          <p>Every 10 ms: time, pitch, F1, F2. A frame counts only when pitch is present. Voiced time is that count times 10 ms.</p>
+        </article>
+        <article class="step measure">
+          <strong>3b. Parselmouth on Cartesia</strong>
+          <p>The saved Cartesia WAV of the word “head” is measured the same way. That WAV is the reference, not the picture of the mouth.</p>
+        </article>
+      </div>
+      <div class="arrow" aria-hidden="true">↓</div>
+      <article class="step decide">
+        <strong>4. One cue, from the numbers</strong>
+        <p>The server compares the two tables. Pitch is kept and is not used for the cue. Claude is not asked to pick the cue.</p>
+        <div class="nums">
+          <div>
+            <b>2970 ms</b>
+            your voiced time · 297 frames × 10 ms<br />
+            F1 574.3 Hz · F2 1710.6 Hz · pitch 142.8 Hz
+          </div>
+          <div>
+            <b>160 ms</b>
+            reference voiced time · 16 frames × 10 ms<br />
+            F1 689.7 Hz · F2 1976.8 Hz · pitch 182.7 Hz
+          </div>
+        </div>
+        <p>2970 / 160 is much longer than 65%, so “finish the word” is skipped. F1 is 16.7% lower, past the 15% bar, so the cue is mouth_more_open. F2 is only 13.5% lower, so there is no tongue cue.</p>
+      </article>
+      <div class="arrow" aria-hidden="true">↓</div>
+      <article class="step phrase">
+        <strong>5. Claude phrases that cue</strong>
+        <p>Claude may rewrite “open your mouth a little more.” If the rewrite adds another body part or the opposite move, the rewrite is dropped and the measured sentence is spoken.</p>
+      </article>
+      <div class="arrow" aria-hidden="true">↓</div>
+      <div class="split">
+        <article class="step store">
+          <strong>6a. SpacetimeDB, when connected</strong>
+          <p>The table is written by <code>record_articulation</code> into <code>learner_articulation</code>. Raw audio is not stored there. The head screen does not read this table back to decide the cue.</p>
+        </article>
+        <article class="step local">
+          <strong>6b. Local file, this run</strong>
+          <p>The 2970 ms take is in <code>backend/.local_store/learners/…json</code>. That means this comparison saved locally. Spacetime was not required for the cue or the sentence.</p>
+        </article>
+      </div>
+      <div class="arrow" aria-hidden="true">↓</div>
+      <article class="step hear">
+        <strong>7. Advice back on the mouth</strong>
+        <p>The screen shows the cue name, “Claude phrased it”, and the two voiced times. The mouth speaks the sentence.</p>
+      </article>
+    </section>
+
+    <h2>Where Spacetime still sits</h2>
+    <table>
+      <thead>
+        <tr><th>Piece</th><th>Uses Spacetime for</th><th>Needed for this head cue</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Head match</td><td>Optional copy of the pitch table</td><td>No. This run used the local file.</td></tr>
+        <tr><td>Live practice</td><td>Attempts, coach turns, notes, progress, metric batches, shared insight</td><td>No, not for this screen.</td></tr>
+        <tr><td>Parselmouth</td><td>Nothing. It only measures the two WAVs.</td><td>Yes. It produces F1, F2, and the times.</td></tr>
+        <tr><td>Claude</td><td>Nothing. It only rewrites the chosen sentence.</td><td>Only for the wording.</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Removing Spacetime would leave the head comparison working as it did for this take. It would also drop the live session store: attempts, notes, progress, and metric batches.</p>
+  </main>
+</body>
+</html>

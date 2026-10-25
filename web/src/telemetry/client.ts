@@ -106,6 +106,7 @@ function startPresence(): void {
   // The dashboard viewer is not a learner.
   try {
     if (/^#\/?dashboard/.test(window.location.hash)) return;
+    if (/teach\.html$/i.test(window.location.pathname)) return;
   } catch {
     /* ignore */
   }

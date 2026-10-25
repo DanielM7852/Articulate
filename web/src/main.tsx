@@ -10,8 +10,11 @@ import Tutorial from './screens/Tutorial';
 import PracticeStudio from './screens/PracticeStudio';
 import OnYourOwn from './screens/OnYourOwn';
 import WordLesson from './screens/WordLesson';
-import Dashboard from './screens/Dashboard';
+import MatchWord from './screens/MatchWord';
 import ConsonantCoach from './screens/ConsonantCoach';
+import { LessonSync } from './classroom/LessonSync';
+import { loadSession } from './classroom/session';
+import { OpenLiveConsole } from './teach/OpenLiveConsole';
 
 /**
  * Flow: the guide greets the learner, then the quiz, then a tutorial where the
@@ -20,14 +23,16 @@ import ConsonantCoach from './screens/ConsonantCoach';
  */
 function Guard({ need, children }: { need: 'quiz' | 'tutorial'; children: ReactNode }) {
   const { quizDone, onboarded } = useAppState();
-  if (!quizDone) return <Navigate to="/" replace />;
-  if (need === 'tutorial' && !onboarded) return <Navigate to="/tutorial" replace />;
+  const classroomLearner = loadSession()?.role === 'learner';
+  if (!quizDone && !classroomLearner) return <Navigate to="/" replace />;
+  if (need === 'tutorial' && !onboarded && !classroomLearner) return <Navigate to="/tutorial" replace />;
   return children;
 }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AppStateProvider>
+      <LessonSync />
       <HashRouter>
         <Routes>
           <Route path="/" element={<Intro />} />
@@ -37,8 +42,9 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/lesson" element={<Guard need="quiz"><WordLesson /></Guard>} />
           <Route path="/practice" element={<Guard need="tutorial"><PracticeStudio /></Guard>} />
           <Route path="/own" element={<Guard need="tutorial"><OnYourOwn /></Guard>} />
+          <Route path="/match" element={<Guard need="tutorial"><MatchWord /></Guard>} />
           <Route path="/consonants" element={<ConsonantCoach />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard" element={<OpenLiveConsole />} />
           <Route path="/summary" element={<Navigate to="/own" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

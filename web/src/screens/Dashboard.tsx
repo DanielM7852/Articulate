@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject, type CSSProperties } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { subscribeTelemetry, type NodeId, type TelemetryEvent } from '../telemetry/client';
 import brandMark from '../assets/landing/brand-mark.svg';
 import '../styles/dashboard.css';
@@ -50,7 +49,7 @@ const NODES: NodeDef[] = [
   { id: 'pitch', name: 'Pitch', caption: 'librosa F0 extraction', loc: 'server', x: 566, y: 762, r: 34, n: 190, ann: [322, 730, 198], align: 'right' },
   { id: 'sparc', name: 'SPARC', caption: 'articulatory model service', loc: 'server', x: 1010, y: 650, r: 38, n: 210, ann: [1058, 606, 184] },
   { id: 'db', name: 'SpacetimeDB', caption: 'live tables, subscriptions', loc: 'maincloud', x: 790, y: 768, r: 44, n: 260, ann: [846, 736, 170] },
-  { id: 'claude', name: 'Claude', caption: 'coach decisions, notes, insights', loc: 'Anthropic', x: 1212, y: 470, r: 112, n: 760, ann: [1262, 612, 312] },
+  { id: 'claude', name: 'Model', caption: 'coach decisions, when a model is called', loc: 'Anthropic', x: 1212, y: 470, r: 112, n: 760, ann: [1262, 612, 312] },
   { id: 'ui', name: 'Learner', caption: 'the learner’s screen', loc: 'browser', x: 1478, y: 196, r: 44, n: 260, ann: [1416, 250, 170] },
 ];
 const NODE = Object.fromEntries(NODES.map((n) => [n.id, n])) as Record<NodeId, NodeDef>;
@@ -138,7 +137,7 @@ interface Model {
   dbReads: number[];
   dbWrites: number[];
   dbTable: string | null;
-  claude: { model: string; purpose: string; latency: number | null; inTok: number | null; outTok: number | null; error: string | null } | null;
+  claude: { provider: string | null; model: string; purpose: string; latency: number | null; inTok: number | null; outTok: number | null; error: string | null } | null;
   claudeCalls: number;
   claudeLine: string;
   backendReqs: number[];
@@ -371,10 +370,11 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
       break;
     case 'claude.request':
       m.claudeCalls += 1;
-      m.claude = { model: str(p.model) ?? m.claude?.model ?? '—', purpose: str(p.purpose) ?? '—', latency: null, inTok: null, outTok: null, error: null };
+      m.claude = { provider: str(p.provider) ?? m.claude?.provider ?? null, model: str(p.model) ?? m.claude?.model ?? '—', purpose: str(p.purpose) ?? '—', latency: null, inTok: null, outTok: null, error: null };
       break;
     case 'claude.response':
       m.claude = {
+        provider: str(p.provider) ?? m.claude?.provider ?? null,
         model: str(p.model) ?? m.claude?.model ?? '—',
         purpose: str(p.purpose) ?? m.claude?.purpose ?? '—',
         latency: num(p.latencyMs),
@@ -386,6 +386,7 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
       break;
     case 'claude.error':
       m.claude = {
+        provider: str(p.provider) ?? m.claude?.provider ?? null,
         model: str(p.model) ?? m.claude?.model ?? '—',
         purpose: str(p.purpose) ?? m.claude?.purpose ?? '—',
         latency: num(p.latencyMs),
@@ -700,6 +701,7 @@ interface Engine {
   fire(e: TelemetryEvent): void;
   setLine(text: string): void;
   reset(): void;
+  resume(): void;
   destroy(): void;
 }
 
@@ -710,6 +712,8 @@ interface EngineIO {
   wire: () => HTMLCanvasElement | null;
   /** the live card model (read for lip.mesh and audio.spectrum) */
   model: () => Model;
+  suspended: () => boolean;
+  paused: () => boolean;
 }
 
 /**
@@ -816,6 +820,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
     staticLayer.height = canvas.height;
     sctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * ox, dpr * oy);
     sctx.clearRect(-ox / scale, -oy / scale, canvas.width, canvas.height);
+    /* 2026-10-25: connections were only pale dots, so the longer links disappeared.
     for (const [s, t] of EDGES) {
       const c = curves.get(`${s}>${t}`)!;
       const steps = Math.max(4, Math.round(c.len / 7.5));
@@ -829,11 +834,38 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
       sctx.fillStyle = '#cbd7e6';
       sctx.fill();
     }
+    */
+    sctx.lineCap = 'round';
+    sctx.lineJoin = 'round';
+    for (const [s, t] of EDGES) {
+      const c = curves.get(`${s}>${t}`)!;
+      const steps = Math.max(8, Math.round(c.len / 6));
+      sctx.beginPath();
+      pointOn(c, 0, pt);
+      sctx.moveTo(pt.x, pt.y);
+      for (let i = 1; i <= steps; i++) {
+        pointOn(c, i / steps, pt);
+        sctx.lineTo(pt.x, pt.y);
+      }
+      sctx.strokeStyle = 'rgba(32, 62, 104, 0.42)';
+      sctx.lineWidth = 2.4;
+      sctx.stroke();
+      sctx.beginPath();
+      for (let i = 0; i <= steps; i++) {
+        pointOn(c, i / steps, pt);
+        const r = 1.7;
+        sctx.moveTo(pt.x + r, pt.y);
+        sctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+      }
+      sctx.fillStyle = '#7e97b8';
+      sctx.fill();
+    }
   };
 
   const resize = () => {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const box = canvas.parentElement?.getBoundingClientRect();
+    const vw = box && box.width > 40 ? box.width : window.innerWidth;
+    const vh = box && box.height > 40 ? box.height : window.innerHeight;
     dpr = Math.min(2, window.devicePixelRatio || 1);
     scale = Math.min(vw / W, vh / H);
     ox = (vw - W * scale) / 2;
@@ -949,7 +981,12 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
   };
 
   const frame = (now: number) => {
+    if (io.suspended()) {
+      raf = 0;
+      return;
+    }
     raf = requestAnimationFrame(frame);
+    if (io.paused()) return;
     const dtMs = Math.min(100, Math.max(0, now - prevNow));
     prevNow = now;
     const el = io.line();
@@ -1120,6 +1157,9 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
   resize();
   window.addEventListener('resize', resize);
   document.addEventListener('fullscreenchange', resize);
+  const observed = canvas.parentElement;
+  const observer = observed ? new ResizeObserver(() => resize()) : null;
+  if (observed) observer?.observe(observed);
   raf = requestAnimationFrame(frame);
 
   return {
@@ -1156,6 +1196,9 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
       lineShown = -1;
       dirtyUntil = performance.now() + 50;
     },
+    resume() {
+      if (!raf && !io.suspended()) raf = requestAnimationFrame(frame);
+    },
     reset() {
       packets = [];
       for (const c of clusters) {
@@ -1170,6 +1213,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
     },
     destroy() {
       cancelAnimationFrame(raf);
+      observer?.disconnect();
       window.removeEventListener('resize', resize);
       document.removeEventListener('fullscreenchange', resize);
     },
@@ -1361,7 +1405,8 @@ function ClaudeCard({ s, lineRef }: { s: Snap; lineRef: RefObject<HTMLSpanElemen
   return (
     <div className="dash-card dash-card--claude">
       <div className="dash-claude__top">
-        <span className="dash-chip">{c?.model ?? 'model —'}</span>
+        <span className="dash-chip">{modelTitle(c?.provider ?? null).name}</span>
+        <span className="dash-chip dash-chip--soft">{c?.model ?? 'model —'}</span>
         <span className="dash-chip dash-chip--soft">{c?.purpose ?? 'idle'}</span>
         <span className="dash-claude__calls">
           <b>{s.claudeCalls}</b> {s.claudeCalls === 1 ? 'call' : 'calls'}
@@ -1385,8 +1430,39 @@ function ClaudeCard({ s, lineRef }: { s: Snap; lineRef: RefObject<HTMLSpanElemen
 
 type Conn = 'connecting' | 'live' | 'offline';
 
-export default function Dashboard() {
-  const [params] = useSearchParams();
+function modelTitle(provider: string | null): { name: string; loc: string } {
+  if (provider === 'anthropic') return { name: 'Claude', loc: 'Anthropic' };
+  if (provider === 'openai') return { name: 'GPT', loc: 'OpenAI' };
+  if (provider) return { name: provider, loc: 'model' };
+  return { name: 'Model', loc: 'not named' };
+}
+
+function demoFromHash(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+    return params.has('demo') || params.has('d');
+  } catch {
+    return false;
+  }
+}
+
+export type LiveGraphProps = {
+  embedded?: boolean;
+  hidden?: boolean;
+  paused?: boolean;
+  demo?: boolean;
+  onEvent?: (event: TelemetryEvent) => void;
+  onStream?: (state: { conn: 'connecting' | 'live' | 'offline'; count: number; lastAt: number | null }) => void;
+};
+
+export default function Dashboard({
+  embedded = false,
+  hidden = false,
+  paused = false,
+  demo: demoProp = false,
+  onEvent,
+  onStream,
+}: LiveGraphProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const lineRef = useRef<HTMLSpanElement>(null);
@@ -1394,16 +1470,24 @@ export default function Dashboard() {
   const engine = useRef<Engine | null>(null);
   const model = useRef<Model>(freshModel());
   const dirty = useRef(true);
+  const hiddenRef = useRef(hidden);
+  const pausedRef = useRef(paused);
+  const onEventRef = useRef(onEvent);
+  hiddenRef.current = hidden;
+  pausedRef.current = paused;
+  onEventRef.current = onEvent;
   /** perception liveness as last rendered, so going quiet re-renders the cards once */
   const shownLive = useRef<[boolean, boolean]>([false, false]);
   const [snap, setSnap] = useState<Snap>(() => snapshot(model.current, performance.now()));
   const [conn, setConn] = useState<Conn>('connecting');
-  const [forced, setForced] = useState<boolean | null>(() => (params.has('demo') ? true : null));
-  const demo = forced ?? conn === 'offline';
+  const [lastAt, setLastAt] = useState<number | null>(null);
+  const [forced, setForced] = useState<boolean | null>(() => (embedded ? null : demoFromHash()));
+  const demo = embedded ? demoProp : forced === true;
   const demoRef = useRef(demo);
   demoRef.current = demo;
   const liveSeen = useRef(false);
   const tickSeq = useRef(0);
+  const lastStamp = useRef<number | null>(null);
 
   const ingest = useCallback((e: TelemetryEvent, animate: boolean) => {
     const now = performance.now();
@@ -1421,6 +1505,11 @@ export default function Dashboard() {
       engine.current?.setLine(m.claudeLine);
     }
     dirty.current = true;
+    if (!QUIET.has(e.kind)) onEventRef.current?.(e);
+    if (lastStamp.current == null || e.at - lastStamp.current > 1000) {
+      lastStamp.current = e.at;
+      setLastAt(e.at);
+    }
   }, []);
 
   // Canvas engine.
@@ -1432,17 +1521,30 @@ export default function Dashboard() {
     const eng = createEngine(
       canvas,
       stage,
-      { line: () => lineRef.current, wire: () => wireRef.current, model: () => model.current },
+      {
+        line: () => lineRef.current,
+        wire: () => wireRef.current,
+        model: () => model.current,
+        suspended: () => hiddenRef.current,
+        paused: () => pausedRef.current,
+      },
       reduce,
     );
     engine.current = eng;
+    if (!hiddenRef.current) eng.resume();
     return () => {
       eng.destroy();
       engine.current = null;
     };
   }, []);
 
-  // Cards: at most 10 renders a second, only when something changed (the ticker also needs its expiry).
+  useEffect(() => {
+    if (!hidden) engine.current?.resume();
+  }, [hidden]);
+
+  useEffect(() => {
+    onStream?.({ conn, count: snap.count, lastAt });
+  }, [conn, snap.count, lastAt, onStream]);
   useEffect(() => {
     const id = window.setInterval(() => {
       const m = model.current;
@@ -1547,7 +1649,7 @@ export default function Dashboard() {
       if (k === 'f') {
         if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
         else void document.documentElement.requestFullscreen?.().catch(() => {});
-      } else if (k === 'd') {
+      } else if (k === 'd' && !embedded) {
         setForced(!demoRef.current);
       }
     };
@@ -1556,14 +1658,14 @@ export default function Dashboard() {
   }, []);
 
   return (
-    <div className="dash">
+    <div className={embedded ? 'dash dash--embedded' : 'dash'}>
       <canvas ref={canvasRef} className="dash-canvas" aria-hidden="true" />
       <div ref={stageRef} className="dash-stage">
         <header className="dash-head">
           <div className="dash-brand">
             <img src={brandMark} alt="" aria-hidden="true" width={24} height={26} />
             <h1>articulate</h1>
-            <span className="dash-sub">live system view</span>
+            <span className="dash-sub">{demo ? 'demo replay' : 'live system'}</span>
           </div>
           <div className="dash-head__right">
             {demo && (
@@ -1578,26 +1680,27 @@ export default function Dashboard() {
               <b>{snap.count.toLocaleString('en-US')}</b> events
               <span className="dash-count__rate"> · {snap.rate.toFixed(1)}/s</span>
             </span>
-            <span className="dash-pill" data-state={conn}>
+            <span className="dash-pill" data-state={conn === 'live' ? 'live' : conn === 'offline' ? 'offline' : 'connecting'}>
               <i aria-hidden="true" />
-              {conn}
+              {conn === 'live' ? 'connected' : conn === 'offline' ? 'disconnected' : 'connecting'}
             </span>
           </div>
         </header>
 
         {NODES.map((n) => {
           const [ax, ay, aw] = n.ann;
+          const titled = n.id === 'claude' ? modelTitle(snap.claude?.provider ?? null) : null;
           return (
             <section
               key={n.id}
               className={`dash-node dash-node--${n.id}`}
               data-align={n.align}
               style={{ left: ax, top: ay, width: aw }}
-              aria-label={n.name}
+              aria-label={titled?.name ?? n.name}
             >
               <h2 className="dash-node__name">
-                {n.name}
-                <span className="dash-node__loc">{n.loc}</span>
+                {titled?.name ?? n.name}
+                <span className="dash-node__loc">{titled?.loc ?? n.loc}</span>
               </h2>
               <p className="dash-node__cap">{n.caption}</p>
               {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} />}
@@ -1609,8 +1712,9 @@ export default function Dashboard() {
         <aside className="dash-legend" aria-label="How to read this view">
           <p className="dash-legend__title">How to read it</p>
           <p>
-            Each cluster of dots is one part of the system, lit like Ava’s head. When an event flows, a packet of dots
-            runs along its line and the part it reaches ripples. Everything converges on Claude.
+            Each cluster is one part of the system. A packet runs along the path that event actually took.
+            A lesson change can stop at the database. It does not have to pass through a model.
+            The lip wireframe and the equalizer are the live perception streams, not a named learner.
           </p>
         </aside>
 

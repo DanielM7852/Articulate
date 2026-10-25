@@ -27,7 +27,7 @@ export default function OnYourOwn() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const speech = useSpeech();
-  const { plan, updatePlan, attempts, addAttempt, updateAttempt, narration: readAloud } = useAppState();
+  const { plan, updatePlan, attempts, addAttempt, updateAttempt, narration: readAloud, preferences } = useAppState();
   const [phase, setPhase] = useState<Phase>('ready');
   const [say, setSay] = useState<Say>('sound');
   const [current, setCurrent] = useState<Attempt | null>(null);
@@ -99,7 +99,8 @@ export default function OnYourOwn() {
     addAttempt(attempt);
     setCurrent(attempt);
     setPhase('analyzing');
-    const response = await analyzeAttempt(attempt, history);
+    const response = await analyzeAttempt(attempt, history, { plan, preferences });
+    if (response.plan) updatePlan({ pace: response.plan.pace, assistance: response.plan.assistance });
     setCoach(response);
     setPhase('feedback');
     if (readAloud) speech.speak(`${response.observation} ${response.nextCue}`);
@@ -223,6 +224,9 @@ export default function OnYourOwn() {
           }}
         />
         <AccessToggles />
+        <button type="button" className="ob-text-btn" onClick={() => navigate('/match')} disabled={busy}>
+          Advanced · head
+        </button>
       </div>
 
       <div className={`own-stage ${recording ? 'is-recording' : ''}`}>

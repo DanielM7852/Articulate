@@ -16,6 +16,40 @@ export const AcceptedEvents = __t.object("AcceptedEvents", {
 });
 export type AcceptedEvents = __Infer<typeof AcceptedEvents>;
 
+export const AttemptCardRow = __t.object("AttemptCardRow", {
+  attemptId: __t.string(),
+  profileId: __t.string(),
+  exercise: __t.string(),
+  usable: __t.bool(),
+  finding: __t.string(),
+  kind: __t.string(),
+  provenance: __t.string(),
+  referenceVersion: __t.string(),
+  analysisVersion: __t.string(),
+  cueId: __t.string(),
+  measurementsJson: __t.string(),
+  synthetic: __t.bool(),
+  createdAt: __t.u64(),
+});
+export type AttemptCardRow = __Infer<typeof AttemptCardRow>;
+
+export const AttemptSummary = __t.object("AttemptSummary", {
+  attemptId: __t.string(),
+  profileId: __t.string(),
+  exercise: __t.string(),
+  usable: __t.bool(),
+  finding: __t.string(),
+  kind: __t.string(),
+  provenance: __t.string(),
+  referenceVersion: __t.string(),
+  analysisVersion: __t.string(),
+  cueId: __t.string(),
+  measurementsJson: __t.string(),
+  synthetic: __t.bool(),
+  createdAt: __t.u64(),
+});
+export type AttemptSummary = __Infer<typeof AttemptSummary>;
+
 export const Attempts = __t.object("Attempts", {
   id: __t.string(),
   sessionId: __t.string(),
@@ -28,6 +62,101 @@ export const Backend = __t.object("Backend", {
   identity: __t.identity(),
 });
 export type Backend = __Infer<typeof Backend>;
+
+export const ClassAssignment = __t.object("ClassAssignment", {
+  classroomId: __t.string(),
+  revision: __t.u32(),
+  commandId: __t.string(),
+  settingsJson: __t.string(),
+  visible: __t.string(),
+  status: __t.string(),
+  expiresAt: __t.u64(),
+  savedAt: __t.u64(),
+  actorProfile: __t.string(),
+});
+export type ClassAssignment = __Infer<typeof ClassAssignment>;
+
+export const ClassIdentity = __t.object("ClassIdentity", {
+  identity: __t.identity(),
+  role: __t.string(),
+  profileId: __t.string(),
+  classroomId: __t.string(),
+  displayName: __t.string(),
+});
+export type ClassIdentity = __Infer<typeof ClassIdentity>;
+
+export const ClassInvite = __t.object("ClassInvite", {
+  code: __t.string(),
+  role: __t.string(),
+  profileId: __t.string(),
+  classroomId: __t.string(),
+  displayName: __t.string(),
+  consumed: __t.bool(),
+});
+export type ClassInvite = __Infer<typeof ClassInvite>;
+
+export const ClassMember = __t.object("ClassMember", {
+  id: __t.string(),
+  profileId: __t.string(),
+  classroomId: __t.string(),
+  displayName: __t.string(),
+});
+export type ClassMember = __Infer<typeof ClassMember>;
+
+export const ClassRoom = __t.object("ClassRoom", {
+  id: __t.string(),
+  name: __t.string(),
+  teacherProfile: __t.string(),
+});
+export type ClassRoom = __Infer<typeof ClassRoom>;
+
+export const ClassroomBoard = __t.object("ClassroomBoard", {});
+export type ClassroomBoard = __Infer<typeof ClassroomBoard>;
+
+export const ClassroomBoardRow = __t.object("ClassroomBoardRow", {
+  profileId: __t.string(),
+  displayName: __t.string(),
+  classroomId: __t.string(),
+  presence: __t.string(),
+  presenceAt: __t.u64(),
+  exercise: __t.string(),
+  lessonRevision: __t.u32(),
+  lessonSource: __t.string(),
+  overrideRevision: __t.u32(),
+  classroomRevision: __t.u32(),
+  visible: __t.string(),
+  settingsJson: __t.string(),
+  ackPhase: __t.string(),
+  usable: __t.u32(),
+  unusable: __t.u32(),
+  lastFinding: __t.string(),
+  lastKind: __t.string(),
+  lastProvenance: __t.string(),
+  lastAt: __t.u64(),
+  repeatCount: __t.u32(),
+  needsAttention: __t.bool(),
+  syntheticRepeat: __t.u32(),
+  helpRequested: __t.bool(),
+  helpNote: __t.string(),
+});
+export type ClassroomBoardRow = __Infer<typeof ClassroomBoardRow>;
+
+export const ClassroomLessonRow = __t.object("ClassroomLessonRow", {
+  profileId: __t.string(),
+  revision: __t.u32(),
+  commandId: __t.string(),
+  source: __t.string(),
+  settingsJson: __t.string(),
+  visible: __t.string(),
+  status: __t.string(),
+  ackPhase: __t.string(),
+  teacherName: __t.string(),
+  classroomName: __t.string(),
+  savedAt: __t.u64(),
+  receivedAt: __t.u64(),
+  appliedAt: __t.u64(),
+});
+export type ClassroomLessonRow = __Infer<typeof ClassroomLessonRow>;
 
 export const CoachTurn = __t.object("CoachTurn", {
   attemptId: __t.string(),
@@ -80,6 +209,11 @@ export const LearnerAttempt = __t.object("LearnerAttempt", {
 });
 export type LearnerAttempt = __Infer<typeof LearnerAttempt>;
 
+export const LearnerAttemptCards = __t.object("LearnerAttemptCards", {
+  profileId: __t.string(),
+});
+export type LearnerAttemptCards = __Infer<typeof LearnerAttemptCards>;
+
 export const LearnerNote = __t.object("LearnerNote", {
   profileId: __t.string(),
   notes: __t.string(),
@@ -93,6 +227,85 @@ export const LearnerProgress = __t.object("LearnerProgress", {
   updatedAt: __t.timestamp(),
 });
 export type LearnerProgress = __Infer<typeof LearnerProgress>;
+
+export const LearnerRoll = __t.object("LearnerRoll", {
+  profileId: __t.string(),
+  displayName: __t.string(),
+  classroomId: __t.string(),
+  presence: __t.string(),
+  presenceAt: __t.u64(),
+  exercise: __t.string(),
+  lessonRevision: __t.u32(),
+  lessonSource: __t.string(),
+  settingsJson: __t.string(),
+  overrideRevision: __t.u32(),
+  classroomRevision: __t.u32(),
+  visible: __t.string(),
+  ackPhase: __t.string(),
+  ackRevision: __t.u32(),
+  usable: __t.u32(),
+  unusable: __t.u32(),
+  lastFinding: __t.string(),
+  lastKind: __t.string(),
+  lastProvenance: __t.string(),
+  lastAt: __t.u64(),
+  repeatFinding: __t.string(),
+  repeatCount: __t.u32(),
+  referenceVersion: __t.string(),
+  syntheticFinding: __t.string(),
+  syntheticRepeat: __t.u32(),
+  helpRequested: __t.bool(),
+  helpNote: __t.string(),
+});
+export type LearnerRoll = __Infer<typeof LearnerRoll>;
+
+export const LessonAck = __t.object("LessonAck", {
+  profileId: __t.string(),
+  revision: __t.u32(),
+  commandId: __t.string(),
+  phase: __t.string(),
+  receivedAt: __t.u64(),
+  appliedAt: __t.u64(),
+});
+export type LessonAck = __Infer<typeof LessonAck>;
+
+export const LessonAckEvent = __t.object("LessonAckEvent", {
+  id: __t.string(),
+  profileId: __t.string(),
+  revision: __t.u32(),
+  commandId: __t.string(),
+  phase: __t.string(),
+  at: __t.u64(),
+});
+export type LessonAckEvent = __Infer<typeof LessonAckEvent>;
+
+export const LessonCommand = __t.object("LessonCommand", {
+  commandId: __t.string(),
+  profileId: __t.string(),
+  classroomId: __t.string(),
+  scope: __t.string(),
+  actorProfile: __t.string(),
+  expectedRevision: __t.u32(),
+  newRevision: __t.u32(),
+  settingsJson: __t.string(),
+  visible: __t.string(),
+  outcome: __t.string(),
+  createdAt: __t.u64(),
+});
+export type LessonCommand = __Infer<typeof LessonCommand>;
+
+export const LessonOverride = __t.object("LessonOverride", {
+  profileId: __t.string(),
+  revision: __t.u32(),
+  commandId: __t.string(),
+  settingsJson: __t.string(),
+  visible: __t.string(),
+  status: __t.string(),
+  expiresAt: __t.u64(),
+  savedAt: __t.u64(),
+  actorProfile: __t.string(),
+});
+export type LessonOverride = __Infer<typeof LessonOverride>;
 
 export const LiveInsight = __t.object("LiveInsight", {
   attemptId: __t.string(),
@@ -159,6 +372,12 @@ export const MetricBatch = __t.object("MetricBatch", {
   receivedAt: __t.timestamp(),
 });
 export type MetricBatch = __Infer<typeof MetricBatch>;
+
+export const MyAttemptCards = __t.object("MyAttemptCards", {});
+export type MyAttemptCards = __Infer<typeof MyAttemptCards>;
+
+export const MyClassroomLesson = __t.object("MyClassroomLesson", {});
+export type MyClassroomLesson = __Infer<typeof MyClassroomLesson>;
 
 export const Sessions = __t.object("Sessions", {
   id: __t.string(),

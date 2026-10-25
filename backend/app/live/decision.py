@@ -221,6 +221,58 @@ def fallback_decision(
     return decision, [EvidenceItem(field=f, value=candidates[f]) for f in fields]
 
 
+# How many earlier tries may repeat one instruction before the next line steps down.
+SAME_INSTRUCTION_LIMIT = 2
+
+
+def _still_missing(attempt: dict[str, Any]) -> bool:
+    verdict = attempt.get("wordVerdict") or attempt.get("audioVerdict")
+    return verdict in ("off", "close")
+
+
+def _same_instruction(attempt: dict[str, Any], sound: str, decision: CoachDecision) -> bool:
+    if attempt.get("sound") != sound or attempt.get("cueId") != decision.cueId:
+        return False
+    if attempt.get("nextAction") not in (None, "retry"):
+        return False
+    focus = decision.focusZoneId
+    if focus and attempt.get("focusZoneId") not in (None, focus):
+        return False
+    return _still_missing(attempt)
+
+
+def ease_repeated_instruction(
+    decision: CoachDecision,
+    *,
+    sound: str,
+    recent: list[dict[str, Any]],
+    word: WordAttempt | None = None,
+) -> CoachDecision | None:
+    """Replace a cue that has already been given twice without the target landing.
+
+    The learner hears a shorter task instead of the same instruction again.
+    Returns None when this decision should stand.
+    """
+    if decision.nextAction != "retry":
+        return None
+    repeated = [a for a in recent if _same_instruction(a, sound, decision)]
+    if len(repeated) < SAME_INSTRUCTION_LIMIT:
+        return None
+    if word is None:
+        spelled = SOUND_SPELLING[sound]
+        caption = f"Let's make this easier. Hold a short {spelled} for just a moment, with the picture in front of you."
+        observation = f"The same cue has come up again, and the {spelled} has not landed in the target area yet."
+    else:
+        info = zone_info(word, decision.focusZoneId) if decision.focusZoneId else None
+        if info is not None:
+            caption = f"Let's make this easier. Leave {word.word} for now and shape only the {info.label}."
+            observation = f"The same cue for the {info.label} has come up again, and that part of {word.word} has not landed yet."
+        else:
+            caption = f"Let's make this easier. Say {word.word} in two short pieces instead of all at once."
+            observation = f"The same cue has come up again, and {word.word} has not landed yet."
+    return decision.model_copy(update={"observation": observation, "caption": caption})
+
+
 # ---- Word mode ----
 #
 # Evidence field names are flattened: word.verdict, word.hitCount, word.zoneCount, word.weakestZoneId,
