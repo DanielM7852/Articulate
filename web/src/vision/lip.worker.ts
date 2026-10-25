@@ -62,8 +62,8 @@ self.onmessage = async (ev: MessageEvent) => {
       );
       const face = res.faceLandmarks?.[0];
       const mesh = face ? (meshPoints(face) ?? undefined) : undefined;
-      const meshV2 = face ? (meshPacked(face) ?? undefined) : undefined;
-      postMessage({ type: 'frame', frame, mesh, meshV2 });
+      const meshPackedV3 = face ? (meshPacked(face) ?? undefined) : undefined;
+      postMessage({ type: 'frame', frame, mesh, meshPacked: meshPackedV3 });
     } catch (err) {
       postMessage({ type: 'error', detail: err instanceof Error ? err.message : String(err) });
     } finally {

@@ -211,6 +211,7 @@ function micLabel(mic: MicStatus, voice: VoiceFrames['status']): string {
 const LIP_LABEL: Record<LipTrackingStatus, string> = {
   off: 'Camera off',
   loading: 'Loading lip tracking',
+  warming: 'Starting lip tracking',
   tracking: 'Lip tracking on',
   'no-face': 'Face not found',
   error: 'Lip tracking unavailable',

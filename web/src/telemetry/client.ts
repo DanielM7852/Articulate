@@ -25,6 +25,11 @@ const DEFAULT_URI = 'wss://maincloud.spacetimedb.com';
 const DEFAULT_DB = 'articulate-live';
 const BACKOFF_MS = [1000, 2000, 5000, 10000];
 const MAX_INFLIGHT = 20;
+// Emits made while the connection is still opening (the first emit of a tab opens it) wait here
+// briefly instead of being dropped; anything older than PENDING_MAX_AGE_MS at flush time is discarded.
+const PENDING_MAX = 16;
+const PENDING_MAX_AGE_MS = 10_000;
+const pending: Array<{ at: number; source: NodeId; target: NodeId; kind: string; label: string; payload: Record<string, unknown> }> = [];
 const MAX_LABEL = 120;
 
 interface RawRow {
@@ -53,6 +58,51 @@ let attempt = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let inflight = 0;
 const subs = new Set<Sub>();
+
+/**
+ * Per-kind delivery counters, exposed as `window.__telemetryStats` for debugging (docs/telemetry.md).
+ * sent: reducer calls made; accepted / rejected: their outcome (the reducer promise resolves, or rejects with
+ * the SDK's SenderError / InternalError); dropped: emits skipped because the connection was not ready or too
+ * many calls were in flight. Throttled emits are not counted.
+ */
+export interface TelemetryKindStats {
+  sent: number;
+  accepted: number;
+  rejected: number;
+  dropped: number;
+  lastError: string | null;
+}
+const stats: Record<string, TelemetryKindStats> = {};
+const warnedKinds = new Set<string>();
+let warnedSubscription = false;
+
+declare global {
+  interface Window {
+    __telemetryStats?: Record<string, TelemetryKindStats>;
+  }
+}
+try {
+  if (typeof window !== 'undefined') window.__telemetryStats = stats;
+} catch {
+  /* ignore */
+}
+
+function statFor(kind: string): TelemetryKindStats {
+  let s = stats[kind];
+  if (!s) {
+    s = { sent: 0, accepted: 0, rejected: 0, dropped: 0, lastError: null };
+    stats[kind] = s;
+  }
+  return s;
+}
+
+function byteLength(text: string): number {
+  try {
+    return new TextEncoder().encode(text).length;
+  } catch {
+    return text.length;
+  }
+}
 
 const SID_KEY = 'articulate.telemetry.sid';
 const PING_MS = 20000;
@@ -203,6 +253,14 @@ function connect(): void {
         ready = true;
         attempt = 0;
         startPresence();
+        if (pending.length) {
+          const now = Date.now();
+          const queued = pending.splice(0);
+          for (const q of queued) {
+            if (now - q.at <= PENDING_MAX_AGE_MS) emit(q.source, q.target, q.kind, q.label, q.payload);
+            else statFor(q.kind).dropped++;
+          }
+        }
         try {
           c.db.telemetryEvent.onInsert((_ctx, row) => {
             if (conn !== c) return;
@@ -216,8 +274,11 @@ function connect(): void {
               applied = true;
               subs.forEach((s) => replay(s, c));
             })
-            .onError(() => {
-              /* leave connection up for emits; dashboard just gets no stream */
+            .onError((ctx) => {
+              // leave connection up for emits; dashboard just gets no stream
+              if (warnedSubscription) return;
+              warnedSubscription = true;
+              console.warn('telemetry subscription failed:', ctx?.event?.message ?? 'unknown error');
             })
             .subscribe('SELECT * FROM telemetry_event');
         } catch {
@@ -253,16 +314,40 @@ export function emit(
   if (disabled) return;
   try {
     ensureStarted();
+    const st = statFor(kind);
     const c = conn;
-    if (!c || !ready || inflight >= MAX_INFLIGHT) return;
+    if (!c || !ready) {
+      if (pending.length < PENDING_MAX) pending.push({ at: Date.now(), source, target, kind, label, payload: payload ?? {} });
+      else st.dropped++;
+      return;
+    }
+    if (inflight >= MAX_INFLIGHT) {
+      st.dropped++;
+      return;
+    }
     const payloadJson = JSON.stringify({ ...(payload ?? {}), sid: (payload as Record<string, unknown> | undefined)?.sid ?? getSessionId() });
     inflight++;
+    st.sent++;
     const done = () => {
       if (inflight > 0) inflight--;
     };
     c.reducers
       .emitTelemetry({ source, target, kind, label: label.slice(0, MAX_LABEL), payloadJson })
-      .then(done, done);
+      .then(
+        () => {
+          done();
+          st.accepted++;
+        },
+        (err: unknown) => {
+          done();
+          st.rejected++;
+          st.lastError = err instanceof Error ? err.message : String(err);
+          if (!warnedKinds.has(kind)) {
+            warnedKinds.add(kind);
+            console.warn(`telemetry ${kind} rejected (payload ${byteLength(payloadJson)} bytes): ${st.lastError}`);
+          }
+        },
+      );
   } catch {
     /* never throws */
   }

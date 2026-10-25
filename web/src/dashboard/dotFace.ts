@@ -12,7 +12,7 @@ import { FACE_CANON, FACE_TRIS } from './faceTris';
  * the camera, and skipped when its triangle faces away, so a turned head thins naturally.
  *
  * Points are carried as Float32Array(478 * 3): x, y in 0..1 across the nose-centred square (y down), z in
- * inter-ocular units (smaller = nearer the camera), the same frame as the v2 payload.
+ * inter-ocular units (smaller = nearer the camera), the same frame as the v2 and v3 payloads.
  */
 
 export const FACE_POINTS = 478;
@@ -166,6 +166,27 @@ export function decodeFaceV2(b64: string, n: number): Float32Array | null {
     out[3 * i] = (bin.charCodeAt(o) | (bin.charCodeAt(o + 1) << 8)) / 65535;
     out[3 * i + 1] = (bin.charCodeAt(o + 2) | (bin.charCodeAt(o + 3) << 8)) / 65535;
     out[3 * i + 2] = (bin.charCodeAt(o + 4) / 255) * 1.2 - 0.6;
+  }
+  if (n === 468) synthIris(out);
+  return out;
+}
+
+/** Decodes a v3 `pts` string (n records of x u8, y u8, z u8; the live format). Null when it is malformed. */
+export function decodeFaceV3(b64: string, n: number): Float32Array | null {
+  if (n !== 478 && n !== 468) return null;
+  let bin: string;
+  try {
+    bin = atob(b64);
+  } catch {
+    return null;
+  }
+  if (bin.length < n * 3) return null;
+  const out = new Float32Array(FACE_POINTS * 3);
+  for (let i = 0; i < n; i++) {
+    const o = i * 3;
+    out[3 * i] = bin.charCodeAt(o) / 255;
+    out[3 * i + 1] = bin.charCodeAt(o + 1) / 255;
+    out[3 * i + 2] = (bin.charCodeAt(o + 2) / 255) * 1.2 - 0.6;
   }
   if (n === 468) synthIris(out);
   return out;
