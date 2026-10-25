@@ -2,6 +2,7 @@ import type { TrackedFrame } from '@vowel-mapper/audio/tracker';
 import type { LipFrame } from '../vision/lipTelemetry';
 import type { SoundId } from '../state/types';
 import { offlineSink, type MetricSink } from './metricSink';
+import { emit, throttledEmit } from '../telemetry/client';
 
 /**
  * Records one attempt's real tracker output: F1/F2 frames from the vowel engine and lip frames
@@ -58,6 +59,7 @@ export class AttemptRecorder {
   private timer: ReturnType<typeof setInterval> | null = null;
   private sinkReady = false;
   private sinkMissed = false;
+  private rmsRing: number[] = [];
 
   constructor(private readonly sink: MetricSink = offlineSink) {}
 
@@ -89,6 +91,14 @@ export class AttemptRecorder {
       return;
     }
     const f = toAudioFrame(frame, t);
+    this.rmsRing.push(f.rms);
+    if (this.rmsRing.length > 32) this.rmsRing.shift();
+    throttledEmit('audio.frame', 200, 'audio', 'db', 'audio.frame', 'audio frame', {
+      f1: f.f1,
+      f2: f.f2,
+      rms: f.rms,
+      env: this.envelope(),
+    });
     this.audio.push(f);
     this.pendingAudio.push(f);
   }
@@ -105,15 +115,34 @@ export class AttemptRecorder {
     this.pendingVideo.push(f);
   }
 
+  /** 32 values 0..1 from the recent rms history (oldest first, left-padded with 0); no raw PCM is available here. */
+  private envelope(): number[] {
+    const out = new Array<number>(32).fill(0);
+    const off = 32 - this.rmsRing.length;
+    for (let i = 0; i < this.rmsRing.length; i++) {
+      const v = this.rmsRing[i];
+      out[off + i] = Math.round(Math.min(1, Math.max(0, v * 4)) * 1000) / 1000;
+    }
+    return out;
+  }
+
   private flush(): void {
     const useSink = this.sink.connected && this.sinkReady;
     if (this.sink.connected && !useSink && (this.pendingAudio.length || this.pendingVideo.length)) this.sinkMissed = true;
     if (this.pendingAudio.length) {
-      if (useSink) this.sink.push('audio', this.seq.audio++, this.pendingAudio);
+      if (useSink) {
+        const seq = this.seq.audio++;
+        this.sink.push('audio', seq, this.pendingAudio);
+        emit('audio', 'db', 'audio.batch', `audio batch ${seq}`, { frames: this.pendingAudio.length, seq });
+      }
       this.pendingAudio = [];
     }
     if (this.pendingVideo.length) {
-      if (useSink) this.sink.push('video', this.seq.video++, this.pendingVideo);
+      if (useSink) {
+        const seq = this.seq.video++;
+        this.sink.push('video', seq, this.pendingVideo);
+        emit('mediapipe', 'db', 'lip.batch', `lip batch ${seq}`, { frames: this.pendingVideo.length, seq });
+      }
       this.pendingVideo = [];
     }
   }
@@ -149,6 +178,7 @@ export class AttemptRecorder {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.attemptId = null;
+    this.rmsRing = [];
     this.audio = [];
     this.video = [];
     this.pendingAudio = [];

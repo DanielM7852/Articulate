@@ -1,6 +1,8 @@
 // Teacher speech: Cartesia streaming TTS over WebSocket (token from our backend), played through Web Audio,
 // with word and phoneme timestamps and a playback clock. Falls back to speechSynthesis.
 
+import { emit } from '../telemetry/client';
+
 export interface TimedWord { text: string; start: number; end: number }
 export interface TimedPhoneme { p: string; start: number; end: number }
 export type TeacherEvent = 'start' | 'word' | 'timeline' | 'end' | 'error';
@@ -197,6 +199,7 @@ class Impl implements TeacherSpeech {
   private lastClock = -Infinity; // clock() never goes backwards once started
   private streamDone = false;
   private carry: Uint8Array = new Uint8Array(0);
+  private samplesTotal = 0;
   private sampleRate = 24000;
   private info: TokenResponse | null = null;
   private gotMessage = false;
@@ -387,6 +390,7 @@ class Impl implements TeacherSpeech {
         continue: false,
       };
       if (this.speed !== undefined && Math.abs(this.speed - 1) > 0.01) body.generation_config = { speed: this.speed };
+      emit('ui', 'tts', 'tts.speak', 'speak line', { chars: this.text.length, voice: info.voice_id });
       ws.send(JSON.stringify(body));
     };
     ws.onopen = send;
@@ -457,6 +461,7 @@ class Impl implements TeacherSpeech {
     try { decoded = decodeF32(b64, this.carry); } catch { return; }
     this.carry = decoded.rest;
     if (decoded.samples.length === 0) return;
+    this.samplesTotal += decoded.samples.length;
     const buffer = ctx.createBuffer(1, decoded.samples.length, this.sampleRate);
     buffer.copyToChannel(decoded.samples as Float32Array<ArrayBuffer>, 0);
     const source = ctx.createBufferSource();
@@ -480,6 +485,7 @@ class Impl implements TeacherSpeech {
 
   private markStreamDone(): void {
     this.streamDone = true;
+    emit('tts', 'ui', 'tts.audio', 'speech audio received', { ms: Math.round((this.samplesTotal / this.sampleRate) * 1000) });
     const ws = this.ws;
     this.ws = null;
     if (ws) {
