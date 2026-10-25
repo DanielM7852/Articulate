@@ -41,6 +41,8 @@ The container needs a height (the component fills it). It builds its own layout:
 | `setStyle("hologram" \| "particles" \| "porcelain" \| "hybrid" \| "solid")` | Switch look at runtime. |
 | `toggleCalibration()` / `handleCalibrationKey(e)` | Highlight ring calibration (see below). `handleCalibrationKey` returns `true` if it consumed the key. |
 | `assemble({ durationMs? })` / `disperse({ durationMs? })` | Particles style intro / outro: the dots fly in and build the head (default 1600 ms), or dissolve outward and up (default 1100 ms). Resolve `true` when done, `false` if the other call interrupts. Reduced motion: a 300 ms crossfade. Other styles resolve at once. |
+| `setStartShape(shape \| null)` / `setStartShapeFromImage({ src, box, fit?, spacing?, threshold? })` | Particles style: while dispersed all the dots draw a picture (camera-space `points`, optional `shade`; darker samples carry more dots), and `assemble()` morphs each dot from its spot on it to its spot on the head, nothing appearing from elsewhere. The image variant samples the image's dark pixels laid out in `box` (CSS px relative to the canvas host). `null` restores the usual fly-in. Return / resolve `true` when the picture is on stage. |
+| `setBackdrop(color \| null, { durationMs? })` | Wash the stage backdrop toward a flat CSS colour (e.g. to match a page behind a see-through overlay); `null` eases back to the gradient. |
 | `dispose()` | Free GPU resources, listeners and DOM. Safe to call twice. |
 | `driverName`, `style`, `view`, `speed`, `cueId`, `speaking`, `assembly`, `assembled` | Read-only state. `assembly` is `"assembled"`, `"dispersed"`, `"assembling"` or `"dispersing"`. |
 

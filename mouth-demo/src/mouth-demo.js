@@ -28,6 +28,11 @@ const LOOK = { yaw: 0.14, pitch: 0.09, ease: 0.07 };
 const GAZE = { yaw: 0.8, pitch: 0.4, rest: -0.12 };
 const GAZE_SHAPES = ["eyeLookOutLeft", "eyeLookInLeft", "eyeLookOutRight", "eyeLookInRight", "eyesLookUp", "eyesLookDown"];
 const NOTE = "Mouth demonstrations are illustrative and would be reviewed by speech therapists before real use.";
+// Start picture from an image (setStartShapeFromImage): the image is read at most maxPx wide; its pixels darker
+// than `threshold` (luminance after compositing over `paper`) become samples on a jittered grid `spacing` CSS px
+// apart, each with its tone (`black` is the luminance that counts as fully dark). The particle head then spreads
+// all its dots over the samples, darker ones carrying more.
+const SHAPE_IMG = { maxPx: 512, spacing: 1.6, threshold: 0.55, black: 0.08, paper: [250, 249, 246] };
 const DRIVERS = ["auto", "talkinghead", "three"];
 const STYLES = ["hologram", "particles", "porcelain", "hybrid", "solid"];
 
@@ -369,6 +374,114 @@ export async function createMouthDemo(container, options = {}) {
   const lipsync = createLipSync({ driver, isBlocked: cueOwnsFace, emit: emitSpeech });
   disposers.push(() => lipsync.dispose());
 
+  // Start picture: an image's dark pixels, laid out in a box on the canvas, become the dots' starting shape.
+  const shapeImages = new Map(); // src -> Promise<{ w, h, data }>
+  let shapeToken = 0;
+  const loadShapeImage = (src) => {
+    let p = shapeImages.get(src);
+    if (!p) {
+      p = new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`start shape image did not load: ${src}`));
+        img.src = src;
+      }).then((img) => {
+        const iw = img.naturalWidth || img.width;
+        const ih = img.naturalHeight || img.height;
+        const w = Math.max(1, Math.min(SHAPE_IMG.maxPx, iw));
+        const h = Math.max(1, Math.round((w * ih) / iw));
+        const cv = document.createElement("canvas");
+        cv.width = w;
+        cv.height = h;
+        const ctx = cv.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, w, h);
+        return { w, h, data: ctx.getImageData(0, 0, w, h).data };
+      });
+      p.catch(() => shapeImages.delete(src));
+      shapeImages.set(src, p);
+    }
+    return p;
+  };
+
+  const shapeFromImage = async ({ src, box, fit = "fill", spacing = SHAPE_IMG.spacing, threshold = SHAPE_IMG.threshold } = {}) => {
+    if (disposed || !src || !box) return false;
+    const token = ++shapeToken;
+    let img;
+    try {
+      img = await loadShapeImage(src);
+    } catch (err) {
+      console.warn("[mouth-demo]", err?.message ?? err);
+      return false;
+    }
+    if (disposed || token !== shapeToken) return false; // a newer call (resize) wins
+    const hw = host.clientWidth;
+    const hh = host.clientHeight;
+    const bw = +box.width;
+    const bh = +box.height;
+    if (!(hw > 0 && hh > 0 && bw > 0 && bh > 0)) return false;
+    // where the image lands inside the box (like CSS object-fit, centred)
+    let kx = bw / img.w;
+    let ky = bh / img.h;
+    if (fit === "cover") kx = ky = Math.max(kx, ky);
+    else if (fit === "contain") kx = ky = Math.min(kx, ky);
+    const ox = (bw - img.w * kx) / 2;
+    const oy = (bh - img.h * ky) / 2;
+    // the picture lies on the plane through the orbit target, facing the camera, in camera space
+    const cam = scene.camera;
+    cam.updateMatrixWorld();
+    const m = cam.matrixWorldInverse.elements;
+    const t = scene.controls.target;
+    const d = Math.max(0.05, -(m[2] * t.x + m[6] * t.y + m[10] * t.z + m[14]));
+    const tanH = Math.tan(((cam.fov || 30) * Math.PI) / 360);
+    const aspect = hw / hh;
+    const mPerPx = (2 * d * tanH) / hh;
+    const step = Math.max(1, +spacing || SHAPE_IMG.spacing);
+    const T = Math.min(0.99, Math.max(0.01, +threshold || SHAPE_IMG.threshold));
+    const [pr, pg, pb] = SHAPE_IMG.paper;
+    const paperLum = 0.2126 * pr + 0.7152 * pg + 0.0722 * pb;
+    const data = img.data;
+    const pts = [];
+    const tone = [];
+    for (let y = 0; y < bh; y += step) {
+      for (let x = 0; x < bw; x += step) {
+        const px = x + Math.random() * step;
+        const py = y + Math.random() * step;
+        if (px >= bw || py >= bh) continue;
+        const ix = Math.floor((px - ox) / kx);
+        const iy = Math.floor((py - oy) / ky);
+        if (ix < 0 || iy < 0 || ix >= img.w || iy >= img.h) continue;
+        const i = (iy * img.w + ix) * 4;
+        const a = data[i + 3] / 255;
+        const lum = (a * (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) + (1 - a) * paperLum) / 255;
+        if (lum >= T) continue;
+        const v = Math.min(1, (T - lum) / Math.max(0.05, T - SHAPE_IMG.black));
+        const nx = ((box.x + px) / hw) * 2 - 1;
+        const ny = 1 - ((box.y + py) / hh) * 2;
+        pts.push(nx * tanH * aspect * d, ny * tanH * d, -d);
+        tone.push(v);
+      }
+    }
+    if (!pts.length) return false;
+    return cloud.setStartShape({
+      points: new Float32Array(pts),
+      shade: new Float32Array(tone),
+      jitter: step * mPerPx,
+      area: (pts.length / 3) * (step * mPerPx) ** 2,
+    });
+  };
+
+  // Stage backdrop: the gradient, washed toward a flat colour (eased in the frame loop).
+  const backdrop = { color: null, amount: 0, target: 0, rate: 0 };
+  const stepBackdrop = (dt) => {
+    if (backdrop.amount === backdrop.target) return;
+    const d = dt * backdrop.rate;
+    backdrop.amount = backdrop.target > backdrop.amount
+      ? Math.min(backdrop.target, backdrop.amount + d)
+      : Math.max(backdrop.target, backdrop.amount - d);
+    scene.setBackdrop(backdrop.color, backdrop.amount);
+  };
+
   const demo = {
     driverName: driver.name,
 
@@ -488,6 +601,32 @@ export async function createMouthDemo(container, options = {}) {
       return cloud.disperse(o);
     },
 
+    // Particles style: while dispersed the dots draw this picture, and assemble() morphs it into the head.
+    // shape: { points (camera-space xyz), shade?, jitter?, area?, dotRadius? } or null for the default fly-in.
+    setStartShape(shape) {
+      if (!shape) shapeToken++; // drop an image still loading
+      return cloud.setStartShape(shape ?? null);
+    },
+
+    // The same, from an image laid out in `box` (CSS px relative to the canvas host).
+    setStartShapeFromImage(o) {
+      return shapeFromImage(o);
+    },
+
+    // Wash the stage backdrop toward a flat colour (null returns to the gradient).
+    setBackdrop(color, o = {}) {
+      if (disposed) return;
+      if (color) backdrop.color = color;
+      backdrop.target = color ? 1 : 0;
+      const dur = Math.max(0, +o.durationMs || 0);
+      if (dur > 0) {
+        backdrop.rate = 1 / dur;
+      } else if (backdrop.amount !== backdrop.target) {
+        backdrop.amount = backdrop.target;
+        scene.setBackdrop(backdrop.color, backdrop.amount);
+      }
+    },
+
     toggleCalibration() {
       highlight.toggleCalibration();
     },
@@ -512,6 +651,7 @@ export async function createMouthDemo(container, options = {}) {
     get speaking() { return lipsync.speaking; },
     get assembly() { return cloud.assembly; },
     get assembled() { return cloud.assembly === "assembled"; },
+    get hasStartShape() { return cloud.hasStartShape; },
   };
 
   if (params.debug) {
@@ -541,6 +681,7 @@ export async function createMouthDemo(container, options = {}) {
     }
     const step = Math.min(dt, 100);
     const scaled = step * timeline.speed;
+    stepBackdrop(step);
     timeline.update(step);
     lipsync.update(step);
     // The side diagram follows the lip sync whenever no cue owns the face; otherwise paint()'s setPose

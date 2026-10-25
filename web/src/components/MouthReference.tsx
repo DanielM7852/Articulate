@@ -35,6 +35,16 @@ export interface MouthReferenceHandle {
   assemble(opts?: AssemblyOptions): Promise<boolean>;
   /** Dissolve the particle head. Resolves true when gone, false if interrupted or not ready. */
   disperse(opts?: AssemblyOptions): Promise<boolean>;
+  /**
+   * While dispersed, draw the particle head's dots as this image, laid out in `rect` (viewport px, e.g. an
+   * element's getBoundingClientRect()); assemble() then morphs it into the head. Resolves true when the
+   * picture is on stage, false if the guide is not ready or not the particle style.
+   */
+  setStartShapeFromImage(opts: { src: string; rect: DOMRectReadOnly; fit?: 'fill' | 'cover' | 'contain' }): Promise<boolean>;
+  /** Back to the default fly-in (after a morph in progress). The guide also does this when it leaves the screen. */
+  clearStartShape(): void;
+  /** Wash the stage toward a flat CSS colour; null returns to the default gradient. Reset when it leaves the screen. */
+  setBackdrop(color: string | null, opts?: { durationMs?: number }): void;
 }
 
 export interface MouthReferenceProps {
@@ -86,6 +96,21 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
       disperse(opts) {
         return demoRef.current?.disperse(opts) ?? Promise.resolve(false);
       },
+      setStartShapeFromImage({ src, rect, fit }) {
+        const demo = demoRef.current;
+        const host = hostRef.current;
+        if (!demo || !host) return Promise.resolve(false);
+        // the box is relative to the demo's canvas host
+        const origin = (host.querySelector('.md-canvas-host') ?? host).getBoundingClientRect();
+        const box = { x: rect.left - origin.left, y: rect.top - origin.top, width: rect.width, height: rect.height };
+        return demo.setStartShapeFromImage({ src, box, fit });
+      },
+      clearStartShape() {
+        demoRef.current?.setStartShape(null);
+      },
+      setBackdrop(color, opts) {
+        demoRef.current?.setBackdrop(color, opts);
+      },
     }),
     [],
   );
@@ -108,6 +133,9 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
       });
     return () => {
       cancelled = true;
+      // a screen's start picture and backdrop do not follow the guide to the next screen
+      demoRef.current?.setStartShape(null);
+      demoRef.current?.setBackdrop(null);
       demoRef.current = null;
       releaseGuide(host);
     };

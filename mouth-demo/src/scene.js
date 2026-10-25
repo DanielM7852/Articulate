@@ -2,19 +2,31 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
+// The stage backdrop: a soft radial gradient, optionally washed toward a flat colour (setBackdrop).
 function makeBackground() {
   const c = document.createElement("canvas");
   c.width = 256;
   c.height = 256;
   const g = c.getContext("2d");
-  const grad = g.createRadialGradient(128, 128, 0, 128, 128, 181);
-  grad.addColorStop(0, "#FFFFFF");
-  grad.addColorStop(1, "#CBD7E6");
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 256, 256);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+  function draw(color, amount) {
+    const grad = g.createRadialGradient(128, 128, 0, 128, 128, 181);
+    grad.addColorStop(0, "#FFFFFF");
+    grad.addColorStop(1, "#CBD7E6");
+    g.globalAlpha = 1;
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 256);
+    if (color && amount > 0) {
+      g.globalAlpha = Math.min(1, amount);
+      g.fillStyle = color;
+      g.fillRect(0, 0, 256, 256);
+      g.globalAlpha = 1;
+    }
+    tex.needsUpdate = true;
+  }
+  draw(null, 0);
+  return { tex, draw };
 }
 
 export function createScene(host) {
@@ -29,7 +41,8 @@ export function createScene(host) {
   host.appendChild(canvas);
 
   const scene = new THREE.Scene();
-  const background = makeBackground();
+  const backdrop = makeBackground();
+  const background = backdrop.tex;
   scene.background = background;
 
   const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 50);
@@ -121,5 +134,7 @@ export function createScene(host) {
   return {
     renderer, scene, camera, canvas, controls,
     setSize, setSolidLighting, startLoop, stopLoop, dispose,
+    /** Wash the gradient toward a flat colour: amount 0 is the plain gradient, 1 the colour. */
+    setBackdrop: (color, amount) => backdrop.draw(color, amount),
   };
 }

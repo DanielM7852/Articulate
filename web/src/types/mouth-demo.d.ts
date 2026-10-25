@@ -14,6 +14,33 @@ declare module '@mouth-demo/src/mouth-demo.js' {
     durationMs?: number;
   }
 
+  /** A picture drawn in dots that the particle head starts from (see MouthDemo.setStartShape). */
+  export interface StartShape {
+    /** xyz per sample, in camera space (the picture's plane in front of the camera). Any count. */
+    points: Float32Array;
+    /** 0..1 per sample, 1 darkest (darker samples carry more dots, drawn darker and larger). Default 1. */
+    shade?: Float32Array;
+    /** Metres between samples: each sample's dots are spread over a cell this wide. */
+    jitter?: number;
+    /** The picture's area in m² (default: samples x jitter²); sets the dot radius for an even coverage. */
+    area?: number;
+    /** Dot radius on the picture, metres; overrides the one derived from `area`. */
+    dotRadius?: number;
+  }
+
+  export interface StartShapeImageOptions {
+    /** Image URL; its pixels darker than `threshold` become the dots. */
+    src: string;
+    /** Where the image sits, in CSS px relative to the demo's canvas host. */
+    box: { x: number; y: number; width: number; height: number };
+    /** How the image fills the box, like CSS object-fit. Default 'fill'. */
+    fit?: 'fill' | 'cover' | 'contain';
+    /** CSS px between samples. Default 1.6. */
+    spacing?: number;
+    /** Luminance (0..1, composited over cream) below which a pixel is part of the shape. Default 0.55. */
+    threshold?: number;
+  }
+
   /** Timestamps in seconds from the start of the speech audio (e.g. from Cartesia). */
   export interface SpeechTimeline {
     phonemes?: { p: string; start: number; end: number }[];
@@ -74,6 +101,18 @@ declare module '@mouth-demo/src/mouth-demo.js' {
     assemble(opts?: AssemblyOptions): Promise<boolean>;
     /** Particles style: the head dissolves (dots drift outward and up and fade). Resolves false if interrupted. */
     disperse(opts?: AssemblyOptions): Promise<boolean>;
+    /** True while a start shape is set. */
+    readonly hasStartShape: boolean;
+    /**
+     * Particles style: while dispersed the dots draw this picture, and assemble() morphs each dot from its
+     * spot on it to its spot on the head. Null restores the default fly-in (after a morph in progress).
+     * Returns true when the picture is on stage.
+     */
+    setStartShape(shape: StartShape | null): boolean;
+    /** setStartShape from an image laid out in a box on the canvas. Resolves true when the picture is on stage. */
+    setStartShapeFromImage(opts: StartShapeImageOptions): Promise<boolean>;
+    /** Wash the stage backdrop toward a flat CSS colour; null returns to the default gradient. */
+    setBackdrop(color: string | null, opts?: { durationMs?: number }): void;
     /** Freeze the face, camera and choreography clock without losing state. */
     pause(): void;
     resume(): void;

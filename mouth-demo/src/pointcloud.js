@@ -94,6 +94,29 @@ const FLY = {
   prepassAt: 0.78,
   eyesIn: 0.08 // timeline share over which the eyes and teeth fade back in after that
 };
+/**
+ * Start shape: instead of the shell, the fly-in can start from a picture drawn in dots (the landing page's ribbon).
+ * Every dot of the head starts visible on the picture (darker samples carry more dots) and travels from there to
+ * its spot on the head: nothing appears from elsewhere. Dots are paired by rank (left to right in strips, then
+ * bottom to top within each strip), so the left of the picture flows into the left of the head. The wave drains
+ * the picture progressively, starting from the end set by `key`.
+ */
+const SHAPE = {
+  swirl: 0.2, // radians of spiral over one flight: a morph, not a tornado
+  key: "x", // stagger: "x" drains the picture from its left end, "far" from its right end, "dist" the farthest dots first
+  random: 0.15, // stagger key: 0 is a clean sweep, 1 fully random
+  spread: 0.4, // share of the timeline used to stagger the dots; the rest is each dot's own flight
+  light: 1.0, // dot tone on the picture (navy multiplier) for the lightest and the darkest samples
+  dark: 0.4,
+  sizeLight: 0.8, // dot radius multiplier on the picture, by tone
+  sizeDark: 1.15,
+  alphaLight: 0.65, // dot opacity on the picture, by tone (the lighter parts read lighter)
+  alphaDark: 1.0,
+  toneWeight: 0.35, // dots per sample: toneWeight + tone, so darker samples carry more dots
+  coverage: 0.72, // share of the picture's area the dots cover on average; sets their radius from their density
+  minPx: 1.0, // device px: smallest dot drawn on the picture; smaller ones are drawn at this size, fainter
+  appearMs: 600 // the picture fades in when it is first shown
+};
 const DISSOLVE = { spread: 0.6, random: 0.3, out: 0.07, outZ: 0.3, up: 0.16, curl: 0.035, fadeStart: 0.1, fadeEnd: 0.9, shrink: 0.45 };
 const REDUCED_FADE_MS = 300; // reduced motion: a plain crossfade, no travel
 
@@ -140,6 +163,13 @@ uniform float uTravel; // 1: dots travel; 0: reduced motion, a plain crossfade
 uniform float uBackFade; // while the depth prepass is off: hide settled dots behind the head's centre plane
 uniform vec3 uCenter;
 uniform vec2 uYRange;
+attribute vec2 aShape; // start picture: x tone (1 darkest), y stagger key (0 leaves first)
+uniform float uShape; // 1: the fly-in starts from a picture; aFly.xyz is then in camera space
+uniform mat4 uShapeMatrix; // camera space to world, for the picture
+uniform float uShapeRadius; // dot radius on the picture, metres
+uniform float uShapeAlpha; // the picture's own fade-in
+varying float vShape;
+varying float vShade;
 varying float vRim;
 varying float vKind;
 varying float vMouth;
@@ -151,11 +181,40 @@ void main() {
   float fade = 1.0;
   float grow = 1.0;
   float settled = 1.0; // weight of the far-side hiding (prepass off): 1 at home, 0 far away
+  float shapeMix = 0.0; // 1 on the start picture, 0 at home
+  bool shaped = uShape > 0.5 && uMode < 0.5;
   bool moving = uMode > 0.5 || uProg < 1.0;
   if (moving) {
     float yN = clamp((position.y - uYRange.x) / max(uYRange.y - uYRange.x, 1e-3), 0.0, 1.0);
     if (uTravel < 0.5) {
-      fade = uMode > 0.5 ? 1.0 - uProg : uProg;
+      if (shaped && uProg < 0.5) {
+        // reduced motion from a picture: it fades out, then the head fades in
+        p = (uShapeMatrix * vec4(aFly.xyz, 1.0)).xyz;
+        shapeMix = 1.0;
+        settled = 0.0;
+        fade = (1.0 - 2.0 * uProg) * uShapeAlpha;
+      } else if (shaped) {
+        fade = 2.0 * uProg - 1.0;
+      } else {
+        fade = uMode > 0.5 ? 1.0 - uProg : uProg;
+      }
+    } else if (shaped) {
+      // morph from the picture: the wave drains it progressively; each dot peels off, travels and settles,
+      // turning a little about the head's vertical axis. Every dot is visible the whole way.
+      vec3 start = (uShapeMatrix * vec4(aFly.xyz, 1.0)).xyz;
+      float key = mix(aShape.y, aFly.w, ${SHAPE.random.toFixed(2)});
+      float q = clamp((uProg - key * ${SHAPE.spread.toFixed(2)}) / ${(1 - SHAPE.spread).toFixed(2)}, 0.0, 1.0);
+      float e = q * q * (3.0 - 2.0 * q); // ease in and out: leaves the picture gently, lands softly
+      float ang = ${SHAPE.swirl.toFixed(2)} * (1.0 - e);
+      float cs = cos(ang);
+      float sn = sin(ang);
+      vec3 home = position - uCenter;
+      home = vec3(cs * home.x + sn * home.z, home.y, cs * home.z - sn * home.x);
+      p = mix(start, uCenter + home, e);
+      fade = uShapeAlpha;
+      if (aInfo.y > 1.5) fade *= mix(1.0 - e, 1.0, smoothstep(${FLY.prepassAt.toFixed(2)}, ${(FLY.prepassAt + FLY.eyesIn).toFixed(2)}, uProg));
+      shapeMix = 1.0 - e;
+      settled = e;
     } else if (uMode < 0.5) {
       // fly-in: a wave from the chin up, broken up by each dot's phase
       float key = mix(yN, aFly.w, ${FLY.random.toFixed(2)});
@@ -193,6 +252,8 @@ void main() {
     fade *= smoothstep(${FLY.near[0].toFixed(2)}, ${FLY.near[1].toFixed(2)}, -mv.z);
   }
   vec3 n = normalize(normalMatrix * aNormal);
+  // on the picture every dot faces the viewer, so it is lit evenly
+  if (shapeMix > 0.0) n = normalize(mix(n, vec3(0.0, 0.0, 1.0), shapeMix) + vec3(0.0, 0.0, 1e-3));
   vec3 toEye = normalize(-mv.xyz);
   float facing = abs(dot(n, toEye));
   float rim = pow(1.0 - clamp(facing, 0.0, 1.0), 2.0);
@@ -202,14 +263,23 @@ void main() {
   float lit = smoothstep(-0.15, 0.85, lambert);
   float sizeLight = mix(${LIGHT.sizeShadow.toFixed(2)}, ${LIGHT.sizeLit.toFixed(2)}, lit);
   float r = uRadius * aInfo.x * sizeLight * grow * (1.0 + ${DOT.mouthSwell.toFixed(2)} * aInfo.z + uHold * ${DOT.holdSwell.toFixed(2)} * aInfo.z + ${DOT.rimSwell.toFixed(2)} * rim);
+  r = mix(r, uShapeRadius * mix(${SHAPE.sizeLight.toFixed(2)}, ${SHAPE.sizeDark.toFixed(2)}, aShape.x), shapeMix);
   // capped so a dot lifted toward the camera does not balloon
-  gl_PointSize = clamp(2.0 * r * uProj / -mv.z, ${DOT.minPx.toFixed(1)}, ${DOT.maxPx.toFixed(1)} * uDpr);
+  float px = 2.0 * r * uProj / -mv.z;
+  float minPx = mix(${DOT.minPx.toFixed(1)}, ${SHAPE.minPx.toFixed(1)}, shapeMix);
+  float ps = clamp(px, minPx, ${DOT.maxPx.toFixed(1)} * uDpr);
+  gl_PointSize = ps;
   gl_Position = projectionMatrix * mv;
   vRim = rim;
   vKind = aInfo.y;
   vMouth = aInfo.z;
-  vAlpha = aInfo.w * fade;
+  // on the picture: opacity by tone, and a dot drawn larger than its size is fainter so the coverage holds
+  float sub = px / ps;
+  float shapeAlpha = mix(${SHAPE.alphaLight.toFixed(2)}, ${SHAPE.alphaDark.toFixed(2)}, aShape.x) * min(1.0, sub * sub);
+  vAlpha = mix(aInfo.w, shapeAlpha, shapeMix) * fade;
   vLit = lit;
+  vShape = shapeMix;
+  vShade = aShape.x;
 }
 `;
 
@@ -222,6 +292,8 @@ varying float vKind;
 varying float vMouth;
 varying float vAlpha;
 varying float vLit;
+varying float vShape;
+varying float vShade;
 
 void main() {
   vec2 q = gl_PointCoord * 2.0 - 1.0;
@@ -243,6 +315,12 @@ void main() {
     base = uColNavy * ${HAIR_TONE.base.toFixed(2)};
     spec *= ${HAIR_TONE.spec.toFixed(2)};
     rimGlow = 0.0;
+  }
+  if (vShape > 0.0) {
+    // on the start picture: one navy, darker where the picture is darker
+    base = mix(base, uColNavy * mix(${SHAPE.light.toFixed(2)}, ${SHAPE.dark.toFixed(2)}, vShade), vShape);
+    spec *= 1.0 - 0.5 * vShape;
+    rimGlow *= 1.0 - vShape;
   }
   vec3 col = base * shade + uColHalo * (spec + rimGlow) + uColHalo * 0.04 * vMouth;
   gl_FragColor = vec4(col, cov * vAlpha);
@@ -299,6 +377,43 @@ const smooth = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
+
+// Sorting ids by a float key without a comparator: the key is quantized and packed with the id into one
+// float64 (both well inside 2^53), so the native typed-array sort does the work.
+const QK = 1048576; // 2^20: max ids and key levels
+function sortByKey(ids, key) {
+  const m = ids.length;
+  if (m < 2) return;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let j = 0; j < m; j++) {
+    const v = key[ids[j]];
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  const span = hi - lo || 1;
+  const k = new Float64Array(m);
+  for (let j = 0; j < m; j++) k[j] = Math.floor(((key[ids[j]] - lo) / span) * (QK - 1)) * QK + ids[j];
+  k.sort();
+  for (let j = 0; j < m; j++) ids[j] = k[j] % QK;
+}
+
+/**
+ * Pair two equally long id lists by rank so neighbours stay neighbours: both are cut into the same number of
+ * equal-count strips along x, then each strip is ordered along y. Afterwards a[j] pairs with b[j].
+ */
+function rankMatch(a, ax, ay, b, bx, by) {
+  const m = a.length;
+  sortByKey(a, ax);
+  sortByKey(b, bx);
+  const strips = Math.max(1, Math.round(Math.sqrt(m)));
+  for (let s = 0; s < strips; s++) {
+    const i0 = Math.floor((s * m) / strips);
+    const i1 = Math.floor(((s + 1) * m) / strips);
+    sortByKey(a.subarray(i0, i1), ay);
+    sortByKey(b.subarray(i0, i1), by);
+  }
+}
 
 /** Typed-array copy of a BufferAttribute (handles interleaved and normalized attributes). */
 function copyAttr(attr, itemSize, Ctor = Float32Array) {
@@ -659,8 +774,16 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   nrmAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("position", posAttr);
   geometry.setAttribute("aNormal", nrmAttr);
-  geometry.setAttribute("aInfo", new THREE.BufferAttribute(new Float32Array(info), 4));
-  geometry.setAttribute("aFly", new THREE.BufferAttribute(makeFlyStarts(count), 4));
+  const infoA = new Float32Array(info);
+  geometry.setAttribute("aInfo", new THREE.BufferAttribute(infoA, 4));
+  // fly-in starts: the shell, or (with a start shape) points on the picture in camera space
+  const shellFly = makeFlyStarts(count);
+  const flyA = new Float32Array(shellFly);
+  const flyAttr = new THREE.BufferAttribute(flyA, 4);
+  geometry.setAttribute("aFly", flyAttr);
+  const shapeA = new Float32Array(count * 2);
+  const shapeAttr = new THREE.BufferAttribute(shapeA, 2);
+  geometry.setAttribute("aShape", shapeAttr);
   const uniforms = {
     uProj: { value: 1000 },
     uDpr: { value: 1 },
@@ -672,6 +795,10 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     uBackFade: { value: 0 },
     uCenter: { value: new THREE.Vector3().copy(mouthC) },
     uYRange: { value: new THREE.Vector2(minY, hb.max.y) },
+    uShape: { value: 0 },
+    uShapeMatrix: { value: new THREE.Matrix4() },
+    uShapeRadius: { value: DOT.radius },
+    uShapeAlpha: { value: 0 },
     uColNavy: { value: new THREE.Color(COLOR_NAVY) },
     uColHalo: { value: new THREE.Color(COLOR_HALO) },
     uColGrey: { value: new THREE.Color(COLOR_GREY) }
@@ -967,15 +1094,23 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   const settledHome = () => !fly.anim && fly.mode === 0 && fly.p >= 1;
   const gone = () => (fly.mode === 1 ? fly.p >= 1 : fly.p <= 0);
 
+  // start shape: on while a picture is set; alpha is its fade-in; a clear asked for mid-morph waits for the end
+  const shape = { on: false, alpha: 0, pendingClear: false };
+  // dispersed with a start shape: the dots sit on the picture (the fly-in at progress 0)
+  const showingShape = () => shape.on && !fly.anim && gone();
+
   function applyFly() {
-    const empty = !fly.anim && gone();
-    uniforms.uProg.value = fly.p;
-    uniforms.uMode.value = fly.mode;
+    const showShape = showingShape();
+    const empty = !fly.anim && gone() && !showShape;
+    uniforms.uProg.value = showShape ? 0 : fly.p;
+    uniforms.uMode.value = showShape ? 0 : fly.mode;
     uniforms.uTravel.value = reduced ? 0 : 1;
+    uniforms.uShape.value = shape.on ? 1 : 0;
     // The depth prepass hides the far side and the eye and mouth interiors. Early in the fly-in it would also
     // hide dots in flight behind an invisible head, so it is off then and the shader hides settled dots on the
     // far side instead. The dissolve keeps it: dots leave the surface outward, so they stay in front of it.
-    const prepassOn = active && !empty && (fly.mode === 1 || fly.p >= FLY.prepassAt || reduced);
+    // The start picture is not on the head's surface, so it never has the prepass.
+    const prepassOn = active && !empty && !showShape && (fly.mode === 1 || fly.p >= FLY.prepassAt || reduced);
     uniforms.uBackFade.value = prepassOn ? 0 : 1;
     points.visible = active && !empty;
     for (const e of entries) if (e.prepass) e.prepass.visible = e.visible && prepassOn;
@@ -989,6 +1124,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       fly.mode = a.assemble ? 0 : 1;
       fly.p = 1;
     }
+    if (shape.pendingClear) clearShape();
     applyFly();
     a.resolve(done);
   }
@@ -1059,6 +1195,163 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     uniforms.uYRange.value.set(y0, y1);
   }
 
+  /** Deform the meshes for the current pose (morphs, skinning, world matrices). */
+  function pose() {
+    root.updateMatrixWorld(true);
+    for (const sk of skeletons) sk.update();
+    for (const e of entries) {
+      e.deformer.update();
+      if (e.prepass) syncPrepass(e);
+    }
+  }
+
+  function syncProjection() {
+    renderer.getDrawingBufferSize(size);
+    uniforms.uProj.value = size.y / 2 / Math.tan(THREE.MathUtils.degToRad((camera.fov || 30) / 2));
+    uniforms.uDpr.value = renderer.getPixelRatio();
+  }
+
+  /** The picture is stored in camera space, so it stays put on screen while the camera eases. */
+  function syncShape(dtMs) {
+    camera.updateMatrixWorld();
+    uniforms.uShapeMatrix.value.copy(camera.matrixWorld);
+    if (showingShape()) shape.alpha = reduced ? 1 : Math.min(1, shape.alpha + Math.max(0, dtMs || 0) / SHAPE.appearMs);
+    else if (!(fly.anim && fly.mode === 0)) shape.alpha = 0; // the head is up: the next showing fades in again
+    uniforms.uShapeAlpha.value = shape.alpha;
+  }
+
+  function clearShape() {
+    if (!shape.on) {
+      shape.pendingClear = false;
+      return;
+    }
+    if (fly.anim && fly.mode === 0) {
+      shape.pendingClear = true; // mid-morph: the dots are still leaving the picture
+      return;
+    }
+    shape.on = false;
+    shape.pendingClear = false;
+    shape.alpha = 0;
+    flyA.set(shellFly);
+    flyAttr.needsUpdate = true;
+    applyFly();
+  }
+
+  /**
+   * Start the fly-in from a picture instead of the shell. shape.points: xyz per sample in camera space (the
+   * picture's plane in front of the camera); shape.shade: 0..1 per sample (1 darkest); shape.jitter: metres
+   * between samples (each sample's dots are spread over that cell); shape.area: the picture's area in m² (default
+   * samples x jitter²), which sets the dot radius for SHAPE.coverage; shape.dotRadius overrides that radius.
+   * Every dot starts visible on the picture, darker samples carrying more of them. Null restores the shell.
+   * Returns true when the picture is on stage (the cloud is active).
+   */
+  function setStartShape(s) {
+    if (disposed) return false;
+    const pts = s?.points;
+    const n = pts ? Math.floor(pts.length / 3) : 0;
+    if (!n) {
+      clearShape();
+      return false;
+    }
+    shape.pendingClear = false;
+    const t0 = performance.now();
+
+    // head dots where they are now, in camera space
+    pose();
+    place();
+    camera.updateMatrixWorld();
+    const V = camera.matrixWorldInverse.elements;
+    const hx = new Float32Array(count);
+    const hy = new Float32Array(count);
+    const hz = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      const x = positions[i * 3];
+      const y = positions[i * 3 + 1];
+      const z = positions[i * 3 + 2];
+      hx[i] = V[0] * x + V[4] * y + V[8] * z + V[12];
+      hy[i] = V[1] * x + V[5] * y + V[9] * z + V[13];
+      hz[i] = V[2] * x + V[6] * y + V[10] * z + V[14];
+    }
+
+    // every dot gets a spot on the picture: samples are drawn in proportion to toneWeight + tone (stratified,
+    // so the spread is even) and the dot is scattered over its sample's cell
+    const shadeOf = (j) => (s.shade ? Math.min(1, Math.max(0, s.shade[j] ?? 1)) : 1);
+    const cum = new Float64Array(n);
+    let acc = 0;
+    for (let j = 0; j < n; j++) cum[j] = acc += SHAPE.toneWeight + shadeOf(j);
+    const jit = Math.max(0, +s.jitter || 0);
+    const rx = new Float32Array(count);
+    const ry = new Float32Array(count);
+    const rz = new Float32Array(count);
+    const rs = new Float32Array(count);
+    const vid = new Uint32Array(count);
+    const dots = new Uint32Array(count);
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    for (let k = 0; k < count; k++) {
+      const u = ((k + Math.random()) / count) * acc;
+      let lo = 0;
+      let hi = n - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (cum[mid] < u) lo = mid + 1;
+        else hi = mid;
+      }
+      rx[k] = pts[lo * 3] + (Math.random() - 0.5) * jit;
+      ry[k] = pts[lo * 3 + 1] + (Math.random() - 0.5) * jit;
+      rz[k] = pts[lo * 3 + 2];
+      rs[k] = shadeOf(lo);
+      vid[k] = k;
+      dots[k] = k;
+      if (rx[k] < x0) x0 = rx[k];
+      if (rx[k] > x1) x1 = rx[k];
+    }
+    rankMatch(dots, hx, hy, vid, rx, ry);
+
+    // stagger key per dot (0 leaves first)
+    let d0 = Infinity;
+    let d1 = -Infinity;
+    const dist = SHAPE.key === "dist" ? new Float32Array(count) : null;
+    if (dist) {
+      for (let j = 0; j < count; j++) {
+        const i = dots[j];
+        const v = vid[j];
+        const d = Math.hypot(rx[v] - hx[i], ry[v] - hy[i], rz[v] - hz[i]);
+        dist[j] = d;
+        if (d < d0) d0 = d;
+        if (d > d1) d1 = d;
+      }
+    }
+    const xs = x1 - x0 || 1;
+    const ds = d1 - d0 || 1;
+    for (let j = 0; j < count; j++) {
+      const i = dots[j];
+      const v = vid[j];
+      flyA[i * 4] = rx[v];
+      flyA[i * 4 + 1] = ry[v];
+      flyA[i * 4 + 2] = rz[v];
+      shapeA[i * 2] = rs[v];
+      const xN = (rx[v] - x0) / xs;
+      shapeA[i * 2 + 1] = dist ? 1 - (dist[j] - d0) / ds : SHAPE.key === "far" ? 1 - xN : xN;
+    }
+    flyAttr.needsUpdate = true;
+    shapeAttr.needsUpdate = true;
+
+    // dot radius for the target coverage: 1 - exp(-density * pi * r^2) = coverage
+    const area = s.area > 0 ? s.area : n * jit * jit;
+    let radius = s.dotRadius > 0 ? s.dotRadius : 0;
+    if (!radius && area > 0) radius = Math.sqrt(-Math.log(1 - SHAPE.coverage) / (Math.PI * (count / area)));
+    uniforms.uShapeRadius.value = radius || DOT.radius;
+
+    if (!shape.on || !showingShape()) shape.alpha = 0;
+    shape.on = true;
+    syncShape(0);
+    syncProjection();
+    applyFly();
+    console.info(`[pointcloud] start shape: ${count} dots on ${n} samples, radius ${(uniforms.uShapeRadius.value * 1000).toFixed(3)} mm, ${(performance.now() - t0).toFixed(0)} ms`);
+    return active;
+  }
+
   function setActive(on) {
     if (disposed) return;
     active = !!on;
@@ -1106,6 +1399,14 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     disperse(opts) {
       return transition(false, opts?.durationMs ?? 1100);
     },
+    /**
+     * Start the fly-in from a picture drawn in dots (see setStartShape above); while dispersed the dots sit on
+     * it, and assemble() morphs them into the head. Null goes back to the shell (after a morph in progress).
+     */
+    setStartShape,
+    get hasStartShape() {
+      return shape.on;
+    },
     setHold(v) {
       uniforms.uHold.value = Math.max(0, Math.min(1, v || 0));
     },
@@ -1122,15 +1423,15 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     /** Call after the driver and head pose have been updated for this frame, before render. */
     update(dtMs) {
       if (!active || disposed) return;
-      if (!fly.anim && gone()) return; // nothing on stage: skip the deform entirely
+      if (shape.on) syncShape(dtMs);
+      if (!fly.anim && gone()) {
+        // nothing on stage but maybe the start picture, which needs no deform
+        if (shape.on) syncProjection();
+        return;
+      }
       const t0 = performance.now();
       const dtSec = Math.min(0.05, Math.max(0, (dtMs || 0) / 1000));
-      root.updateMatrixWorld(true);
-      for (const sk of skeletons) sk.update();
-      for (const e of entries) {
-        e.deformer.update();
-        if (e.prepass) syncPrepass(e);
-      }
+      pose();
       scatter(dtSec);
       springs(dtSec);
       place();
@@ -1138,9 +1439,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         measureFly();
         stepFly(dtMs);
       }
-      renderer.getDrawingBufferSize(size);
-      uniforms.uProj.value = size.y / 2 / Math.tan(THREE.MathUtils.degToRad((camera.fov || 30) / 2));
-      uniforms.uDpr.value = renderer.getPixelRatio();
+      syncProjection();
       // one-off cost report after the first few seconds
       stats.ms += performance.now() - t0;
       if (++stats.frames === 240) console.info(`[pointcloud] cpu ${(stats.ms / stats.frames).toFixed(2)} ms/frame for ${count} dots`);
