@@ -62,7 +62,10 @@ const SCATTER = {
   k: 90,
   c: 11,
   maxOffset: 0.009,
-  settle: 1.5e-4
+  settle: 1.5e-4,
+  // A push can carry a dot a little into the head (a concave spot, or the wake), where the depth prepass would
+  // hide it and leave a hole. Its depth is drawn this many times its offset nearer the camera, so every dot shows.
+  depthBias: 1.5
 };
 const PREPASS_OFFSET = { factor: 2, units: 4 };
 // dot size from the skin texture: darker texels (lips, brows, nostrils) get bigger dots, like the hologram style
@@ -155,6 +158,7 @@ const VERT = /* glsl */ `
 attribute vec3 aNormal;
 attribute vec4 aInfo; // x: size multiplier, y: kind, z: mouth weight, w: alpha
 attribute vec4 aFly; // xyz: fly-in start relative to the head centre, w: per-dot random in [0, 1)
+attribute float aDisp; // metres the pointer has pushed this dot (0 at rest)
 uniform float uProj; // device pixels per metre at one metre
 uniform float uDpr;
 uniform float uRadius;
@@ -272,6 +276,12 @@ void main() {
   float ps = clamp(px, minPx, ${DOT.maxPx.toFixed(1)} * uDpr);
   gl_PointSize = ps;
   gl_Position = projectionMatrix * mv;
+  if (aDisp > 0.0) {
+    // a pushed dot keeps its place on screen but its depth comes toward the camera, past the prepass
+    float dist = length(mv.xyz);
+    vec4 nearer = projectionMatrix * vec4(mv.xyz * (1.0 - min(0.5, ${SCATTER.depthBias.toFixed(2)} * aDisp / max(dist, 1e-3))), 1.0);
+    gl_Position.z = nearer.z / nearer.w * gl_Position.w;
+  }
   vRim = rim;
   vKind = aInfo.y;
   vMouth = aInfo.z;
@@ -760,6 +770,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   const positions = new Float32Array(count * 3);
   const normals = new Float32Array(count * 3);
   const offset = new Float32Array(count * 3);
+  const disp = new Float32Array(count); // |offset| per dot, for the shader's depth bias
   const vel = new Float32Array(count * 3);
   const activeIdx = new Uint32Array(count);
   const isActive = new Uint8Array(count);
@@ -776,6 +787,9 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   nrmAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("position", posAttr);
   geometry.setAttribute("aNormal", nrmAttr);
+  const dispAttr = new THREE.BufferAttribute(disp, 1);
+  dispAttr.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute("aDisp", dispAttr);
   const infoA = new Float32Array(info);
   geometry.setAttribute("aInfo", new THREE.BufferAttribute(infoA, 4));
   // fly-in starts: the shell, or (with a start shape) points on the picture in camera space
@@ -1032,12 +1046,15 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       if (settled) {
         offset[i * 3] = offset[i * 3 + 1] = offset[i * 3 + 2] = 0;
         vel[i * 3] = vel[i * 3 + 1] = vel[i * 3 + 2] = 0;
+        disp[i] = 0;
         isActive[i] = 0;
       } else {
+        disp[i] = Math.hypot(offset[i * 3], offset[i * 3 + 1], offset[i * 3 + 2]);
         activeIdx[w++] = i;
       }
     }
     activeCount = w;
+    dispAttr.needsUpdate = true;
   }
 
   function place() {
@@ -1418,6 +1435,8 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       reduced = !!on;
       if (reduced) {
         offset.fill(0);
+        disp.fill(0);
+        dispAttr.needsUpdate = true;
         vel.fill(0);
         isActive.fill(0);
         activeCount = 0;
