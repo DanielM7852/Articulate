@@ -35,3 +35,28 @@ test('wordFallbackLine: no practice or full coverage names the word', () => {
   expect(wordFallbackLine(spec, bad('clipped')).caption).toBe('That was a bit loud for me. Say track once more, a little softer.');
   expect(wordFallbackLine(spec, bad('too-short')).caption).toBe('That went by quickly. Say track once more, at an easy pace.');
 });
+
+test('wordFallbackLine: an all-hit part names the part label, like the backend', () => {
+  const hit = (zoneId: string, kind: 'stop' | 'vowel') => ({
+    zoneId,
+    phoneme: zoneId,
+    kind,
+    verdict: 'hit' as const,
+    dwellMs: 100,
+    startMs: 0,
+    endMs: 100,
+    evidence: {},
+  });
+  const ok: WordAttemptResult = {
+    word: 'track',
+    attemptId: 'y',
+    durationMs: 900,
+    quality: 'usable',
+    lipUsable: false,
+    zones: [hit('t', 'stop'), hit('r', 'stop'), hit('a', 'vowel'), hit('ck', 'stop')],
+  };
+  expect(wordFallbackLine(spec, ok, ['a']).caption).toBe('The a in track landed. Nice work.');
+  expect(wordFallbackLine(spec, ok, ['t', 'r']).caption).toBe('The tr in track landed. Nice work.');
+  expect(wordFallbackLine(spec, ok, ['t', 'r', 'a', 'ck']).caption).toBe('That part of track landed. Nice work.');
+  expect(wordFallbackLine(spec, ok).caption).toBe('Every part of track landed. Nice work.');
+});

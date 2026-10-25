@@ -23,6 +23,38 @@ class DecisionError(ValueError):
 
 _SHAMING = re.compile(r"\b(wrong|bad|fail(?:ed|s|ure)?|incorrect|terrible|awful|poor)\b", re.IGNORECASE)
 _BODY = re.compile(r"\b(lips?|jaw)\b", re.IGNORECASE)
+# Observation claims only: "I saw/noticed/watched/(could|can) see" followed in the clause by a body or attempt word.
+# Conversational "I see, good question" / "I see why you're asking" / "I see what you mean" do not match.
+_OBSERVED = re.compile(
+    r"\bI\s+(?:saw|see|noticed|watched|could\s+see|can\s+see)\b[^.!?]*?"
+    r"\b(?:lips?|jaw|mouth|tongue|face|you(?:r)?\s+(?:were|did|made|said|tried|moved|opened|\w+ed))\b",
+    re.IGNORECASE,
+)
+_BODY_PAST = re.compile(
+    r"\byour\s+(?:lips?|jaw|mouth)\s+(?:(?!(?:is|are)\b)\w+\s+)?(?:was|were|looked|moved|stayed|did|opened|rounded|spread)\b",
+    re.IGNORECASE,
+)
+_BODY_PRESENT = re.compile(r"\byour\s+(?:lips?|jaw|mouth)\s+(?:\w+\s+)?(?:is|are)\b", re.IGNORECASE)
+_BODY_JUDGED = re.compile(
+    r"\byour\s+(?:lips?|jaw|mouth)\s+(?:is|are)\s+(?:too|not|still|a\s+bit|slightly|very|quite|tight|tense|closed|wrong)\b",
+    re.IGNORECASE,
+)
+_BODY_NEG = re.compile(
+    r"\byour\s+(?:lips?|jaw|mouth)\s+(?:\w+\s+)?(?:didn[’']?t|did\s+not|never|wasn[’']?t|weren[’']?t)\b",
+    re.IGNORECASE,
+)
+_TARGET_FRAME = re.compile(r"\b(?:for\s+(?:ee|oo|ah)|when\s+you\s+(?:say|make))\b", re.IGNORECASE)
+
+
+def body_claim(text: str) -> bool:
+    """True when the text claims what the learner's lips/jaw/mouth did or looked like (instructions are fine)."""
+    # Past/observational/negated forms always claim; present is/are claims only without "for <sound>"/"when you
+    # say|make" framing, or when followed by a judgement word ("too", "not", "tight", ...).
+    if _BODY_PAST.search(text) or _OBSERVED.search(text) or _BODY_JUDGED.search(text) or _BODY_NEG.search(text):
+        return True
+    return bool(_BODY_PRESENT.search(text)) and not _TARGET_FRAME.search(text)
+
+
 _TONGUE = re.compile(r"\btongue\b", re.IGNORECASE)
 _TONGUE_CLAIM = re.compile(
     r"\btongue\s+(?:\w+\s+)?(?:was|were|is|are|has|had|stayed|moved|went|did|sat|touched|rose|dropped|\w+ed)\b",
@@ -232,6 +264,16 @@ def _mentions_label(text: str, label: str) -> bool:
     return re.search(pattern, text, re.IGNORECASE) is not None
 
 
+def normalize_word_cue(decision: CoachDecision) -> CoachDecision:
+    """The cue is code-owned: a non-null cueId that is not the focus zone's cue is replaced by it (None if it has none)."""
+    if decision.cueId is None:
+        return decision
+    cue = ZONE_CUE.get(decision.focusZoneId) if decision.focusZoneId is not None else None
+    if cue == decision.cueId:
+        return decision
+    return decision.model_copy(update={"cueId": cue})
+
+
 def validate_word_decision(
     decision: CoachDecision,
     word: WordAttempt,
@@ -268,7 +310,7 @@ def validate_word_decision(
         raise DecisionError("number_not_in_evidence")
     if _SHAMING.search(text):
         raise DecisionError("shaming_language")
-    if not word.lipUsable and _BODY.search(text):
+    if not word.lipUsable and body_claim(text):
         raise DecisionError("body_claim_without_video")
     # Tongue instructions are the point of word coaching; claims about what the tongue did are not measured.
     if _TONGUE_CLAIM.search(text):
@@ -342,7 +384,7 @@ def word_fallback_line(
         if practice is not None:
             return (
                 f"The board marked the practised part of {name} as hit.",
-                f"That part of {name} landed. Nice work.",
+                f"The {part} in {name} landed. Nice work." if (part := _practice_label(word, practice)) else f"That part of {name} landed. Nice work.",
                 None,
             )
         return f"The board marked every part of {name} as hit.", f"Every part of {name} landed. Nice work.", None

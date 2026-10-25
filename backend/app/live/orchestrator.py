@@ -21,6 +21,7 @@ from app.live import llm
 from app.live.decision import (
     evidence_candidates,
     fallback_decision,
+    normalize_word_cue,
     show_side_view,
     validate_decision,
     validate_word_decision,
@@ -442,6 +443,7 @@ async def _decide_word(
             )
             t1 = time.perf_counter()
             timings["llm"] = _ms(t0, t1)
+            decision = normalize_word_cue(decision)
             evidence = validate_word_decision(decision, word, score, candidates, practice)
             timings["validate"] = _ms(t1, time.perf_counter())
             return "agent", decision, evidence
@@ -481,7 +483,19 @@ async def coach_attempt(
     context.attempts = [a for a in context.attempts if a.get("attemptId") != body.attemptId]
 
     word_score = score_word(body.word, _practice_ids(body)) if body.word is not None else None
-    if word_score is not None:
+    if word_score is not None and word_score.verdict == "on_target":
+        # The local judge already passed every counted zone: no Praat, Azure or model call; GPT is only for errors.
+        logger.info("live word coach: local pass, cloud skipped")
+        wav = None
+        timings["llm"] = 0
+        t_v = time.perf_counter()
+        candidates = word_evidence_candidates(body.word, word_score)
+        decision, evidence = word_fallback_decision(body.word, word_score, candidates, _practice_ids(body))
+        timings["validate"] = _ms(t_v, time.perf_counter())
+        source = "fallback"
+        focus = decision.focusZoneId
+        side = word_show_side_view(focus, decision.nextAction)
+    elif word_score is not None:
         decoded = decode_attempt_audio(body)
         wav = decoded if llm.is_openai(deps.settings) else None
         t_ac = time.perf_counter()

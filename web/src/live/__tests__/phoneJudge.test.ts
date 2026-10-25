@@ -12,6 +12,8 @@ import {
   parsePhoneResponse,
   scorePhones,
   unitPhoneZones,
+  isLoneVowelUnit,
+  loneVowelVerdict,
   verdictFromScore,
   type PhoneScoreResponse,
 } from '../phoneJudge';
@@ -39,11 +41,13 @@ const result = (over: Partial<WordAttemptResult> = {}): WordAttemptResult => ({
 const unit = (id: string, zoneIds: string[]): GhostUnit => ({ id, label: id, zoneIds, partIds: [] });
 const tgt = (p: string, post: number, startMs = 300, endMs = 380, gop = 1) => ({ p, startMs, endMs, peakMs: startMs + 20, post, gop, best: p, bestPost: post });
 const resp = (targets: ReturnType<typeof tgt>[]): PhoneScoreResponse => ({ targets, phones: [] });
+const full = unit('track', ['t', 'r', 'a', 'k']);
 const verdictOf = (r: WordAttemptResult, id: string) => r.zones.find((z) => z.zoneId === id)!.verdict;
 
 test('phone thresholds map post to hit/partial/miss (gop positive)', () => {
-  const u = unit('a', ['a']);
-  const at = (post: number) => verdictOf(applyPhoneJudgement(result(), u, resp([tgt('æ', post)]), 0), 'a');
+  const u = unit('track', ['t', 'r', 'a', 'k']);
+  const at = (post: number) =>
+    verdictOf(applyPhoneJudgement(result(), u, resp([tgt('t', 0.9), tgt('ɹ', 0.9), tgt('æ', post), tgt('k', 0.9)]), 0), 'a');
   expect(at(PHONE_HIT_POST)).toBe('hit');
   expect(at(0.99)).toBe('hit');
   expect(at(PHONE_HIT_POST - 0.01)).toBe('partial');
@@ -78,7 +82,36 @@ test('calibration: accents and weak phones', () => {
 
 test('applyPhoneJudgement uses gop and the zone kind', () => {
   const r = applyPhoneJudgement(result(), unit('a', ['a']), resp([tgt('æ', 0.03, 300, 380, -3.9)]), 0);
-  expect(verdictOf(r, 'a')).toBe('partial');
+  expect(verdictOf(r, 'a')).toBe('hit'); // lone vowel part: partial counts as hit
+  const whole = applyPhoneJudgement(result(), full, resp([tgt('t', 0.9), tgt('ɹ', 0.9), tgt('æ', 0.03, 300, 380, -3.9), tgt('k', 0.9)]), 0);
+  expect(verdictOf(whole, 'a')).toBe('partial');
+});
+
+test('lone vowel part: partial counts as hit, a real miss stays a miss', () => {
+  const a = unit('a', ['a']);
+  const at = (post: number, gop: number, u = a, res = result()) => {
+    const targets = unitPhoneZones('track', u).map((z) => (z.zoneId === 'a' ? tgt('æ', post, 300, 380, gop) : tgt(z.phone, 0.9)));
+    return verdictOf(applyPhoneJudgement(res, u, resp(targets), 0), 'a');
+  };
+  expect(at(0.16, -1.26)).toBe('hit');
+  expect(at(0.05, -6)).toBe('miss');
+  expect(at(0.05, -3)).toBe('hit'); // gop > -4
+  expect(at(0.16, -1.26, full)).toBe('partial'); // same score in the whole word stays strict
+  expect(at(0.9, 1, full)).toBe('hit');
+  expect(loneVowelVerdict(0.16, -1.26)).toBe('hit');
+  expect(loneVowelVerdict(0.05, -6)).toBe('miss');
+  expect(isLoneVowelUnit(a, result().zones)).toBe(true);
+  expect(isLoneVowelUnit(full, result().zones)).toBe(false);
+  expect(isLoneVowelUnit(unit('k', ['k']), result().zones)).toBe(false);
+});
+
+test('consonant parts keep the strict rule', () => {
+  const k = unit('k', ['k']);
+  const at = (post: number, gop: number) => verdictOf(applyPhoneJudgement(result(), k, resp([tgt('k', post, 300, 380, gop)]), 0), 'k');
+  expect(at(0.16, -1.26)).toBe('partial');
+  expect(at(0.47, -0.1)).toBe('partial');
+  expect(at(0.05, -6)).toBe('miss');
+  expect(at(0.5, 0)).toBe('hit');
 });
 
 test('only the unit zones change and advisory/kind are kept', () => {
@@ -107,7 +140,6 @@ const unclearTrack = (reason: WordAttemptResult['qualityReason']): WordAttemptRe
     durationMs: 0,
     zones: [skippedZone('t', 't', 'stop'), skippedZone('r', 'r', 'liquid'), skippedZone('a', 'ae', 'vowel'), skippedZone('k', 'k', 'stop')],
   });
-const full = unit('track', ['t', 'r', 'a', 'k']);
 
 test('canPhoneRescue only for unclear no-voice / too-short', () => {
   expect(canPhoneRescue(unclearTrack('no-voice'))).toBe(true);

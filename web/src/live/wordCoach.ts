@@ -103,6 +103,14 @@ export interface FallbackSpec {
   zones: { id: string; label: string }[];
 }
 
+/** Joined labels of the practised zones when they are a strict part of the word (the backend's _practice_label), else null. */
+function partLabel(spec: FallbackSpec, practice?: string[] | null): string | null {
+  if (!practice || practice.length === 0) return null;
+  const part = spec.zones.filter((z) => practice.includes(z.id));
+  if (part.length === 0 || part.length >= spec.zones.length) return null;
+  return part.map((z) => z.label).join('') || null;
+}
+
 /** What the learner is asked to say: the practised part ("the tr in track") or the whole word. */
 function spokenName(spec: FallbackSpec, word: string, practice?: string[] | null): string {
   if (!practice || practice.length === 0) return word;
@@ -131,7 +139,8 @@ export function wordFallbackLine(
   }
   const id = score.weakestZoneId;
   if (!id) {
-    return { caption: practice ? `That part of ${word} landed. Nice work.` : `Every part of ${word} landed. Nice work.`, focusZoneId: null };
+    const part = partLabel(spec, practice);
+    return { caption: part ? `The ${part} in ${word} landed. Nice work.` : practice ? `That part of ${word} landed. Nice work.` : `Every part of ${word} landed. Nice work.`, focusZoneId: null };
   }
   const zone = result.zones.find((z) => z.zoneId === id)!;
   const label = spec.zones.find((z) => z.id === id)?.label ?? zone.phoneme;

@@ -76,6 +76,20 @@ export function verdictFromScore(post: number, gop: number, kind: ZoneResult['ki
   return 'miss';
 }
 
+/**
+ * A part that is one vowel zone (the a in track). Cut out of the word, a vowel alone is scored on far less context and
+ * often lands at partial (a correct æ: 2/10 hit alone vs 7/10 in the word), so it is judged leniently.
+ */
+export function isLoneVowelUnit(unit: GhostUnit, zones: readonly { zoneId: string; kind: ZoneResult['kind'] }[]): boolean {
+  if (unit.zoneIds.length !== 1) return false;
+  return zones.some((z) => z.zoneId === unit.zoneIds[0] && z.kind === 'vowel');
+}
+
+/** Verdict for a lone vowel part: what verdictFromScore calls partial counts as a hit, below that stays a miss. */
+export function loneVowelVerdict(post: number, gop: number): ZoneVerdict {
+  return verdictFromScore(post, gop, 'vowel') === 'miss' ? 'miss' : 'hit';
+}
+
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** Validates the service payload; null when it is not shaped as the contract says. */
@@ -150,6 +164,7 @@ export function applyPhoneJudgement(
     const heard = response.targets.filter((t) => t.post >= PHONE_PARTIAL_POST).length;
     if (heard < Math.ceil(response.targets.length / 2)) return result;
   }
+  const lone = isLoneVowelUnit(unit, result.zones);
   const byZone = new Map(zones.map((z, i) => [z.zoneId, response.targets[i]]));
   const out: ZoneResult[] = result.zones.map((z) => {
     const t = byZone.get(z.zoneId);
@@ -168,7 +183,7 @@ export function applyPhoneJudgement(
       if (Object.keys(evidence).length <= MAX_EVIDENCE_KEYS) break;
       if (!(k in mine)) delete evidence[k];
     }
-    return { ...z, verdict: verdictFromScore(t.post, t.gop, z.kind), startMs, endMs, dwellMs: Math.max(0, endMs - startMs), evidence };
+    return { ...z, verdict: lone && z.kind === 'vowel' ? loneVowelVerdict(t.post, t.gop) : verdictFromScore(t.post, t.gop, z.kind), startMs, endMs, dwellMs: Math.max(0, endMs - startMs), evidence };
   });
   if (rescue) {
     // The tracker's duration is too short here; the aligned phones span the word, so the coach clip covers all of it.

@@ -83,8 +83,12 @@ def test_part_attempt_skips_azure(tmp_path, monkeypatch, part):
     mock_assess(monkeypatch, calls=calls)
     b = body()
     b["practiceZoneIds"] = part
+    for z in b["word"]["zones"]:  # a local pass skips every cloud call, so the practised zones must not all hit
+        if z["zoneId"] in part:
+            z["verdict"] = "miss"
     fake = FakeClient(word_decision())
     r = anthropic_client(tmp_path, fake, **SETTINGS).post("/v1/live/coach", json=b)
+    assert fake.calls
     assert calls == []
     assert "azure" not in payload(anthropic_text(fake.calls[0]))
     assert "azure" not in r.json()["timingsMs"]

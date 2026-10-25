@@ -12,6 +12,8 @@ export interface GhostZoneSpec {
   label: string;
   kind: ZoneKind;
   hint: string;
+  /** Vowel zones only: a common word with the same sound, so a lone vowel is not read as its letter name. */
+  example?: string;
 }
 
 export interface GhostPartSpec {
@@ -34,7 +36,7 @@ const TRACK: GhostWordSpec = {
   zones: [
     { id: 't', phoneme: 't', label: 't', kind: 'stop', hint: 'Tongue tip up behind the teeth, then let go.' },
     { id: 'r', phoneme: 'r', label: 'r', kind: 'liquid', hint: R_HINT },
-    { id: 'a', phoneme: 'ae', label: 'a', kind: 'vowel', hint: 'Jaw open, tongue low and forward.' },
+    { id: 'a', phoneme: 'ae', label: 'a', kind: 'vowel', hint: 'Jaw open, tongue low and forward.', example: 'cat' },
     { id: 'k', phoneme: 'k', label: 'ck', kind: 'stop', hint: 'Back of the tongue up, then release.' },
   ],
   parts: [
@@ -48,7 +50,7 @@ const SHEEP: GhostWordSpec = {
   word: 'sheep',
   zones: [
     { id: 'sh', phoneme: 'sh', label: 'sh', kind: 'fricative', hint: 'Lips pushed forward, a wide soft hiss.' },
-    { id: 'ee', phoneme: 'iy', label: 'ee', kind: 'vowel', hint: 'Lips spread, tongue high and forward.' },
+    { id: 'ee', phoneme: 'iy', label: 'ee', kind: 'vowel', hint: 'Lips spread, tongue high and forward.', example: 'see' },
     { id: 'p', phoneme: 'p', label: 'p', kind: 'stop', hint: 'Close both lips, then pop them open.' },
   ],
   parts: [
@@ -62,7 +64,7 @@ const RENT: GhostWordSpec = {
   word: 'rent',
   zones: [
     { id: 'r', phoneme: 'r', label: 'r', kind: 'liquid', hint: R_HINT },
-    { id: 'e', phoneme: 'eh', label: 'e', kind: 'vowel', hint: 'Jaw half open, tongue mid and forward.' },
+    { id: 'e', phoneme: 'eh', label: 'e', kind: 'vowel', hint: 'Jaw half open, tongue mid and forward.', example: 'bed' },
     { id: 'n', phoneme: 'n', label: 'n', kind: 'nasal', hint: N_HINT },
     { id: 't', phoneme: 't', label: 't', kind: 'stop', hint: 'Tongue tip up behind the teeth, then let go.' },
   ],
@@ -78,7 +80,7 @@ const BRAIN: GhostWordSpec = {
   zones: [
     { id: 'b', phoneme: 'b', label: 'b', kind: 'stop', hint: 'Close both lips with voice on, then open them.' },
     { id: 'r', phoneme: 'r', label: 'r', kind: 'liquid', hint: R_HINT },
-    { id: 'ai', phoneme: 'ey', label: 'ai', kind: 'vowel', hint: 'Start mid, then glide the tongue up and forward.' },
+    { id: 'ai', phoneme: 'ey', label: 'ai', kind: 'vowel', hint: 'Start mid, then glide the tongue up and forward.', example: 'rain' },
     { id: 'n', phoneme: 'n', label: 'n', kind: 'nasal', hint: N_HINT },
   ],
   parts: [
@@ -94,3 +96,22 @@ export const GHOST_WORDS: Record<string, GhostWordSpec> = {
   rent: RENT,
   brain: BRAIN,
 };
+
+/** The example word when a unit is one vowel zone ("cat" for the a in track); undefined for anything else. */
+export function loneVowelExample(spec: GhostWordSpec, zoneIds: readonly string[]): string | undefined {
+  if (zoneIds.length !== 1) return undefined;
+  const z = spec.zones.find((x) => x.id === zoneIds[0]);
+  return z && z.kind === 'vowel' ? z.example : undefined;
+}
+
+/** The ask for a part. A lone vowel with an example gets the word and the example ("the a in track, like in cat"); anything else is just the label. */
+export function partPrompt(spec: GhostWordSpec, unit: { label: string; zoneIds: readonly string[] }): { label: string; lead: string; tail: string | null; spoken: string } {
+  const example = loneVowelExample(spec, unit.zoneIds);
+  if (!example) return { label: unit.label, lead: '', tail: null, spoken: `Say ${unit.label}.` };
+  return {
+    label: unit.label,
+    lead: 'the ',
+    tail: ` in ${spec.word}, like in “${example}”`,
+    spoken: `Say the ${unit.label} in ${spec.word}, like in ${example}.`,
+  };
+}

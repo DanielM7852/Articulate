@@ -23,7 +23,7 @@ import { isClose, unitDurationMs } from '../game/ghost/follow';
 import { ghostModel } from '../game/ghost/models';
 import { MAX_TRIES, lessonPlan, nextStep, skipStep, startProgress, stepLabel, type LessonStep, type ProgressResult, type ProgressState } from '../game/ghost/plan';
 import { DEFAULT_FACTOR } from '../game/ghost/voice';
-import { GHOST_WORDS, type GhostWordSpec } from '../game/ghost/words';
+import { GHOST_WORDS, partPrompt, type GhostWordSpec } from '../game/ghost/words';
 import type { WordAttemptResult } from '../game/types';
 import { useAppState } from '../state/AppState';
 import { learnerProfileId } from '../state/learnerId';
@@ -133,10 +133,11 @@ const lessonContext = (word: string) =>
   `[app] Lesson context: the practice word is "${word}". The lesson goes one part of the word at a time, then joins the parts back into the whole word. ` +
   'The app runs the lesson and the ghost board measures every try. ' +
   'Stay silent until the app sends you a coaching result or the learner speaks to you between tries.';
-const stepMessage = (word: string, step: LessonStep) =>
-  step.kind === 'word'
-    ? `[app] Now practising the whole word "${word}".`
-    : `[app] Now practising the "${step.unit.label}" part of "${word}".`;
+const stepMessage = (spec: GhostWordSpec, step: LessonStep) => {
+  if (step.kind === 'word') return `[app] Now practising the whole word "${spec.word}".`;
+  const ask = partPrompt(spec, step.unit);
+  return `[app] Now practising the "${ask.label}" part of "${spec.word}".` + (ask.tail ? ` Ask for it like this: "${ask.spoken}" Never say just the letter name.` : '');
+};
 const wordDoneMessage = (word: string, next: string | null) =>
   `[app] The word "${word}" is complete and the board is off. ` +
   (next ? `The learner can press the button for "${next}" or Finish. ` : 'The learner can press Finish. ') +
@@ -519,7 +520,7 @@ export default function WordLesson() {
     const { spec: word, plan: steps } = cur.current;
     a.sendAppMessage(lessonContext(word.word), false);
     const step = steps[shownStep.current];
-    if (step && phaseRef.current !== 'setup' && phaseRef.current !== 'voice' && phaseRef.current !== 'done') a.sendAppMessage(stepMessage(word.word, step), false);
+    if (step && phaseRef.current !== 'setup' && phaseRef.current !== 'voice' && phaseRef.current !== 'done') a.sendAppMessage(stepMessage(word, step), false);
   }, []);
 
   /** Wait for the board's watch to end (onWatchEnd), or give up a little after its own length. */
@@ -601,7 +602,7 @@ export default function WordLesson() {
       takeFloor(true);
       setPhase('intro');
       if (!(await gateAva(my))) return;
-      if (realtimeActive()) avaRef.current.sendAppMessage(stepMessage(word.word, step), false);
+      if (realtimeActive()) avaRef.current.sendAppMessage(stepMessage(word, step), false);
       const intro = introLine(word, step);
       if (!(await line(intro.text, intro.side, intro.cueId))) return;
       newAttempt();
@@ -1263,11 +1264,12 @@ export default function WordLesson() {
   const canReplay = hasSide && ((phase === 'live' && !spoke) || phase === 'done' || (phase === 'coaching' && talking) || (phase === 'cue' && !step.practisable));
 
   const where = stepLabel(plan, stepIdx);
+  const ask = step.kind === 'part' ? partPrompt(spec, step.unit) : { label: spec.word, lead: '', tail: null, spoken: `Say ${spec.word}.` };
   const statusText =
     phase === 'voice'
       ? 'Voice check'
       : phase === 'coaching' && talking
-        ? `Say “${step.unit.label}”, or ask Ava a question`
+        ? `Say ${ask.lead}“${step.unit.label}”${ask.tail ?? ''}, or ask Ava a question`
         : phase === 'live'
           ? `Your turn · ${where}`
           : phase === 'done'
@@ -1378,7 +1380,9 @@ export default function WordLesson() {
         <StepHeading
           title={
             <>
-              Say <span className="navy">“{step.kind === 'part' ? step.unit.label : spec.word}”</span>
+              Say {ask.lead}
+              <span className="navy">“{step.kind === 'part' ? step.unit.label : spec.word}”</span>
+              {ask.tail}
             </>
           }
         />

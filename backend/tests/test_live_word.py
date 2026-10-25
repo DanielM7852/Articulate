@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 
 from app.live.decision import (
     DecisionError,
+    body_claim,
+    normalize_word_cue,
     validate_word_decision,
     word_evidence_candidates,
     word_fallback_decision,
@@ -206,11 +208,48 @@ def test_listening_language_fails():
         check(word_decision(caption="Listen to the ck at the end. Back of the tongue up, then release."))
 
 
-def test_lips_and_jaw_need_the_camera():
-    d = word_decision(focusZoneId="a", caption="The a needs more room. Drop your jaw a little more.")
+def test_lips_and_jaw_claims_need_the_camera():
+    d = word_decision(focusZoneId="a", caption="The a needs more room. Your jaw stayed closed on the a.")
     with pytest.raises(DecisionError, match="body_claim_without_video"):
         check(d)
     check(d, attempt(lip=True, **MISSING_CK))
+
+
+def test_lips_and_jaw_instructions_pass_without_the_camera():
+    check(word_decision(focusZoneId="a", caption="Drop your jaw and say track."))
+    check(word_decision(focusZoneId="a", caption="Open your jaw a little for the a in track."))
+    check(word_decision(focusZoneId="a", caption="Round your lips, then say track."))
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Your jaw is too closed.", "Your lips were spread.", "I saw your jaw drop.", "Your jaw stayed closed on the a."],
+)
+def test_body_claim_detects_claims(text):
+    assert body_claim(text)
+
+
+@pytest.mark.parametrize("text", ["Drop your jaw.", "Round your lips.", "Open your jaw a little for the a in track."])
+def test_body_claim_allows_instructions(text):
+    assert not body_claim(text)
+
+
+def test_normalize_word_cue():
+    assert normalize_word_cue(word_decision(cueId="open-jaw", focusZoneId="k")).cueId is None  # tongue zone
+    assert normalize_word_cue(word_decision(cueId="spread-lips", focusZoneId="a")).cueId == "open-jaw"
+    assert normalize_word_cue(word_decision(cueId="open-jaw", focusZoneId=None)).cueId is None
+    assert normalize_word_cue(word_decision(cueId="open-jaw", focusZoneId="a")).cueId == "open-jaw"
+    assert normalize_word_cue(word_decision(cueId=None, focusZoneId="a")).cueId is None
+
+
+def test_advisory_focus_praise_still_rejected():
+    a = attempt(**MISSING_CK)
+    a = a.model_copy(update={"zones": [z.model_copy(update={"advisory": True}) if z.zoneId == "r" else z for z in a.zones]})
+    s = score_word(a)
+    with pytest.raises(DecisionError, match="judged_advisory_zone"):
+        validate_word_decision(
+            word_decision(focusZoneId="r", caption="Nice, you nailed the r in track."), a, s, word_evidence_candidates(a, s)
+        )
 
 
 def test_tongue_claims_fail_but_instructions_pass():
@@ -374,3 +413,52 @@ def test_route_vowel_path_unchanged_without_word(tmp_path):
     data = client_for(tmp_path).post("/v1/live/coach", json=body).json()
     assert data["word"] is None and data["focusZoneId"] is None
     assert data["audio"]["verdict"] == "insufficient"
+
+
+def test_route_agent_wrong_cue_is_normalized_not_rejected(tmp_path):
+    fake = FakeClient(parsed=word_decision(cueId="open-jaw", caption="Almost there. For the ck, lift the back of the tongue, then release."))
+    data = client_for(tmp_path, fake).post("/v1/live/coach", json=coach_body(attempt_dict(**MISSING_CK))).json()
+    assert data["source"] == "agent" and data["focusZoneId"] == "k" and data["cueId"] is None
+
+
+def test_route_on_target_skips_every_cloud_call(tmp_path, monkeypatch):
+    async def boom(*a, **k):
+        raise AssertionError("cloud call on a local pass")
+
+    monkeypatch.setattr("app.live.orchestrator._measure_acoustics", boom)
+    monkeypatch.setattr("app.live.orchestrator._assess_azure", boom)
+    fake = FakeClient(parsed=word_decision(focusZoneId=None, nextAction="next_sound", caption="track"))
+    r = client_for(tmp_path, fake).post("/v1/live/coach", json=coach_body(attempt_dict()))
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert fake.calls == []
+    assert data["source"] == "fallback" and data["nextAction"] == "next_sound" and data["word"]["verdict"] == "on_target"
+
+
+def test_route_off_attempt_still_calls_the_model(tmp_path):
+    fake = FakeClient(parsed=word_decision(caption="Almost there. For the ck, lift the back of the tongue, then release."))
+    data = client_for(tmp_path, fake).post("/v1/live/coach", json=coach_body(attempt_dict(**MISSING_CK))).json()
+    assert len(fake.calls) == 1 and data["source"] == "agent"
+
+
+@pytest.mark.parametrize(
+    "text", ["Your jaw didn't open on the a.", "Your lips never closed for the k.", "Your jaw did not drop."]
+)
+def test_body_claim_flags_negated_claims(text):
+    assert body_claim(text)
+
+
+def test_negated_jaw_claim_rejected_without_camera():
+    with pytest.raises(DecisionError, match="body_claim_without_video"):
+        check(word_decision(focusZoneId="a", caption="The a needs room. Your jaw did not drop."))
+
+
+def test_on_target_part_caption_names_the_part():
+    a = attempt()
+    for practice, expected in [(["t", "r"], "The tr in track landed. Nice work."), (None, "Every part of track landed. Nice work.")]:
+        s = score_word(a, practice)
+        _, caption, focus = word_fallback_line(a, s, practice)
+        assert caption == expected and focus is None
+        cands = word_evidence_candidates(a, s)
+        d, ev = word_fallback_decision(a, s, cands, practice)
+        assert validate_word_decision(d, a, s, cands, practice) == ev
