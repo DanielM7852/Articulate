@@ -1604,6 +1604,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
     },
     destroy() {
       cancelAnimationFrame(raf);
+      dotFace.dispose(); // frees the face's WebGL context now; browsers cap how many can be live
       observer?.disconnect();
       window.removeEventListener('resize', resize);
       document.removeEventListener('fullscreenchange', resize);
