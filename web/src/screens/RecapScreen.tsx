@@ -55,9 +55,12 @@ function EmailBox({ status, onUpdate, recapId }: { status: RecapStatus; onUpdate
       onUpdate(await emailRecap(recapId, learnerProfileId(), address));
       setChanging(false);
     } catch (err) {
-      setError(err instanceof RecapHttpError && err.status === 422
+      const status = err instanceof RecapHttpError ? err.status : null;
+      setError(status === 422
         ? "That doesn't look like an email address. Check it and try again."
-        : "Couldn't send that request. Try again in a moment.");
+        : status === 404 || status === 403
+          ? "This recap has expired. Finish a lesson to get a new one."
+          : "Couldn't send that request. Try again in a moment.");
     } finally {
       setBusy(false);
     }
