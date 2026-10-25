@@ -5,9 +5,10 @@ import '../styles/phone-strip.css';
 const DEFAULT_TARGETS = ['t', 'ɹ', 'æ', 'k'];
 const VISIBLE = 14;
 
-/** r and ɹ are the same target; everything else compares as-is. */
+/** r and ɹ are the same target, and an aspirated stop (KoelLabs emits kʰ, pʰ) counts as the plain one. */
 function norm(p: string): string {
-  return p === 'r' ? 'ɹ' : p;
+  const q = p.endsWith('ʰ') ? p.slice(0, -1) : p;
+  return q === 'r' ? 'ɹ' : q;
 }
 
 export interface PhoneStripProps {

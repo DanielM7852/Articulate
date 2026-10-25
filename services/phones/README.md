@@ -23,6 +23,11 @@ export HF_TOKEN=...            # gated model; or `hf auth login`
 .venv/Scripts/python.exe scripts/bench.py
 ```
 
+Measured with KoelLabs on an RTX 5070 Ti: TensorRT FP16 agrees with PyTorch fp32 on 99.8% of argmax frames
+(no FP32 pinning needed), about 3.8 ms per 2 s window. Its vocab is 79 symbols (the fallback has 392): no length or
+stress marks, aspiration as separate tokens (`kʰ`, `pʰ`), affricates without tie bars (`tʃ`, `dʒ`). The web
+PhoneStrip folds `r` to `ɹ` and aspirated stops to the plain stop.
+
 If FP16 diverges, rebuild with `build_engine.py --fp32-layers "regex"` to pin matching layers (plus all
 normalization/softmax layers) to FP32.
 
