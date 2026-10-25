@@ -16,13 +16,35 @@
   display: block;
   pointer-events: none;
 }
+
+/* The labels live in the same 1600 x 900 space as the canvas. Scale them from the
+   top-left so a short, wide console does not slide the right-hand nodes off screen. */
 .dash-stage {
   position: absolute;
-  left: 0;
   top: 0;
+  left: 0;
   width: 1600px;
   height: 900px;
   transform-origin: 0 0;
+}
+.dash--embedded {
+  position: absolute;
+  inset: 0;
+}
+
+/* 2026-10-25: the embedded graph kept its own header, which repeated the console and shortened the drawing.
+.dash--embedded .dash-brand img,
+.dash--embedded .dash-brand h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+*/
+
+.dash--embedded .dash-head {
+  display: none;
 }
 
 /* ---------- Header ---------- */
@@ -157,10 +179,13 @@
 .dash-node[data-align='right'] {
   text-align: right;
 }
+/* the tag wraps under the name in a narrow annotation instead of splitting it */
 .dash-node__name {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  column-gap: 8px;
+  white-space: nowrap;
   font-family: var(--font-serif);
   font-weight: 400;
   font-size: 17px;
@@ -187,11 +212,28 @@
   color: var(--color-muted);
 }
 .dash-node--claude .dash-node__name {
-  font-size: 24px;
-  line-height: 28px;
+  font-size: 21px;
+  line-height: 26px;
+}
+/* a part the backend reported off: its label steps back with its pale cluster */
+.dash-node[data-standby] .dash-node__name,
+.dash-node[data-standby] .dash-node__cap {
+  opacity: 0.6;
+}
+/* the coach's caption shares its name row when it fits (it drops below a long name), so the card stays short beside
+   the learner's lines */
+.dash-node--claude {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
 }
 .dash-node--claude .dash-node__cap {
-  font-size: 13px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.dash-node--claude .dash-card {
+  flex-basis: 100%;
 }
 
 /* ---------- Cards ---------- */
@@ -265,24 +307,28 @@
   color: var(--color-warn);
 }
 
-/* MediaPipe wireframe (drawn by the canvas engine; 200 x 200 design px inside a 226 px card) */
-.dash-card--mesh {
-  padding: 10px 12px 9px;
+/* MediaPipe face (drawn by the canvas engine, 280 x 280 design px): no card, it floats on the paper like the
+   clusters, with its readouts as plain captions underneath, flush with the right-aligned label */
+.dash-mesh {
+  width: 280px;
+  margin: 2px 0 0 auto;
+  text-align: right;
 }
 .dash-wire {
   display: block;
-  width: 200px;
-  height: 200px;
-  margin-bottom: 7px;
+  width: 280px;
+  height: 280px;
+  margin-bottom: 2px;
   /* own layer: redrawing it at 60 Hz must not repaint the whole stage */
   will-change: transform;
 }
-.dash-card--mesh .dash-kv {
-  padding-top: 6px;
-  border-top: 1px solid var(--color-line);
+.dash-mesh .dash-kv {
+  grid-template-columns: repeat(4, auto);
+  justify-content: end;
+  gap: 1px 14px;
 }
-.dash-card--mesh .dash-meta {
-  margin-top: 4px;
+.dash-mesh .dash-meta {
+  margin-top: 1px;
 }
 .dash-kv {
   margin: 0;
@@ -307,27 +353,14 @@
   font-weight: 600;
 }
 
-/* audio envelope */
-.dash-spark {
+/* audio waveform: a dot band drawn by WaveCanvas (waveCloud.ts), which sizes the bitmap for the device */
+.dash-wave {
   display: block;
   width: 100%;
-  height: 30px;
+  height: 36px;
   margin-bottom: 3px;
+  /* own layer: redrawing it while the wave eases must not repaint the whole stage */
   will-change: transform;
-}
-.dash-spark__bar,
-.dash-spark__level {
-  fill: var(--color-navy);
-  opacity: 0.85;
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  transition: transform 110ms linear;
-}
-.dash-spark__level {
-  opacity: 1;
-}
-.dash-spark__track {
-  fill: var(--color-navy-soft);
 }
 .dash-unit--inline {
   margin-left: -6px;
@@ -351,6 +384,16 @@
   opacity: 0.45;
 }
 
+/* acoustics: three F0 readings in a narrow card */
+.dash-node--pitch .dash-readout {
+  gap: 7px;
+}
+
+/* Ava's head: a status line and its driver, no card */
+.dash-head-state .dash-meta {
+  margin-top: 1px;
+}
+
 /* backend */
 .dash-big {
   font-family: var(--font-serif);
@@ -371,6 +414,11 @@
   font-size: 15px;
   color: var(--color-muted);
 }
+/* "standby · no collector" and the like on one line of a narrow card */
+.dash-standby[data-small] {
+  font-size: 13px;
+  white-space: nowrap;
+}
 .dash-bars {
   margin: 0;
   padding: 0;
@@ -380,14 +428,16 @@
 }
 .dash-bars li {
   display: grid;
-  grid-template-columns: 72px 1fr 28px;
+  grid-template-columns: 72px 1fr 32px;
   align-items: center;
   gap: 8px;
   font-size: 10.5px;
   line-height: 13px;
   color: var(--color-muted);
 }
+/* signed bars centred on zero: --v in -1..1 grows the fill right (positive) or, mirrored, left (negative) */
 .dash-bars i {
+  position: relative;
   display: block;
   height: 5px;
   border-radius: 3px;
@@ -396,13 +446,25 @@
 }
 .dash-bars i::before {
   content: '';
-  display: block;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 50%;
   height: 100%;
-  border-radius: 3px;
+  border-radius: 0 3px 3px 0;
   background: var(--color-navy);
   transform: scaleX(var(--v, 0));
   transform-origin: 0 50%;
   transition: transform var(--dur-enter) var(--ease-out);
+}
+.dash-bars i::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  background: var(--color-navy-mist);
 }
 .dash-bars b {
   text-align: right;
@@ -417,6 +479,7 @@
 }
 .dash-claude__top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -436,22 +499,22 @@
   background: var(--color-navy-soft);
   color: var(--color-navy);
 }
-.dash-claude__calls {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--color-muted);
+/* the provider beside the model */
+.dash-chip--line {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-navy-mist);
+  color: var(--color-navy);
 }
-.dash-claude__calls b {
-  color: var(--color-ink);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
+/* the call count closes the stats row */
+.dash-claude__stats .dash-claude__calls {
+  margin-left: auto;
 }
 .dash-claude__line {
-  margin-top: 9px;
-  min-height: 63px;
+  margin-top: 8px;
+  min-height: 57px;
   font-family: var(--font-serif);
-  font-size: 15px;
-  line-height: 21px;
+  font-size: 14px;
+  line-height: 19px;
   color: var(--color-navy);
 }
 .dash-caret {
@@ -464,11 +527,12 @@
   animation: dash-breathe 1s steps(2, jump-none) infinite;
 }
 .dash-claude__stats {
-  margin: 8px 0 0;
-  padding-top: 8px;
+  margin: 7px 0 0;
+  padding-top: 7px;
   border-top: 1px solid var(--color-line);
   display: flex;
-  gap: 18px;
+  gap: 14px;
+  white-space: nowrap;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -488,11 +552,12 @@
 }
 
 /* ---------- Legend ---------- */
+/* bottom right, under the phone model */
 .dash-legend {
   position: absolute;
-  left: 52px;
-  top: 744px;
-  width: 224px;
+  left: 1420px;
+  top: 604px;
+  width: 156px;
   font-size: 11.5px;
   line-height: 17px;
   color: #8a9393;
@@ -586,8 +651,6 @@
   .dash-ticker li {
     animation: dash-tick-out 1ms linear 4600ms forwards;
   }
-  .dash-spark__bar,
-  .dash-spark__level,
   .dash-bars i::before {
     transition: none;
   }

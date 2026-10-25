@@ -1,5 +1,6 @@
 """HTTP contract for comparison, progress, and reference playback."""
 
+import json
 import re
 from uuid import uuid4
 
@@ -9,13 +10,17 @@ from pydantic import BaseModel, Field
 
 from app.paths import BACKEND_ROOT
 
+from app import telemetry
 from app.audio.content import RejectingContentVerifier
+from app.audio.pitch_table import WORD_MATCH, advise_word
 from app.audio.gateway import FIXTURE_SCENARIOS, fixture_wav
 from app.errors import ArticulateError, StaleAttemptError
 from app.integrations.cartesia import cached_speech_wav, mint_tts_token
 from app.reasoning.orchestrate import ComparisonJob
 from app.live.runtime import get_runtime
+from app.live.schemas import valid_attempt_id, valid_profile_id
 from app.reasoning.learner_progress import ProgressStore, build_progress_store
+from app.reasoning.lesson_difficulty import QuizPlanRequest, QuizPlanResponse, propose_lesson_plan
 from app.reasoning.vowel_coach import VowelCoachRequest, VowelCoachResponse, coach_attempt
 from app.schemas import ComparisonResult, ErrorBody, HealthResponse, ReferenceView, SpeechTokenResponse
 
@@ -59,7 +64,18 @@ async def vowel_coach(body: VowelCoachRequest, request: Request) -> VowelCoachRe
     """Practice-screen coach. The browser already measured the attempt summary."""
 
     client = getattr(request.app.state, "vowel_client", None)
-    return await coach_attempt(request.app.state.settings, body, client=client, progress_store=_progress_store(request))
+    with telemetry.attempt_scope(body.attempt.attemptId):
+        return await coach_attempt(
+            request.app.state.settings, body, client=client, progress_store=_progress_store(request)
+        )
+
+
+@router.post("/v1/lesson-plan", response_model=QuizPlanResponse)
+async def lesson_plan(body: QuizPlanRequest, request: Request) -> QuizPlanResponse:
+    """Choose a starting lesson from the quiz. Claude may only keep or lower that difficulty."""
+
+    client = getattr(request.app.state, "vowel_client", None)
+    return await propose_lesson_plan(request.app.state.settings, body, client=client)
 
 
 def _progress_store(request: Request) -> ProgressStore:
@@ -100,6 +116,80 @@ def speech_token(request: Request) -> SpeechTokenResponse:
     except ArticulateError as exc:
         raise HTTPException(status_code=502, detail="cartesia_token_failed") from exc
     return SpeechTokenResponse(**data)
+
+
+@router.post("/v1/word-match")
+async def word_match(request: Request, profileId: str = "", attemptId: str = ""):
+    """Compare a learner WAV of "head" with the Cartesia reference and store the pitch table.
+
+    One attempt id covers the take: the stored pitch table, the classroom attempt card and every
+    telemetry event emitted while handling it. The browser may send one (a UUID); otherwise it is
+    minted here. It is returned.
+    """
+
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() != "audio/wav":
+        raise HTTPException(415, "Content-Type must be audio/wav")
+    if attemptId and not valid_attempt_id(attemptId):
+        raise HTTPException(422, "attemptId must be a UUID")
+    wav = await request.body()
+    if len(wav) < 44 or len(wav) > (1 << 20):
+        raise HTTPException(422, "WAV must be between 44 bytes and 1 MiB")
+    settings = request.app.state.settings
+    if not settings.pitch_table_enabled:
+        raise HTTPException(503, "pitch table is disabled")
+    attempt_id = attemptId or str(uuid4())
+    with telemetry.attempt_scope(attempt_id):
+        return await _match_word(request, wav, profileId, attempt_id)
+
+
+async def _match_word(request: Request, wav: bytes, profileId: str, attempt_id: str) -> dict:
+    settings = request.app.state.settings
+    client = getattr(request.app.state, "live_client", None) or get_runtime(request.app).anthropic()
+    result = await advise_word(settings, client, wav, WORD_MATCH)
+    features = result.pop("features", None)
+    stored = False
+    if features is not None and valid_profile_id(profileId):
+        history = getattr(request.app.state, "live_history", None) or get_runtime(request.app).history(
+            getattr(request.app.state, "live_spacetime_transport", None)
+        )
+        stored = await history.record_articulation(profileId, attempt_id, "a", features)
+    result["attemptId"] = attempt_id
+    result["stored"] = bool(stored)
+    result["classroomStored"] = False
+    if valid_profile_id(profileId):
+        from app.classroom.provision import commit_verified_summary
+
+        learner = result.get("learner") or {}
+        reference = result.get("reference") or {}
+        quiet = str(result.get("advice") or "").startswith("I did not catch")
+        cue = result.get("cue") if isinstance(result.get("cue"), str) else ""
+        finding = "insufficient" if quiet else (cue or "none")
+        measurements = {
+            "voicedMs": learner.get("voicedMs"),
+            "f0Hz": learner.get("f0Hz"),
+            "f1Hz": learner.get("f1Hz"),
+            "f2Hz": learner.get("f2Hz"),
+            "referenceVoicedMs": reference.get("voicedMs"),
+            "referenceF1Hz": reference.get("f1Hz"),
+            "referenceF2Hz": reference.get("f2Hz"),
+        }
+        result["classroomStored"] = await commit_verified_summary(
+            settings,
+            [
+                profileId,
+                attempt_id,
+                "head",
+                finding != "insufficient",
+                finding,
+                "verified",
+                "cartesia-head",
+                settings.analysis_version,
+                cue,
+                json.dumps(measurements),
+                False,
+            ],
+        )
+    return result
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -249,7 +339,9 @@ def delete_session(session_id: str, request: Request) -> dict:
 
 async def _run(request: Request, job: ComparisonJob) -> ComparisonResult:
     try:
-        return await request.app.state.orchestrator.compare(job)
+        # The comparison task is created inside this scope, so it copies the attempt id into its context.
+        with telemetry.attempt_scope(job.attempt_id):
+            return await request.app.state.orchestrator.compare(job)
     except StaleAttemptError as exc:
         raise HTTPException(
             status_code=409,

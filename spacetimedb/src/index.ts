@@ -1,7 +1,35 @@
 import { schema, table, t, type ReducerCtx } from "spacetimedb/server";
+import {
+  acceptInvite,
+  ackLesson,
+  attemptSummary,
+  classAssignment,
+  classIdentity,
+  classInvite,
+  classMember,
+  classRoom,
+  classroomBoardRows,
+  clearHelp,
+  commitVerified,
+  learnerAttemptRows,
+  learnerRoll,
+  lessonAck,
+  lessonAckEvent,
+  lessonCommand,
+  lessonOverride,
+  markDisconnected,
+  mintInvite,
+  myAttemptRows,
+  myLessonRows,
+  reportProvisional,
+  requestHelp,
+  revokeLesson,
+  saveLesson,
+  setPresence,
+} from "./classroom";
 
 // No public tables except telemetry_event: a capped (400 rows) stream of derived numbers
-// and short labels for the backend dashboard, with no identities, media or transcripts.
+// and short labels (payloads up to 4 KB) for the backend dashboard, with no identities, media or transcripts.
 // Browsers otherwise call owned metric reducers or the authenticated Python gateway.
 const backend = table(
   { name: "backend", public: false },
@@ -169,6 +197,17 @@ const db = schema({
   liveQuota,
   liveInsight,
   telemetryEvent,
+  classInvite,
+  classIdentity,
+  classRoom,
+  classMember,
+  lessonOverride,
+  classAssignment,
+  lessonCommand,
+  lessonAck,
+  lessonAckEvent,
+  attemptSummary,
+  learnerRoll,
 });
 export default db;
 
@@ -412,6 +451,11 @@ const telemetryNodes = [
 ];
 const telemetryKindRe = /^[a-z]+(\.[a-z_]+)+$/;
 const TELEMETRY_KEEP = 400;
+/** Low-rate rows (camera.on, ui.join, stt.*, ...) are only trimmed while more than this many remain. */
+const TELEMETRY_KEEP_LOW = 150;
+/** 5-10 Hz per-tab streams: trimmed first so a busy lesson cannot push the low-rate events out. */
+const TELEMETRY_HIGH_RATE = new Set(["lip.frame", "lip.mesh", "audio.frame", "audio.spectrum", "ui.ping"]);
+const byId = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0);
 
 export const emit_telemetry = db.reducer(
   {
@@ -426,7 +470,7 @@ export const emit_telemetry = db.reducer(
     if (!telemetryNodes.includes(target)) throw new Error("unknown target node");
     if (!telemetryKindRe.test(kind)) throw new Error("invalid kind");
     if (label.length > 120) throw new Error("label too long (max 120)");
-    if (byteLength(payload_json) > 2048) throw new Error("payload too large");
+    if (byteLength(payload_json) > 4096) throw new Error("payload too large");
     parseJsonObject(payload_json, "payload_json");
     ctx.db.telemetryEvent.insert({
       id: 0n,
@@ -437,13 +481,19 @@ export const emit_telemetry = db.reducer(
       label,
       payload: payload_json,
     });
-    const excess = Number(ctx.db.telemetryEvent.count()) - TELEMETRY_KEEP;
+    let excess = Number(ctx.db.telemetryEvent.count()) - TELEMETRY_KEEP;
     if (excess <= 0) return;
-    // Auto-inc ids grow monotonically, so the lowest ids are the oldest rows.
-    const ids: bigint[] = [];
-    for (const row of ctx.db.telemetryEvent.iter()) ids.push(row.id);
-    ids.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    for (const id of ids.slice(0, excess)) ctx.db.telemetryEvent.id.delete(id);
+    // Retention: oldest high-rate rows go first; low-rate rows only while more than TELEMETRY_KEEP_LOW exist.
+    const high: bigint[] = [];
+    const low: bigint[] = [];
+    for (const row of ctx.db.telemetryEvent.iter()) (TELEMETRY_HIGH_RATE.has(row.kind) ? high : low).push(row.id);
+    high.sort(byId);
+    low.sort(byId);
+    const fromHigh = Math.min(excess, high.length);
+    for (let i = 0; i < fromHigh; i++) ctx.db.telemetryEvent.id.delete(high[i]);
+    excess -= fromHigh;
+    const fromLow = Math.min(excess, Math.max(0, low.length - TELEMETRY_KEEP_LOW));
+    for (let i = 0; i < fromLow; i++) ctx.db.telemetryEvent.id.delete(low[i]);
   },
 );
 
@@ -786,4 +836,145 @@ export const cleanup_live_state = db.reducer(
       if (insight && insight.expires_at <= now) ctx.db.liveInsight.attempt_id.delete(id);
     }
   },
+);
+
+const lessonView = t.row("ClassroomLessonRow", {
+  profile_id: t.string().primaryKey(),
+  revision: t.u32(),
+  command_id: t.string(),
+  source: t.string(),
+  settings_json: t.string(),
+  visible: t.string(),
+  status: t.string(),
+  ack_phase: t.string(),
+  teacher_name: t.string(),
+  classroom_name: t.string(),
+  saved_at: t.u64(),
+  received_at: t.u64(),
+  applied_at: t.u64(),
+});
+
+const boardView = t.row("ClassroomBoardRow", {
+  profile_id: t.string().primaryKey(),
+  display_name: t.string(),
+  classroom_id: t.string(),
+  presence: t.string(),
+  presence_at: t.u64(),
+  exercise: t.string(),
+  lesson_revision: t.u32(),
+  lesson_source: t.string(),
+  override_revision: t.u32(),
+  classroom_revision: t.u32(),
+  visible: t.string(),
+  settings_json: t.string(),
+  ack_phase: t.string(),
+  usable: t.u32(),
+  unusable: t.u32(),
+  last_finding: t.string(),
+  last_kind: t.string(),
+  last_provenance: t.string(),
+  last_at: t.u64(),
+  repeat_count: t.u32(),
+  needs_attention: t.bool(),
+  synthetic_repeat: t.u32(),
+  help_requested: t.bool(),
+  help_note: t.string(),
+});
+
+const attemptView = t.row("AttemptCardRow", {
+  attempt_id: t.string().primaryKey(),
+  profile_id: t.string(),
+  exercise: t.string(),
+  usable: t.bool(),
+  finding: t.string(),
+  kind: t.string(),
+  provenance: t.string(),
+  reference_version: t.string(),
+  analysis_version: t.string(),
+  cue_id: t.string(),
+  measurements_json: t.string(),
+  synthetic: t.bool(),
+  created_at: t.u64(),
+});
+
+export const mint_invite = db.reducer(
+  { code: t.string(), role: t.string(), profile_id: t.string(), classroom_id: t.string(), display_name: t.string() },
+  (ctx, args) => mintInvite(ctx, args),
+);
+export const accept_invite = db.reducer({ code: t.string() }, (ctx, { code }) => acceptInvite(ctx, code));
+export const save_lesson = db.reducer(
+  {
+    command_id: t.string(),
+    scope: t.string(),
+    target_profile: t.string(),
+    classroom_id: t.string(),
+    expected_revision: t.u32(),
+    settings_json: t.string(),
+    expires_in_minutes: t.u32(),
+  },
+  (ctx, args) => saveLesson(ctx, args),
+);
+export const revoke_lesson = db.reducer(
+  { command_id: t.string(), scope: t.string(), target_profile: t.string(), classroom_id: t.string(), expected_revision: t.u32() },
+  (ctx, args) => revokeLesson(ctx, args),
+);
+export const ack_lesson = db.reducer(
+  { revision: t.u32(), phase: t.string(), command_id: t.string() },
+  (ctx, args) => ackLesson(ctx, args),
+);
+export const set_presence = db.reducer(
+  { presence: t.string(), exercise: t.string() },
+  (ctx, { presence, exercise }) => setPresence(ctx, presence, exercise),
+);
+export const request_help = db.reducer({ message: t.string() }, (ctx, { message }) => requestHelp(ctx, message));
+export const clear_help = db.reducer({ profile_id: t.string() }, (ctx, { profile_id }) => clearHelp(ctx, profile_id));
+export const report_provisional = db.reducer(
+  {
+    attempt_id: t.string(),
+    exercise: t.string(),
+    usable: t.bool(),
+    finding: t.string(),
+    reference_version: t.string(),
+    measurements_json: t.string(),
+  },
+  (ctx, args) => reportProvisional(ctx, args),
+);
+export const commit_verified_summary = db.reducer(
+  {
+    profile_id: t.string(),
+    attempt_id: t.string(),
+    exercise: t.string(),
+    usable: t.bool(),
+    finding: t.string(),
+    provenance: t.string(),
+    reference_version: t.string(),
+    analysis_version: t.string(),
+    cue_id: t.string(),
+    measurements_json: t.string(),
+    synthetic: t.bool(),
+  },
+  (ctx, args) => commitVerified(ctx, args),
+);
+export const classroom_disconnect = db.clientDisconnected((ctx) => markDisconnected(ctx));
+
+export const my_classroom_lesson = db.view(
+  { public: true, name: "my_classroom_lesson" },
+  t.array(lessonView),
+  (ctx) => myLessonRows(ctx),
+);
+export const classroom_board = db.view(
+  { public: true, name: "classroom_board" },
+  t.array(boardView),
+  (ctx) => classroomBoardRows(ctx),
+);
+export const my_attempt_cards = db.view(
+  { public: true, name: "my_attempt_cards" },
+  t.array(attemptView),
+  (ctx) => myAttemptRows(ctx),
+);
+export const learner_attempt_cards = db.view(
+  { public: true, name: "learner_attempt_cards" },
+  { profile_id: t.string() },
+  t.array(attemptView),
+  (ctx, { profile_id }) => learnerAttemptRows(ctx, profile_id),
 );

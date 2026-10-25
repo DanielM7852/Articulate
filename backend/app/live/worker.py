@@ -13,6 +13,7 @@ import logging
 import time
 import uuid
 
+from app import telemetry
 from app.config import Settings, get_settings
 from app.integrations.spacetime import SpacetimeError
 from app.live.coordination import Coordination, encode
@@ -68,6 +69,15 @@ class Worker:
 
     async def compute(self, job: dict) -> list:
         payload = json.loads(job["request_json"])
+        # The job runs in the worker's own task, not the request's: the attempt scope comes from the payload.
+        event = payload.get("event") if isinstance(payload, dict) else None
+        attempt_id = payload.get("attemptId") if job["kind"] == "attempt.coach" else (
+            event.get("attemptId") if isinstance(event, dict) else None
+        )
+        with telemetry.attempt_scope(attempt_id if isinstance(attempt_id, str) else None):
+            return await self._compute(job, payload)
+
+    async def _compute(self, job: dict, payload: dict) -> list:
         history = DeferredHistory(self.deps.get_history())
         deps = replace(self.deps, history=history)
         state_json = ""

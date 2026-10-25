@@ -1,8 +1,11 @@
 # Telemetry stream for the backend dashboard
 
 Every subsystem reports small, non-sensitive events to one public SpacetimeDB table.
-The dashboard page (`/#/dashboard` in `web/`) subscribes to that table and animates
-the system graph. No media, transcripts, profile ids or attempt ids are ever written here.
+The teaching console subscribes to that table from `teach.html#/live`. `/#/dashboard` opens the same section.
+No media (audio, video, images) and no profile ids are written here. Some short text is public: `stt.transcript`
+carries up to 80 chars of what the learner said, and `coach.decision` labels and `claude.response` lines carry up
+to 120 chars of the coach's caption or output. A lesson event may add a command id and a revision. Events
+produced while handling one learner attempt may add that attempt's random id (`attemptId`, see "Attempt id").
 
 ## Table `telemetry_event` (public)
 
@@ -14,9 +17,10 @@ the system graph. No media, transcripts, profile ids or attempt ids are ever wri
 | target   | string    | node id                                                |
 | kind     | string    | dotted event kind, see below                           |
 | label    | string    | short human text for the dashboard (<= 120 chars)      |
-| payload  | string    | JSON object, <= 2048 bytes                             |
+| payload  | string    | JSON object, <= 2048 bytes live (4096 in the unpublished source) |
 
-The reducer keeps only the newest 400 rows (deletes the oldest on insert).
+The reducer keeps at most 400 rows. The deployed module deletes the oldest on insert; the source on
+this branch (pending a republish) uses the retention rule in "Retention" below.
 
 ## Reducer `emit_telemetry`
 
@@ -24,7 +28,17 @@ Args (positional order matters for the Python HTTP caller):
 `source: string, target: string, kind: string, label: string, payload_json: string`
 
 Any identity may call it (browser or backend). Validation: node ids from the list below,
-kind matches `^[a-z]+(\.[a-z_]+)+$`, label <= 120 chars, payload_json valid JSON object <= 2048 bytes.
+kind matches `^[a-z]+(\.[a-z_]+)+$`, label <= 120 chars, payload_json valid JSON object <= 2048 bytes
+(the deployed module; the source says 4096 but has not been republished). The live reducer reports every
+rejection with the generic text "The instance encountered a fatal error.", not the thrown message.
+
+### Retention (module source, applies after the next publish)
+
+At most 400 rows. When an insert pushes the count over, the oldest rows among the high-rate kinds
+(`lip.frame`, `lip.mesh`, `audio.frame`, `audio.spectrum`, `ui.ping`) are deleted first. Low-rate rows
+(everything else: `camera.on`, `ui.join`, `stt.*`, ...) are deleted, oldest first, only while more than
+150 of them remain. One pass partitions the ids, then each list is sorted, so a busy lesson streaming at
+10 Hz no longer pushes the session's join and camera events out of the table.
 
 ## Node ids
 
@@ -40,8 +54,10 @@ kind matches `^[a-z]+(\.[a-z_]+)+$`, label <= 120 chars, payload_json valid JSON
 | pitch     | librosa F0 extraction                                        | server        |
 | sparc     | SPARC articulatory model service (`services/articulation`)   | server        |
 | db        | SpacetimeDB                                                  | maincloud     |
-| claude    | Anthropic Claude (coach decisions, notes, insights)          | Anthropic     |
+| claude    | Anthropic Claude (coach decisions, notes, insights, recaps, caption grading) | Anthropic |
 | ui        | the learner's screen                                         | browser       |
+
+The dashboard also derives extra nodes from event kinds and payload fields; see "Kind-routed components".
 
 ## Event kinds and payloads
 
@@ -49,40 +65,105 @@ kind matches `^[a-z]+(\.[a-z_]+)+$`, label <= 120 chars, payload_json valid JSON
 |--------------------|---------------------|------------------------------------------------------------------------|
 | camera.on / camera.off | camera -> mediapipe | `{}`                                                                |
 | lip.frame          | mediapipe -> db     | `{ok, opening, width, rounding, spread, jaw, yaw}` numbers 0..1 / deg  |
-| lip.batch          | mediapipe -> db     | `{frames, seq}`                                                        |
+| lip.batch          | mediapipe -> db     | `{frames, seq, attemptId}`                                             |
 | audio.frame        | audio -> db         | `{f1, f2, rms, env}` env = 32 floats 0..1 downsampled envelope         |
-| audio.batch        | audio -> db         | `{frames, seq}`                                                        |
-| stt.open / stt.close | mic -> stt        | `{}`                                                                   |
-| stt.transcript     | stt -> ui           | `{text, final}` text truncated to 80 chars                             |
+| audio.batch        | audio -> db         | `{frames, seq, attemptId}`                                             |
+| stt.open / stt.close | mic -> stt        | `{provider, model?}` provider `openai` (Realtime, word lesson; `model` from the session secret) or `cartesia` (Ink) |
+| stt.transcript     | stt -> ui           | `{text, final, provider, model?}` text truncated to 80 chars; OpenAI sends one per completed transcription (`final: true`) |
 | tts.token          | backend -> tts      | `{}`                                                                   |
 | tts.speak          | ui -> tts           | `{chars, voice}`                                                       |
 | tts.audio          | tts -> ui           | `{ms}` duration of audio received                                      |
-| coach.request      | ui -> backend       | `{sound, mode}`                                                        |
+| coach.request      | ui -> backend       | `{sound, mode, attemptId}`                                             |
 | coach.decision     | backend -> ui       | `{verdict, cue}`                                                       |
-| claude.request     | backend -> claude   | `{model, purpose}` purpose in decide, word, notes, insight, session, ask |
+| claude.request     | backend -> claude   | `{model, purpose}` purpose in decide, word, notes, insight, session, ask, recap (session recap), grade (offline coach checker) |
 | claude.response    | claude -> backend   | `{model, purpose, latencyMs, inputTokens, outputTokens, line}` line <= 120 chars |
 | claude.error       | claude -> backend   | `{model, purpose, latencyMs, error}`                                   |
-| pitch.extract      | backend -> pitch    | `{seconds}`                                                            |
-| pitch.result       | pitch -> backend    | `{f0Mean, f0Min, f0Max, voicedPct, latencyMs}`                         |
+| pitch.extract      | backend -> pitch    | `{seconds, method}` method `praat` (Parselmouth: word-coach acoustics and the pitch table) or `pyin` (legacy librosa path) |
+| pitch.result       | pitch -> backend    | `{method, ms, latencyMs, f0Mean, f0Min, f0Max, voicedPct, f1Hz?, f2Hz?}` F0 in Hz over voiced frames (null when none), voicedPct 0..100, f1Hz/f2Hz median formants (Praat only, omitted when not measured); latencyMs = ms, kept for older readers; label "f0 <mean> Hz" for Praat. Not sent when the pass fails or times out |
 | sparc.request      | backend -> sparc    | `{seconds}`                                                            |
-| sparc.features     | sparc -> backend    | `{tongueHeight, tongueFront, jawOpen, lipForward, lipAperture, latencyMs}` |
+| sparc.features     | sparc -> backend    | `{tongueHeight, tongueFront, jawOpen, lipForward, lipAperture, ms, n, latencyMs}` n = number of feature keys extracted, ms = collector round trip (latencyMs repeats it) |
 | sparc.skipped      | backend -> sparc    | `{reason}`                                                             |
 | db.read / db.write | backend -> db       | `{table, rows}`                                                        |
+| backend.up         | backend -> db       | `{provider, model, articulation, pitchTable, praat, azure, classroom, coordination, telemetryIdentity}` once at startup when telemetry goes live; label "backend online"; praat = word acoustics enabled, azure = both Azure Speech settings set, classroom = classroom owner credentials present; telemetryIdentity is `anonymous` or `configured` |
 | video.score        | backend -> ui       | `{verdict, okFrames}`                                                  |
-| ui.join            | ui -> db            | `{sid, ua}` ua = coarse device class: phone, tablet or desktop; label "learner joined" |
-| ui.ping            | ui -> db            | `{sid}` every 20 s while the tab is visible                            |
+| ui.join            | ui -> db            | `{sid, ua, pid?}` ua = coarse device class: phone, tablet or desktop; pid = classroom profile id, joined learners only; label "learner joined" |
+| ui.ping            | ui -> db            | `{sid, pid?}` every 20 s while the tab is visible                      |
 | ui.leave           | ui -> db            | `{sid}` on `pagehide`, best effort                                     |
+| azure.request      | backend -> db       | `{word}` before each Azure Pronunciation Assessment call (word coach and consonant coach) |
+| azure.result       | backend -> db       | `{ms, ok: true, accuracy?}` accuracy = whole-word AccuracyScore 0..100; no transcript, no per-phoneme scores |
+| azure.error        | backend -> db       | `{ms, error, status?}` error = exception type name, `HTTPStatusError` (with `status`) or `RecognitionFailed` |
+| azure.skipped      | backend -> db       | `{reason, ms?}` reason `not_configured`, `timeout` (with ms), `no_audio`, `unclear`, `part_only` or `local_pass` |
+| phones.open        | ui -> db            | `{provider: "koellabs", transport: "ws", host}` host = host:port of the phone service URL only |
+| phones.close       | ui -> db            | `{reason}` `client`, `closed`, `unreachable` or `origin-rejected`; a service that never opens reports at most every 30 s |
+| phones.frame       | ui -> db            | `{n}` phones messages received on this socket so far; at most every 500 ms |
+| phones.score       | ui -> db            | `{word, ms, ok, attemptId?}` after each POST /v1/phones/score; word falls back to the target phones when the caller gives none; attemptId when the word lesson judges an attempt |
+| classroom.session  | backend -> db       | `{role}` teacher or learner, when a development classroom session is opened |
+| classroom.summary  | backend -> db       | `{verified}` after `commit_verified_summary` stores a row (false for synthetic fixtures) |
+| classroom.scale    | backend -> db       | `{rooms}` when the scale school is opened                              |
+| classroom.probe    | ui -> db            | `{rooms, updates, ms}` when a school probe write is acknowledged; updates = subscription updates seen across all rooms |
+| head.ready         | ui -> db            | `{driver}` `talkinghead`, `three` or `unknown`, once per guide mount   |
+| head.speak         | ui -> db            | `{ms?}` when the guide's speech playback starts, at most every 2 s; ms = delay from `speak()` to playback |
+| recap.start        | backend -> db       | `{attempts, word?}` when a new recap job starts (not when `POST /v1/live/recap` returns an existing one); attempts = distinct attempt ids; word only when it is a plain word |
+| recap.ready        | backend -> db       | `{ms}` the recap was built; ms = whole job (history load and the Claude call) |
+| recap.error        | backend -> db       | `{ms, error}` error = exception type name (`TimeoutError` when the overall recap timeout hit), or `empty` when none of the session's turns were found |
+| recap.limited      | backend -> db       | `{reason}` `per_learner` (a recap is already pending) or `per_hour`; the route answers 429 |
+| recap.email        | backend -> db       | `{ok, ms, provider: "resend"}` after each send attempt; the address is never sent |
+| recap.email_skipped | backend -> db      | `{reason: "not_configured"}` an address was given but Resend is not configured |
+| checker.run        | backend -> db       | `{source, turns, batches, dryRun, model}` once when the offline coach checker (`python -m scripts.grade_coach`) starts; source `local` or `spacetime`; sent on dry runs too |
+| checker.graded     | backend -> db       | `{graded, turns, ms}` after the grading calls; graded = turns Claude returned a grade for |
+| checker.report     | backend -> db       | `{rows, passRate?}` when report.md and grades.json are written; passRate 0..100 = graded captions with no failed rule (omitted when nothing was graded) |
 
 Rates: lip.frame and audio.frame are throttled to at most 5 per second each by the browser.
 Everything else is one event per occurrence.
+
+## Kind-routed components
+
+The deployed reducer only accepts the twelve node ids above, so components it does not name are identified by the
+event kind and payload fields instead of new ids. `azure.*` (Azure Pronunciation Assessment), `phones.*` (the KoelLabs
+phone recognizer in `services/phones`, called from the browser), `classroom.*` (the classroom database) and `head.*`
+(Ava's 3D head) all travel as `backend -> db` or `ui -> db`. The `provider` field on `stt.*` separates OpenAI Realtime
+from Cartesia Ink, and the `method` field on `pitch.*` separates Praat from pYIN. The dashboard routes these packets by
+kind and field and draws each of these components as its own node.
+
+- Recap: `recap.*`, `backend -> db`. The post-session recap job in the backend (`app/live/recap.py`) and its Resend email;
+  its Claude call is `claude.*` with purpose `recap`.
+- Checker: `checker.*`, `backend -> db`. The offline coach checker script (`scripts/grade_coach.py`), not the running
+  app; its grading calls are `claude.*` with purpose `grade`.
+
+## Attempt id
+
+`attemptId` is an optional payload field on the events produced while one learner attempt is handled, so the
+teaching console can filter the live graph to the attempt a teacher selected. It is the id the browser mints for the
+take (`crypto.randomUUID()`), the same string sent to `/v1/live/coach`, `/v1/live/articulation` and, for practice
+attempts, stored in the classroom's `learner_attempt_cards.attempt_id`. For `/v1/word-match` the browser may send
+`attemptId`; otherwise the backend mints it, uses it for the stored pitch table and the classroom card, and returns it.
+It is random and names no person; profile ids still never appear.
+
+On the backend it is set by request scope: the handlers that receive an attempt id (`POST /v1/live/coach`,
+`/v1/live/session/turn` for `attempt_feedback` and `analysis_ready` events, `POST` and the shared-coordination
+`GET /v1/live/articulation`, `/v1/coach`, `/v1/word-match`, `/v1/comparisons`) open
+`telemetry.attempt_scope(attempt_id)`, a context variable that `emit` copies into every payload that has no
+`attemptId` of its own; tasks and `asyncio.to_thread` calls started inside the scope inherit it, and the background
+articulation job, the scheduled coach persist and the shared-coordination worker open their own scope from the job's
+attempt id. Events outside any attempt (startup, recap, checker, consonant coach, word questions) carry none. Kinds
+that can carry it: `claude.*`, `pitch.*`, `sparc.*`, `azure.*`, `db.read`, `db.write`, `coach.request`,
+`coach.decision`, `video.score`, `classroom.summary`.
+
+In the browser it is explicit: `coach.request`, `lip.batch`, `audio.batch` and `phones.score` (word lesson) add the
+attempt in hand. The 10 Hz streams (`lip.frame`, `lip.mesh`, `audio.frame`, `audio.spectrum`) and `phones.frame` /
+`phones.open` stay per-`sid` and carry no attempt id.
 
 ## Session id and presence
 
 Every browser event carries `sid` in its payload: an anonymous per-tab id (8 lowercase hex chars from
 `crypto.getRandomValues`, kept in `sessionStorage` under `articulate.telemetry.sid`, in memory if storage is
-blocked). It identifies nothing about the person and is not linked to any profile. The client adds it to every
-`emit` unless the payload already has one, and emits `ui.join` once the connection is ready (never from the
-dashboard page itself).
+blocked). On its own it identifies nothing about the person. The client adds it to every `emit` unless the
+payload already has one, and emits `ui.join` once the connection is ready (never from the dashboard page itself).
+
+`ui.join` is `{sid, ua}` and `ui.ping` (every 20 s while the tab is visible) is `{sid}`. Both add an optional
+`pid` when the tab is a joined classroom learner (`loadSession()` has role `learner`): the classroom profile id,
+at most 64 chars. The ping re-reads the session, so a learner who joins the classroom after the page loaded is
+attributed from the next ping. Tabs that are not classroom learners send no `pid`.
 
 Presence rule on the dashboard: any event whose payload has a `sid` marks that session live as of the event time.
 A session is dropped on `ui.leave` or after 60 s without any event (pings every 20 s keep an idle visible tab alive).
@@ -96,11 +177,42 @@ The header shows "N learners live" and the Learner node shows one dot per live s
 - `subscribeTelemetry(cb: (e: TelemetryEvent) => void): () => void` live inserts, newest first on backfill.
 - `TelemetryEvent = { id: string; at: number; source; target; kind; label; payload: Record<string, unknown> }`
 
+Delivery is visible in the console. In SpacetimeDB 2.13 each reducer accessor
+(`conn.reducers.emitTelemetry(...)`) returns a `Promise<void>` that resolves when the reducer commits and
+rejects with `SenderError` (the reducer threw) or `InternalError` (host failure), or with an error when the
+connection is down. The client counts the outcome per kind and keeps the counters on
+`window.__telemetryStats` (always set; it holds no payloads):
+
+```
+window.__telemetryStats
+// { "lip.mesh": { sent, accepted, rejected, dropped, lastError }, "lip.frame": {...}, ... }
+```
+
+- `sent`: reducer calls made; `accepted` / `rejected`: their outcome; `lastError`: the last rejection text.
+- `dropped`: emits skipped because the connection was not ready or 20 calls were already in flight
+  (throttled emits are not counted).
+- The first rejection of each kind logs one `console.warn` with the kind and the payload byte length; a
+  subscription error logs once.
+
 ## Python
 
 `backend/app/telemetry.py` exports `emit(source, target, kind, label, payload: dict)`.
 Fire-and-forget on the running event loop (thread-safe via `call_soon_threadsafe` when called
-from a worker thread). No-op when `spacetime_uri` is not configured. Never raises.
+from a worker thread). Never raises. No-op until `configure` (called from the app lifespan) is live:
+
+- `TELEMETRY_ENABLED=false` turns it off entirely.
+- With `SPACETIME_DATABASE` and `SPACETIME_TOKEN` set, events go to that database with that token.
+- With no `SPACETIME_TOKEN`, the backend mints an anonymous identity (`POST {SPACETIME_URI}/v1/identity`,
+  5 s timeout) in a background task at startup, caches it in the gitignored
+  `<STORE_DIR>/telemetry_identity.json` so restarts keep one identity, and emits to `SPACETIME_DATABASE`
+  or `TELEMETRY_DATABASE` (default `articulate-live`). The table and reducer are public, so no owner token is
+  needed. A failure logs one INFO line and leaves telemetry off; app startup is never blocked.
+
+Once live, the backend emits `backend.up` with its live configuration.
+
+Scripts that run outside the app lifespan (the coach checker) call `configure(settings)` themselves, `await
+wait_live()` so an anonymous identity can finish minting before the first event, and `await drain()` (up to 1.5 s)
+before exiting so in-flight events are not dropped. A telemetry failure never changes their output or exit code.
 
 ## Publishing the module (teammate's machine)
 
@@ -120,7 +232,7 @@ audio node. Both are throttled to 10 Hz per tab and stay well under the 2048-byt
 | kind           | source -> target  | payload (JSON)                                                              |
 |----------------|-------------------|-----------------------------------------------------------------------------|
 | lip.mesh       | mediapipe -> db   | `{sid, pts}` pts = flat int array `[x0,y0,x1,y1,...]`, 81 points, 0..255   |
-| audio.spectrum | audio -> db       | `{sid, bins, rms}` bins = 32 ints 0..255, rms 0..1                          |
+| audio.spectrum | audio -> db       | `{sid, bins, rms, wave}` bins = 32 ints 0..255, rms 0..1, wave = 128 uint8 samples, base64 (172 chars) |
 
 `lip.mesh` point order (MediaPipe FaceLandmarker indices):
 1. OUTER_LIP, 20 points: 61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185
@@ -137,3 +249,84 @@ accepted (a face was found), whether or not the LipFrame quality flags passed.
 `audio.spectrum` bins are 32 log-spaced bands from an AnalyserNode (fftSize 1024, smoothing 0.6)
 over `getByteFrequencyData`, covering roughly 80 Hz to 8 kHz. Emitted whenever a microphone
 stream is open, not only during recording attempts. `rms` is the time-domain RMS of the same block.
+`wave` is that block's waveform (`getByteTimeDomainData`, 1024 samples) decimated to 128 uint8
+samples, 128 = the zero crossing (0 and 255 are full scale), base64-encoded, sent with every frame
+at 10 Hz. Each output sample is the sample of largest magnitude in its window of 8 (sign kept), so
+clicks and plosive bursts survive the decimation. The whole payload is about 400 bytes. Older
+payloads without `wave` stay valid; the dashboard then draws a flat band sized by `rms`.
+
+## Lesson correlation
+
+`lesson.saved`, `lesson.received`, `lesson.applied`, and `lesson.failed` are ordinary `emit_telemetry`
+events (`ui` to `db`). The payload is `{commandId, revision, scope?}` and does not include a profile id
+or an attempt id. The teacher page emits `lesson.saved` only after `save_lesson` resolves. The learner
+page emits receipt and application only after `ack_lesson` resolves. The classroom summary remains the
+source for Saved, Received, and Applied. If one of these events is missing from the public stream, the
+console says that stage was not observed. It does not invent a packet.
+
+The server does not emit its own row for the reducer. Persisted revision is read from `classroom_board`,
+not from this table.
+
+## Authorization gap
+
+`telemetry_event` is public. Any connected identity can subscribe to it and call `emit_telemetry`.
+A teacher session on the classroom database does not grant or limit this stream, and the teaching
+console does not use the teacher token for it. The Live system tab says so in the page. The inspector
+drops token-like payload fields, session ids, and profile ids. Hiding the tab would not be an access control.
+
+With a learner selected, the Live system graph limits its perception cards (face mesh, equalizer, lip and audio
+frames, camera and microphone state) to tabs whose `sid` that learner's own `ui.join` / `ui.ping` mapped to the
+selected `pid`. The filter applies as events arrive, so frames sent before the announcement are skipped, not held
+back. Other tabs still count as traffic and presence, and every other card is the whole public stream. A tab can
+claim any `pid`, so this is attribution for display, not authentication. Demo replay is never filtered.
+
+Demo replay reads `telemetry-demo.json` in the browser. It does not call classroom reducers.
+
+## Full face mesh (lip.mesh v3, live)
+
+`lip.mesh` payload version 3 is what the browser emits. It carries all 478 FaceLandmarker points
+(468 + 10 iris) so the dashboard can render the learner's face as a barycentric dot cloud over the
+canonical tesselation, like Ava's head.
+
+| field | meaning |
+|-------|---------|
+| v     | 3 |
+| n     | 478 (468 when the model returns no iris points) |
+| pts   | base64 of n records of 3 bytes: x uint8, y uint8, z uint8 |
+| yaw, pitch, roll | head pose in degrees from the LipFrame, one decimal |
+
+Normalisation: the same nose-centred square as v1 and v2 (centre = landmark 1, half-size = 1.6 x
+inter-ocular), x and y quantised to 0..255 across the square and clamped. Landmark x and z are in image-width
+units and y in image-height units, so x and z are multiplied by the frame aspect (width / height) first and the
+square is square in pixels (v1 points use the same aspect correction); z = landmark z divided by
+inter-ocular, mapped from [-0.6, 0.6] to 0..255 (0 = nearest the camera). The dashboard decodes x and y
+as byte / 255, the same 0..1 square as v2.
+
+Size: 478 x 3 = 1,434 bytes = 1,912 base64 chars. The worst-case payload with pose and `sid`
+(`{v:3,n:478,pts,yaw:-123.4,pitch:-123.4,roll:-123.4,sid:"8626a337"}`) is 1,995 bytes. The browser drops
+any mesh payload that would exceed 2,000 bytes (`MAX_PAYLOAD_BYTES` in `useLipTracking.ts`, logged once
+at debug level).
+
+Why: the deployed `emit_telemetry` still caps `payload_json` at 2048 bytes. A v2 payload is about
+3,256 bytes with the sid, so every v2 emit was rejected and the dashboard's MediaPipe card read "no face"
+forever. The 8-bit grid is 1/255 of a square 3.2 inter-oculars wide, about 0.013 x the inter-ocular
+distance, finer than the dot face needs. v1 (81 points) is still emitted when fewer than 468 landmarks
+exist. Rate stays 10 Hz per tab.
+
+## lip.mesh v2 (replay only)
+
+Version 2 is no longer emitted. The dashboard still decodes it so `web/public/telemetry-demo.json`
+(recorded in v2) replays unchanged.
+
+| field | meaning |
+|-------|---------|
+| v     | 2 |
+| n     | 478 |
+| pts   | base64 of n records of 5 bytes: x uint16 LE, y uint16 LE, z uint8 |
+| yaw, pitch, roll | head pose in degrees from the LipFrame (optional) |
+
+Normalisation: same nose-centred square as v1 (centre = landmark 1, half-size = 1.6 x inter-ocular),
+x and y quantised to 0..65535 across the square and clamped; z = landmark z divided by inter-ocular,
+mapped from [-0.6, 0.6] to 0..255 (0 = nearest the camera). A v2 payload is about 3.3 KB, which needs
+the 4096-byte cap in the module source; the deployed module's 2048-byte cap rejects it. v1 (81 points,
+`pts` as an int array) remains valid; the dashboard accepts v1, v2 and v3 and prefers a full mesh.

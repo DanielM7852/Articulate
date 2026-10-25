@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     spacetime_uri: str = "https://maincloud.spacetimedb.com"
     spacetime_database: str | None = None
     spacetime_token: str | None = None
+    # Dashboard telemetry (docs/telemetry.md). Without SPACETIME_TOKEN the backend mints and caches an anonymous
+    # identity (the telemetry table and reducer are public) and writes to SPACETIME_DATABASE or this database.
+    telemetry_enabled: bool = True
+    telemetry_database: str = "articulate-live"
     live_coach_model: str = "claude-sonnet-5-5"
     live_coach_thinking: str = "on"  # "on" (adaptive, default) or "off"
     live_notes_model: str = "claude-sonnet-5-5"
@@ -52,7 +56,8 @@ class Settings(BaseSettings):
     live_session_ttl_s: float = 3600.0
     live_coach_timeout_s: float = 15.0
     live_history_limit: int = 12
-    articulation_url: str = ""  # local collector (services/articulation); blank disables background analysis
+    articulation_url: str = ""  # local collector (services/articulation); blank skips the SPARC collector
+    pitch_table_enabled: bool = True  # Parselmouth pitch/formant table stored with the attempt
     articulation_timeout_s: float = 30.0
     articulation_models: str = "sparc,silero_vad"
     articulation_max_queue: int = 2
@@ -99,6 +104,9 @@ class Settings(BaseSettings):
     max_sample_rate_hz: int = 48_000
     analysis_version: str = "pitch-v1"
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    # The deployed console proxies this same host to the classroom database.
+    # Local sign-in leaves this off and keeps the database URI from the owner file.
+    classroom_public_from_host: bool = False
     # Built web/dist to serve at / (single-container hosting). Blank or a missing directory keeps the API-only app.
     static_dir: str = ""
 

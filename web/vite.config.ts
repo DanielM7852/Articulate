@@ -19,12 +19,19 @@ export default defineConfig({
     alias: {
       '@vowel-mapper': repo('../vowel-mapper/src'),
       '@mouth-demo': repo('../mouth-demo'),
+      '@lesson-rules': repo('../spacetimedb/src/lessonRules.ts'),
     },
     dedupe: ['react', 'react-dom', 'three', '@met4citizen/talkinghead', '@fontsource/atkinson-hyperlegible'],
   },
   build: {
     // The AudioWorklet module is tiny; keep it a real file instead of an inlined data URL.
     assetsInlineLimit: (file) => (file.endsWith('.js') ? false : undefined),
+    rollupOptions: {
+      input: {
+        main: repo('./index.html'),
+        teach: repo('./teach.html'),
+      },
+    },
   },
   server: {
     port: 5173,

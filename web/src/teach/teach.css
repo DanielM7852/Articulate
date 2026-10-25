@@ -1,0 +1,1717 @@
+/* ---------- Teaching console ----------
+ * One instrument with two views. The Classroom tab borrows the live graph's vocabulary
+ * (styles/dashboard.css): cream paper, ink text, #cdd3d8 hairlines, serif node names,
+ * small tracked labels, chips, and navy dots for state.
+ */
+.console {
+  --console-gutter: 40px;
+  --console-hair: #cdd3d8;
+  --console-faint: #8a9393;
+  --console-card: #fcfbf8;
+  --console-card-line: rgba(218, 223, 217, 0.9);
+  --console-dot-1: #3b5884;
+  --console-dot-2: #8fa5c3;
+  --console-dot-3: #c2cedd;
+  --console-enter: 240ms;
+  --console-exit: 180ms;
+
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-cream);
+  color: var(--color-ink);
+}
+
+/* Small tracked label, the console's version of .dash-node__loc. */
+.console .eyebrow,
+.console-room label,
+.console-mode__label,
+.console .teach-editor label,
+.console .teach-add label,
+.console .classroom-id label {
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--console-faint);
+}
+
+/* ---------- Buttons and fields inside the console ---------- */
+.console .btn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  border-color: var(--color-line);
+  background: var(--color-cream);
+  color: var(--color-navy);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.console .btn--sm {
+  height: 28px;
+  padding: 0 12px;
+}
+
+.console .btn--primary,
+.console .btn[aria-pressed='true'] {
+  background: var(--color-navy);
+  border-color: var(--color-navy);
+  color: var(--color-ivory);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .console .btn:hover {
+    border-color: var(--color-navy-mist);
+    background: var(--color-surface);
+  }
+
+  .console .btn--primary:hover,
+  .console .btn[aria-pressed='true']:hover {
+    background: var(--color-navy-deep);
+    border-color: var(--color-navy-deep);
+  }
+}
+
+.console .btn[disabled] {
+  background: var(--color-navy-soft);
+  border-color: var(--color-line);
+  color: var(--color-muted);
+}
+
+.console-room input,
+.console .teach-editor select,
+.console .teach-editor input:not([type='checkbox']),
+.console .teach-add input {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  transition: border-color 120ms ease;
+}
+
+.console .teach-editor select {
+  padding-right: 10px;
+  cursor: pointer;
+}
+
+.console-room input:focus-visible,
+.console .teach-editor select:focus-visible,
+.console .teach-editor input:focus-visible,
+.console .teach-add input:focus-visible {
+  border-color: var(--color-navy);
+}
+
+.console-room input:disabled {
+  background: transparent;
+  color: var(--console-faint);
+}
+
+/* ---------- Console bar ---------- */
+.console-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 0 var(--console-gutter);
+  background: var(--color-cream);
+}
+
+.console-bar__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 28px;
+  min-height: 68px;
+  border-bottom: 1px solid var(--console-hair);
+}
+
+.console-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.console-brand img {
+  display: block;
+  width: 24px;
+  height: 26px;
+}
+
+.console-brand__name,
+.teach-summary h1 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  color: var(--color-navy);
+}
+
+.console-brand__name {
+  font-size: 23px;
+  line-height: 1;
+  letter-spacing: -0.005em;
+}
+
+.console-brand__label {
+  margin-left: 8px;
+  padding-left: 14px;
+  border-left: 1px solid var(--color-line);
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: 0.02em;
+  color: var(--color-muted);
+}
+
+/* Tabs read as node names. One navy rule slides under the active tab. */
+.console-tabs {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-left: 8px;
+}
+
+.console-tabs button {
+  height: 100%;
+  min-height: 44px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 22px;
+  color: var(--console-faint);
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.console-tabs button[aria-current='page'] {
+  color: var(--color-navy);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .console-tabs button:hover {
+    color: var(--console-dot-1);
+  }
+}
+
+.console-tabs__bar {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 1px;
+  height: 2px;
+  background: var(--color-navy);
+  transform-origin: 0 50%;
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 260ms var(--ease-in-out);
+}
+
+.console-tabs__bar[data-placed] {
+  opacity: 1;
+}
+
+.console-room {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 0 auto;
+}
+
+.console-room label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.console-room input {
+  width: 140px;
+  height: 30px;
+}
+
+.console-room .btn {
+  height: 30px;
+}
+
+.console-identity {
+  display: grid;
+  gap: 1px;
+  max-width: 300px;
+}
+
+.console-identity p:first-child {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.console-identity .fine {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--console-faint);
+}
+
+.console-bar__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 24px;
+  min-height: 40px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--console-hair);
+}
+
+/* Status dot: grey until the classroom answers, navy when connected, ochre when it drops. */
+.console-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.console-status::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--console-dot-3);
+}
+
+.console-status[data-state='live'] {
+  color: var(--color-navy);
+}
+
+.console-status[data-state='live']::before {
+  background: var(--color-navy);
+}
+
+.console-status[data-state='offline'] {
+  color: var(--color-warn);
+}
+
+.console-status[data-state='offline']::before {
+  background: var(--color-warn);
+}
+
+.console-mode {
+  display: flex;
+  flex: 1 1 320px;
+  flex-flow: row wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 10px;
+}
+
+.console-mode .fine {
+  flex: 0 1 auto;
+  margin: 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--console-faint);
+}
+
+/* 2026-10-25: the School tab keyed this on :has(.console-main--school:not([hidden])).
+   The demo controls drive the live graph only, so they hide on Live system and School. */
+.console[data-tab='live'] .console-mode,
+.console[data-tab='school'] .console-mode {
+  display: none;
+}
+
+.console-bar .teach-alert {
+  flex-basis: 100%;
+}
+
+/* ---------- Panes ----------
+ * The tabs share one grid cell, so the leaving pane and the entering pane overlap while they
+ * cross. Classroom is the leftmost tab and Live system the rightmost, so each always leaves and
+ * arrives on its own side. School sits between them: Console.tsx sets data-dir on .console, and
+ * School arrives from the side of the tab row it is moving toward and leaves the other way.
+ * Opacity and transform only. Console.tsx hides the leaving pane once --console-exit has passed.
+ */
+.console-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+
+.console-main {
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.console-main[hidden] {
+  display: none;
+}
+
+.console-main[data-pane='out'] {
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.console-main--classroom[data-pane='out'] {
+  transform: translateX(-16px);
+}
+
+.console-main--live[data-pane='out'] {
+  transform: translateX(16px);
+}
+
+/* Moving right (Classroom to School to Live system), School leaves to the left; moving left, to the right. */
+.console[data-dir='next'] .console-main--school[data-pane='out'] {
+  transform: translateX(-16px);
+}
+
+.console[data-dir='prev'] .console-main--school[data-pane='out'] {
+  transform: translateX(16px);
+}
+
+.console[data-motion] .console-main[data-pane='in'] {
+  transition:
+    opacity var(--console-enter) var(--ease-out),
+    transform var(--console-enter) var(--ease-out);
+}
+
+.console[data-motion] .console-main[data-pane='out'] {
+  transition:
+    opacity var(--console-exit) var(--ease-out),
+    transform var(--console-exit) var(--ease-out);
+}
+
+/* Entering from hidden: start from the pane's own side. An interrupted exit is not hidden yet,
+   so it skips this and its transition turns around from where it is. */
+@starting-style {
+  .console[data-motion] .console-main--classroom[data-pane='in'] {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+
+  .console[data-motion] .console-main--live[data-pane='in'] {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+
+  .console[data-motion][data-dir='next'] .console-main--school[data-pane='in'] {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+
+  .console[data-motion][data-dir='prev'] .console-main--school[data-pane='in'] {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .console .console-main,
+  .console .console-main[data-pane],
+  .console[data-dir] .console-main--school[data-pane] {
+    transition: none;
+    transform: none;
+  }
+
+  .console-tabs__bar,
+  .console-tabs button,
+  .console .teach-board > button {
+    transition: none;
+  }
+}
+
+/* ---------- Classroom tab ---------- */
+.teach {
+  padding: 24px var(--console-gutter) 72px;
+  color: var(--color-ink);
+}
+
+.teach-top {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.teach-top h1 {
+  margin: 0;
+}
+
+.teach-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  align-items: baseline;
+  margin-bottom: 24px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.teach-summary h1 {
+  margin-right: 6px;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.teach-summary p {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.teach-summary b {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.teach-summary .small {
+  color: var(--console-faint);
+}
+
+.teach-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.teach-board,
+.teach-detail {
+  display: grid;
+  min-width: 0;
+}
+
+/* Roster: one row per learner on hairlines, led by a presence dot. */
+.teach-board {
+  gap: 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.teach-board > button {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  padding: 14px 10px 14px 28px;
+  border: 0;
+  border-top: 1px solid var(--color-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  transition: background-color 160ms ease;
+}
+
+.teach-board > button:first-child {
+  border-top-color: var(--console-hair);
+}
+
+.teach-board > button::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 22px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--console-dot-3);
+}
+
+.teach-board > button[data-presence='recording']::before,
+.teach-board > button[data-presence='analyzing']::before {
+  background: var(--color-navy);
+}
+
+.teach-board > button[data-presence='idle']::before {
+  background: var(--console-dot-2);
+}
+
+.teach-board > button[data-presence='disconnected']::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--console-dot-3);
+}
+
+/* Whole class: a small stipple cluster instead of one dot. */
+.teach-board > button[data-presence='class']::before {
+  top: 19px;
+  width: 5px;
+  height: 5px;
+  background: var(--color-navy);
+  box-shadow:
+    6px 2px 0 -0.5px var(--console-dot-1),
+    2px 7px 0 0 var(--console-dot-2),
+    8px 9px 0 -1px var(--console-dot-3),
+    -2px 5px 0 -1px var(--console-dot-2);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .teach-board > button:hover {
+    background: var(--color-ivory);
+  }
+}
+
+.teach-board > button.is-selected {
+  background: var(--color-navy-soft);
+  box-shadow: inset 2px 0 0 var(--color-navy);
+}
+
+.teach-row__name {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 22px;
+  color: var(--color-navy);
+}
+
+.teach-row__exercise {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.teach-board > button > span:not(.teach-row__name):not(.teach-row__exercise):not(.teach-pill):not(.is-capture) {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-muted);
+}
+
+.teach-board > button > .is-capture {
+  justify-self: start;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.teach-detail > .text-link {
+  justify-self: start;
+}
+
+.teach-row__meta,
+.teach-detail .small,
+.teach-detail .fine {
+  overflow-wrap: anywhere;
+}
+
+.teach-add {
+  display: grid;
+  gap: 6px;
+  padding: 14px 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.teach-add label {
+  display: grid;
+  gap: 6px;
+}
+
+.teach-add .btn {
+  justify-self: start;
+}
+
+.teach-add .fine {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--console-faint);
+}
+
+/* Delivery state as chips, the same pills that label the live model card. */
+.teach-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: 22px;
+  margin-top: 4px;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+}
+
+.teach-pill--on {
+  background: var(--color-navy);
+  color: var(--color-ivory);
+}
+
+.teach-pill--wait {
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+}
+
+.teach-pill--none {
+  box-shadow: inset 0 0 0 1px var(--color-line);
+  color: var(--color-muted);
+}
+
+.teach-empty {
+  padding: 16px 0 16px 28px;
+  border-top: 1px solid var(--color-line);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+/* Learner detail: one paper card, sections split by hairlines. */
+.teach-detail {
+  gap: 22px;
+  padding: 22px 26px 26px;
+  background: var(--console-card);
+  border: 1px solid var(--console-card-line);
+  border-radius: var(--radius-card);
+}
+
+.teach-detail > section + section,
+.teach-detail > section + details,
+.teach-detail > .teach-next {
+  padding-top: 22px;
+  border-top: 1px solid var(--color-line);
+}
+
+.teach-detail > .teach-next:first-child,
+.teach-detail > .teach-back + .teach-next {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.teach-detail > section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.teach-detail .eyebrow {
+  margin-bottom: -2px;
+}
+
+.teach-detail .title-serif {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.25;
+  color: var(--color-navy);
+}
+
+.teach-detail p {
+  max-width: 76ch;
+}
+
+.teach-detail .small {
+  font-size: 13px;
+}
+
+.teach-detail .fine {
+  font-size: 12px;
+  color: var(--console-faint);
+}
+
+.teach-h {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  line-height: 24px;
+  font-weight: 400;
+  color: var(--color-navy);
+}
+
+.teach-back {
+  justify-self: start;
+}
+
+.teach-next,
+.teach-editor,
+.teach-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.teach-next > .btn {
+  justify-self: start;
+}
+
+.console .teach-editor {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.console .teach-editor label {
+  display: grid;
+  gap: 6px;
+}
+
+.teach-note,
+.teach-check {
+  grid-column: 1 / -1;
+}
+
+.console .teach-editor .teach-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.teach-check__text {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-ink);
+}
+
+.teach-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-navy);
+}
+
+.teach-preview {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--color-navy-soft);
+  border-radius: var(--radius-tile);
+  color: var(--color-navy);
+  overflow-wrap: anywhere;
+}
+
+.teach-preview > p:not(.eyebrow):not(.small) {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 21px;
+}
+
+.teach-preview .eyebrow {
+  color: var(--console-dot-1);
+}
+
+.teach-diff {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.teach-diff li {
+  display: grid;
+  grid-template-columns: 120px 1fr 1fr;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid var(--color-navy-mist);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-ink);
+}
+
+.teach-diff li span:first-child {
+  font-weight: 600;
+  color: var(--color-navy);
+}
+
+.teach-actions {
+  grid-template-columns: repeat(2, minmax(0, max-content));
+}
+
+.teach-actions .btn {
+  height: auto;
+  min-height: 36px;
+  padding: 7px 16px;
+  white-space: normal;
+  text-align: center;
+}
+
+.teach-attempts {
+  display: grid;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.teach-attempts li {
+  display: grid;
+  gap: 2px;
+  padding: 12px 0;
+  border-top: 1px solid var(--color-line);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-muted);
+}
+
+.teach-attempts li .strong {
+  font-size: 13px;
+}
+
+.teach-attempts .text-link {
+  justify-self: start;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.teach-attempts .text-link[aria-pressed='true'] {
+  color: var(--color-ink);
+}
+
+li.is-capture,
+li.is-synthetic {
+  padding: 12px 14px;
+  margin: 6px 0;
+  border-radius: var(--radius-tile);
+}
+
+.is-capture {
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+}
+
+li.is-capture {
+  border-top-color: transparent;
+}
+
+.is-synthetic {
+  border-style: dashed;
+}
+
+li.is-synthetic {
+  border: 1px dashed var(--console-dot-2);
+}
+
+/* Alerts: ochre text led by an ochre dot, like an offline status pill. */
+.teach-alert {
+  color: var(--color-warn);
+  font-size: 13px;
+}
+
+.teach-alert::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+}
+
+.teach-alert .text-link {
+  color: var(--color-warn);
+  text-decoration: underline;
+}
+
+.teach-details {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.teach-details summary {
+  cursor: pointer;
+  color: var(--color-navy);
+  font-weight: 600;
+}
+
+.teach-details p {
+  margin-top: 6px;
+}
+
+/* Lesson delivery: the acknowledgment steps drawn as a stippled route between dots. */
+.teach-path {
+  display: grid;
+  gap: 10px;
+}
+
+.teach-path .teach-actions {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.teach-steps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.teach-step {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  padding: 0 0 14px 24px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.teach-step:last-child {
+  padding-bottom: 0;
+}
+
+.teach-step::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-cream);
+  box-shadow: inset 0 0 0 1px var(--console-dot-2);
+}
+
+.teach-step::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 17px;
+  bottom: 2px;
+  width: 3px;
+  background-image: radial-gradient(circle, var(--console-dot-2) 0.9px, transparent 1.3px);
+  background-size: 3px 5px;
+}
+
+.teach-step:last-child::after {
+  display: none;
+}
+
+.teach-step__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-navy);
+}
+
+.teach-step--done::before {
+  background: var(--color-navy);
+  box-shadow: none;
+}
+
+.teach-step--done::after {
+  background-image: radial-gradient(circle, var(--color-navy) 0.9px, transparent 1.3px);
+}
+
+.teach-step--now::before {
+  box-shadow: inset 0 0 0 2px var(--color-warn);
+}
+
+.teach-step--now .teach-step__title {
+  color: var(--color-warn);
+}
+
+.teach-step--waiting .teach-step__title {
+  color: var(--color-muted);
+}
+
+/* A step the system stream also saw: a small tracked caption under the summary's text. */
+.teach-step__stream {
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--console-faint);
+}
+
+/* The classroom summary and the system stream disagree: one line on a hairline, never hidden. */
+.teach-disagree {
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-line);
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--color-warn);
+  overflow-wrap: anywhere;
+}
+
+/* Roster: what the system stream knows about the learner's tab, as small dots with short words. */
+.teach-board > button > .teach-live {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.teach-live__label {
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--console-faint);
+}
+
+.teach-live__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-muted);
+}
+
+.teach-live__item::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--console-dot-2);
+}
+
+.teach-live__item[data-on] {
+  color: var(--color-ink);
+}
+
+.teach-live__item[data-on]::before {
+  background: var(--color-navy);
+  box-shadow: none;
+}
+
+.teach-board > button > .teach-live[data-state='none'] {
+  color: var(--console-faint);
+}
+
+/* Sign-in: the identity card sits on a stipple cluster, the way the graph's cards sit by their nodes. */
+.teach--signin {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: max(520px, calc(100dvh - 112px));
+  max-width: none;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.teach--signin::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  top: 50%;
+  width: 620px;
+  height: 620px;
+  transform: translate(-62%, -58%);
+  background-image:
+    radial-gradient(circle, var(--console-dot-1) 1.2px, transparent 1.6px),
+    radial-gradient(circle, var(--console-dot-2) 1px, transparent 1.4px),
+    radial-gradient(circle, var(--console-dot-3) 1.4px, transparent 1.8px);
+  background-size: 23px 19px, 13px 11px, 17px 29px;
+  background-position: 0 0, 5px 7px, 9px 3px;
+  -webkit-mask-image: radial-gradient(closest-side, #000 0%, rgba(0, 0, 0, 0.55) 45%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 0%, rgba(0, 0, 0, 0.55) 45%, transparent 100%);
+  pointer-events: none;
+}
+
+@media (max-width: 800px) {
+  .console {
+    --console-gutter: 16px;
+  }
+
+  .teach {
+    padding: 20px var(--console-gutter) 48px;
+  }
+
+  .teach-layout,
+  .console .teach-editor,
+  .teach-diff li,
+  .teach-actions,
+  .teach-path .teach-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .teach-actions .btn {
+    justify-self: stretch;
+  }
+
+  .teach-detail {
+    padding: 18px 16px 20px;
+  }
+
+  .teach--signin::before {
+    width: 420px;
+    height: 420px;
+  }
+
+  .console--detail .teach-board {
+    display: none;
+  }
+
+  .console--roster .teach-detail {
+    display: none;
+  }
+}
+
+.console-tabs button:focus-visible,
+.teach-board > button:focus-visible,
+.btn:focus-visible,
+.live-toolbar button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ---------- School tab ----------
+ * Twelve live rooms in one database. Same paper as the Classroom tab: hairlines, serif names,
+ * tracked labels, and navy dots that light when a subscription receives a row.
+ */
+.school {
+  display: grid;
+  gap: 24px;
+  padding: 24px var(--console-gutter) 72px;
+  color: var(--color-ink);
+}
+
+.school-head {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+}
+
+.school-head h1,
+.school-measure h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  color: var(--color-navy);
+}
+
+.school-head h1 {
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+/* The console's version of .dash-node__loc. */
+.school-kicker,
+.school-db-bar,
+.school-count {
+  margin: 0;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--console-faint);
+}
+
+.school-head p:not(.school-kicker),
+.school-result,
+.school-measure p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-muted);
+}
+
+/* Table names as chips. */
+.school-db {
+  display: inline-block;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px var(--console-hair);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--color-navy);
+  white-space: nowrap;
+}
+
+.school-head .btn {
+  width: max-content;
+  margin-top: 6px;
+}
+
+.school-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 32px;
+  align-items: start;
+}
+
+.school-db-bar {
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--console-hair);
+  color: var(--color-navy);
+}
+
+/* 2026-10-25: overflow-x auto put the twelve live rooms behind a horizontal scrollbar. */
+.school-board {
+  min-width: 0;
+  overflow-x: visible;
+}
+
+.school-rooms {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.school-room {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  min-width: 0;
+  padding: 10px 4px;
+  border: 1px solid var(--console-card-line);
+  border-radius: var(--radius-card);
+  background: var(--console-card);
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    opacity 160ms ease;
+}
+
+.school-room button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 22px;
+  color: var(--color-navy);
+  cursor: pointer;
+}
+
+.school-room button:disabled {
+  color: var(--console-faint);
+  cursor: default;
+}
+
+.school-room button[aria-pressed='true'] {
+  box-shadow: inset 0 -2px 0 var(--color-navy);
+  border-radius: 0;
+}
+
+.school-room button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-pill);
+}
+
+/* Two dots per room: the teacher's subscription and the learner's. */
+.school-dots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 72px;
+  padding-top: 6px;
+}
+
+.school-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--console-dot-3);
+}
+
+.school-room.is-live .school-dots i {
+  background: var(--console-dot-2);
+  box-shadow: none;
+}
+
+.school-room.is-lit {
+  border-color: var(--color-navy);
+  background: var(--color-navy-soft);
+}
+
+.school-room.is-lit .school-dots i {
+  background: var(--color-navy);
+}
+
+.school-room.is-dim {
+  opacity: 0.45;
+}
+
+.school-count {
+  font-size: 9.5px;
+}
+
+.school-count,
+.school-updates {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.school-updates {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.school-room.is-lit .school-updates {
+  color: var(--color-navy);
+  font-weight: 600;
+}
+
+.school-result {
+  margin-top: 14px;
+  max-width: 720px;
+}
+
+/* Measurements: one paper card, like the learner detail. */
+.school-measure {
+  display: grid;
+  gap: 10px;
+  padding: 22px 26px 26px;
+  border: 1px solid var(--console-card-line);
+  border-radius: var(--radius-card);
+  background: var(--console-card);
+}
+
+.school-measure h2 {
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.school-measure h2:not(:first-child) {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-line);
+}
+
+.school-ack {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 28px;
+  line-height: 1.2;
+  color: var(--color-navy);
+  font-variant-numeric: tabular-nums;
+}
+
+.school-measure svg {
+  width: 100%;
+  height: auto;
+}
+
+.school-measure line {
+  stroke: var(--console-hair);
+  stroke-width: 1;
+}
+
+.school-measure polyline {
+  fill: none;
+  stroke: var(--color-navy);
+  stroke-width: 1.5;
+}
+
+.school-measure circle {
+  fill: var(--color-navy);
+}
+
+.school-measure text {
+  fill: var(--console-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.school-measure ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.school-measure li {
+  padding: 4px 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.school-measure .fine {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--console-faint);
+}
+
+@media (max-width: 900px) {
+  .school-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Twelve rooms in one row are too narrow on a phone; two rows of six keep the numbers readable. */
+@media (max-width: 640px) {
+  .school-rooms {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .school-room {
+    transition: none;
+  }
+}
+
+/* ---------- Live system tab ---------- */
+
+/* 2026-10-25: the live graph sat in a short band under the console header.
+.console-main--live {
+  display: flex;
+  flex-direction: column;
+}
+
+.live-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 180px);
+  gap: 8px;
+  padding: 12px 16px 24px;
+}
+*/
+
+/* 2026-10-25: keyed on :has(.console-main--live:not([hidden])). Console.tsx now sets
+   data-live-shown while the live pane is shown or still fading out.
+.console:has(.console-main--live:not([hidden])) {
+*/
+.console[data-live-shown] {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.console-main--live {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.live-pane {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.live-toolbar,
+.live-context {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  max-width: calc(100% - 24px);
+}
+
+.live-toolbar {
+  top: 12px;
+  left: var(--console-gutter);
+  right: 300px;
+  max-width: none;
+  padding: 6px 8px 6px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+}
+
+.live-toolbar .live-scope {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.live-scope > span {
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--console-faint);
+}
+
+.live-scope select,
+.live-actions .btn {
+  height: 32px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+  background: var(--color-cream);
+  color: var(--color-navy);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.live-scope select {
+  padding: 0 28px 0 12px;
+  cursor: pointer;
+}
+
+.live-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.live-actions .btn {
+  padding: 0 12px;
+}
+
+.live-actions .btn[aria-pressed='true'] {
+  background: var(--color-navy);
+  border-color: var(--color-navy);
+  color: var(--color-cream);
+}
+
+.live-stream {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+.live-context {
+  top: 12px;
+  right: var(--console-gutter);
+  left: auto;
+}
+
+/* 2026-10-25: the demo note was a separate warning chip over the graph.
+.live-demo {
+  position: absolute;
+  z-index: 2;
+  top: 96px;
+  left: 12px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-tile);
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+  font-weight: 700;
+}
+*/
+
+.live-stream[data-state='offline'],
+.live-stream[data-state='connecting'] {
+  color: var(--color-warn);
+}
+
+/* 2026-10-25: a 520px floor kept the graph from using the rest of the screen.
+.console-live__stage {
+  position: relative;
+  flex: 1;
+  min-height: 520px;
+}
+*/
+
+.console-live__stage {
+  position: absolute;
+  top: 68px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.live-inspector {
+  position: absolute;
+  z-index: 2;
+  left: var(--console-gutter);
+  bottom: 10px;
+  width: min(440px, calc(100% - 24px));
+  max-height: 36vh;
+  overflow: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: 8px 14px;
+}
+
+/* 2026-10-25: the live header stacked the demo label, a wide button, and the caption.
+.console:has(.console-main--live:not([hidden])) .console-mode {
+  justify-self: start;
+  width: max-content;
+}
+
+.console:has(.console-main--live:not([hidden])) .console-mode .btn {
+  justify-self: start;
+  width: max-content;
+}
+*/
+
+.live-stages,
+.live-events {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.live-stages li,
+.live-events li {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.live-events pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+
+/* The learner a lesson event came from, once that learner's tab announced its profile. */
+.live-learner {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-muted);
+}
+
+.live-learner .text-link {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+@media (max-width: 800px) {
+  .console-bar {
+    position: static;
+  }
+
+  .console-bar__main {
+    gap: 4px 16px;
+    padding: 10px 0 0;
+  }
+
+  .console-tabs {
+    order: 3;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+
+  .console-room {
+    margin-left: 0;
+  }
+
+  .console-mode {
+    justify-content: flex-start;
+  }
+}

@@ -14,11 +14,13 @@ import httpx
 
 from app import telemetry
 from app.audio import azure_pronunciation
-from app.audio.word_acoustics import measure_word
+from app.audio.extract import emit_pitch_extract, emit_pitch_result
+from app.audio.word_acoustics import measure_word, wav_seconds
 from app.config import Settings
 from app.integrations.spacetime import SpacetimeClient, unwrap, uuid_literal
 from app.live import llm
 from app.live.decision import (
+    ease_repeated_instruction,
     evidence_candidates,
     fallback_decision,
     normalize_word_cue,
@@ -237,10 +239,16 @@ async def _measure_acoustics(settings: Settings, body: LiveCoachRequest, wav: by
     """Praat measurements of the attempt WAV, or None when disabled, absent, failed or too slow. Never raises."""
     if wav is None or not settings.word_acoustics_enabled or body.word is None:
         return None
+    pitch: dict[str, Any] = {}
+    emit_pitch_extract(wav_seconds(wav), "praat", "praat measure")
+    started = time.perf_counter()
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(measure_word, wav, list(body.word.zones)), _ACOUSTICS_TIMEOUT_S
+        result = await asyncio.wait_for(
+            asyncio.to_thread(measure_word, wav, list(body.word.zones), pitch), _ACOUSTICS_TIMEOUT_S
         )
+        if result is not None and pitch:
+            emit_pitch_result(dict(pitch), time.perf_counter() - started, "praat")
+        return result
     except Exception as exc:  # noqa: BLE001 - acoustics are optional evidence
         name = type(exc).__name__
         if name not in _acoustics_warned:
@@ -271,15 +279,20 @@ def _is_whole_word(body: LiveCoachRequest) -> bool:
     return practice is None or {z.zoneId for z in word.zones} <= set(practice)
 
 
-def _azure_wanted(settings: Settings, body: LiveCoachRequest, wav: bytes | None) -> bool:
+def _azure_skip_reason(settings: Settings, body: LiveCoachRequest, wav: bytes | None) -> str | None:
+    """Why the word coach does not call Azure for this attempt, or None when it does."""
     word = body.word
-    return (
-        wav is not None
-        and word is not None
-        and word.quality == "usable"
-        and _is_whole_word(body)
-        and azure_pronunciation.configured(settings)
-    )
+    if word is None:
+        return "no_word"
+    if not azure_pronunciation.configured(settings):
+        return "not_configured"
+    if wav is None:
+        return "no_audio"
+    if word.quality != "usable":
+        return "unclear"
+    if not _is_whole_word(body):
+        return "part_only"
+    return None
 
 
 def _azure_zone_scores(word: Any, phonemes: list[dict[str, Any]]) -> dict[str, float]:
@@ -316,7 +329,10 @@ async def _assess_azure(
     settings: Settings, body: LiveCoachRequest, wav: bytes | None
 ) -> tuple[dict[str, Any] | None, int | None]:
     """(Azure evidence block or None, elapsed ms when a call was attempted). Never raises."""
-    if not _azure_wanted(settings, body, wav):
+    reason = _azure_skip_reason(settings, body, wav)
+    if reason is not None:
+        if body.word is not None:
+            azure_pronunciation.emit_skipped(reason)
         return None, None
     assert body.word is not None and wav is not None
     t0 = time.perf_counter()
@@ -330,6 +346,8 @@ async def _assess_azure(
             block = _azure_block(assessment, body.word, settings.consonant_azure_pass)
     except Exception as exc:  # noqa: BLE001 - Azure is optional evidence
         name = type(exc).__name__
+        if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+            azure_pronunciation.emit_skipped("timeout", ms=_ms(t0, time.perf_counter()))
         if name not in _azure_warned:
             _azure_warned.add(name)
             logger.warning("word azure skipped: %s", name)
@@ -505,6 +523,7 @@ async def coach_attempt(
     if word_score is not None and word_score.verdict == "on_target":
         # The local judge already passed every counted zone: no Praat, Azure or model call; GPT is only for errors.
         logger.info("live word coach: local pass, cloud skipped")
+        azure_pronunciation.emit_skipped("local_pass")
         wav = None
         timings["llm"] = 0
         t_v = time.perf_counter()
@@ -549,6 +568,14 @@ async def coach_attempt(
         source, decision, evidence = await _decide(deps, body, audio, video, context, model, timings)
         focus = None
         side = show_side_view(decision.cueId, decision.nextAction)
+    current_verdict = word_score.verdict if word_score is not None else audio.verdict
+    if current_verdict not in ("on_target", "insufficient"):
+        easier = ease_repeated_instruction(decision, sound=body.sound, recent=context.attempts, word=body.word)
+        if easier is not None:
+            decision = easier
+            source = "fallback"
+            focus = decision.focusZoneId
+            side = word_show_side_view(focus, decision.nextAction) if word_score is not None else show_side_view(decision.cueId, decision.nextAction)
     telemetry.emit("backend", "ui", "coach.decision", f"{decision.nextAction}: {decision.caption.strip()}",
                    {"verdict": word_score.verdict if word_score is not None else audio.verdict, "cue": decision.cueId})
     response = LiveCoachResponse(
@@ -601,7 +628,9 @@ async def coach_attempt(
 
     async def persist() -> None:
         try:
-            ok = await history.record(body.profileId, body.attemptId, summary, decision_json)
+            # A scheduled persist runs after the response, outside the route's attempt scope.
+            with telemetry.attempt_scope(body.attemptId):
+                ok = await history.record(body.profileId, body.attemptId, summary, decision_json)
             if not ok:
                 logger.warning("persist reported failure attempt=%s", body.attemptId)
         except Exception as exc:  # noqa: BLE001

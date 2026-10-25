@@ -1,6 +1,7 @@
 import type { AttemptAudio } from '../audio/attemptAudio';
 import type { WordAttemptResult, ZoneResult, ZoneVerdict } from '../game/types';
 import type { GhostUnit } from '../game/ghost/types';
+import { emit as telemetryEmit } from '../telemetry/client';
 
 /**
  * Phone-recognizer judging for the ghost board. The formant judge still finds the try, its quality and the live cursor;
@@ -212,8 +213,16 @@ function inform(why: string) {
 export async function scorePhones(
   clip: AttemptAudio,
   targets: string[],
-  opts: { signal?: AbortSignal; timeoutMs?: number; fetchImpl?: typeof fetch; baseUrl?: string } = {},
+  opts: { signal?: AbortSignal; timeoutMs?: number; fetchImpl?: typeof fetch; baseUrl?: string; word?: string; attemptId?: string } = {},
 ): Promise<PhoneScoreResponse | null> {
+  const started = performance.now();
+  // Dashboard telemetry (kind-routed, ui -> db) after each POST. `word` falls back to the target phones;
+  // `attemptId` ties the event to the attempt being judged.
+  const report = (ok: boolean) => {
+    const word = (opts.word ?? targets.join('')).slice(0, 40);
+    const attempt = opts.attemptId ? { attemptId: opts.attemptId } : {};
+    telemetryEmit('ui', 'db', 'phones.score', `phones ${word} ${ok ? 'scored' : 'failed'}`, { word, ms: Math.round(performance.now() - started), ok, ...attempt });
+  };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const outer = opts.signal;
@@ -232,16 +241,20 @@ export async function scorePhones(
     });
     if (!res.ok) {
       inform(`HTTP ${res.status}`);
+      report(false);
       return null;
     }
     const parsed = parsePhoneResponse(await res.json());
     if (!parsed || parsed.targets.length !== targets.length) {
       inform('unexpected response');
+      report(false);
       return null;
     }
+    report(true);
     return parsed;
   } catch (e) {
     inform(e instanceof Error ? e.name : 'error');
+    report(false);
     return null;
   } finally {
     clearTimeout(timer);

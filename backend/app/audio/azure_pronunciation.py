@@ -5,12 +5,17 @@ Docs: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-sp
 
 assess() never raises: not configured, timeout, transport error, non-200 or a failed recognition all return None.
 Only status codes and exception types are logged, never the key, the audio or the response body.
+
+Dashboard telemetry (docs/telemetry.md, kind-routed, backend -> db): azure.request {word} before the call,
+azure.result {ms, ok, accuracy} after a parsed assessment, azure.error {ms, error} on a failure. Callers emit
+azure.skipped {reason} when they do not call. No transcript, audio or per-phoneme score is ever sent.
 """
 
 import base64
 import io
 import json
 import logging
+import time
 import wave
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,6 +23,7 @@ from typing import Any
 import httpx
 import numpy as np
 
+from app import telemetry
 from app.audio.word_acoustics import _read_pcm16
 from app.config import Settings
 
@@ -40,6 +46,22 @@ class AzureAssessment:
 
 def configured(settings: Settings) -> bool:
     return bool(settings.azure_speech_key and settings.azure_speech_region)
+
+
+def _emit(kind: str, label: str, payload: dict[str, Any]) -> None:
+    try:
+        telemetry.emit("backend", "db", kind, label, payload)
+    except Exception:  # noqa: BLE001 - telemetry never affects the assessment
+        pass
+
+
+def emit_skipped(reason: str, **extra: Any) -> None:
+    """azure.skipped {reason, ...}: the caller decided not to call Azure, or gave up waiting. Never raises."""
+    _emit("azure.skipped", f"azure skipped: {reason}", {"reason": reason, **extra})
+
+
+def _elapsed_ms(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
 
 
 def to_16k_mono_wav(wav: bytes) -> bytes:
@@ -134,6 +156,9 @@ async def assess(
         return None
     own = http is None
     client = http or httpx.AsyncClient(timeout=settings.azure_pronunciation_timeout_s)
+    word = str(reference_text)[:40]
+    _emit("azure.request", f"azure assess {word}", {"word": word})
+    started = time.perf_counter()
     try:
         audio = to_16k_mono_wav(wav_bytes)
         url = f"https://{settings.azure_speech_region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1"
@@ -151,13 +176,23 @@ async def assess(
         )
         if response.status_code != 200:
             logger.warning("azure pronunciation status %s", response.status_code)
+            _emit("azure.error", f"azure status {response.status_code}",
+                  {"ms": _elapsed_ms(started), "error": "HTTPStatusError", "status": response.status_code})
             return None
         parsed = parse_response(response.json())
         if parsed is None:
             logger.warning("azure pronunciation recognition failed")
+            _emit("azure.error", "azure recognition failed", {"ms": _elapsed_ms(started), "error": "RecognitionFailed"})
+            return parsed
+        result: dict[str, Any] = {"ms": _elapsed_ms(started), "ok": True}
+        if parsed.accuracy is not None:
+            result["accuracy"] = parsed.accuracy
+        _emit("azure.result", "azure assessed" if parsed.accuracy is None else f"azure accuracy {round(parsed.accuracy)}",
+              result)
         return parsed
     except Exception as exc:  # noqa: BLE001 - timeout, transport, bad audio or bad JSON all mean "no assessment"
         logger.warning("azure pronunciation error: %s", type(exc).__name__)
+        _emit("azure.error", f"azure error {type(exc).__name__}", {"ms": _elapsed_ms(started), "error": type(exc).__name__})
         return None
     finally:
         if own:

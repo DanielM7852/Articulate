@@ -1,13 +1,17 @@
 """Fire-and-forget telemetry events for the backend dashboard (see docs/telemetry.md).
 
 `emit` never raises and never blocks. It is a no-op until `configure` has been given a configured
-SpacetimeDB; events from worker threads are handed to the captured main loop.
+SpacetimeDB or has minted an anonymous identity; events from worker threads are handed to the captured main loop.
 """
 
 import asyncio
 import json
 import logging
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from app.config import Settings
@@ -18,6 +22,8 @@ LABEL_MAX = 120
 PAYLOAD_MAX_BYTES = 2048
 MAX_IN_FLIGHT = 32
 REDUCER = "emit_telemetry"
+IDENTITY_FILE = "telemetry_identity.json"
+MINT_TIMEOUT_S = 5.0
 
 _client: Any = None
 _http: Any = None
@@ -25,11 +31,38 @@ _loop: asyncio.AbstractEventLoop | None = None
 _inflight = 0
 _lock = threading.Lock()
 _tasks: set[asyncio.Task] = set()
+_startup: asyncio.Task | None = None
+_generation = 0
+
+# The learner attempt the current request or job is handling; `emit` adds it to the payload as `attemptId`.
+# Tasks created and `asyncio.to_thread` calls made inside the scope copy the context, so their events
+# carry it too. Starlette background tasks run after the handler returns, so they open their own scope.
+current_attempt: ContextVar[str | None] = ContextVar("telemetry_attempt", default=None)
 
 
-def configure(settings: Settings | None = None, transport=None, client: Any = None) -> bool:
-    """Enable telemetry. Call from the event loop (the loop is captured). Returns whether it is enabled."""
-    global _client, _http, _loop
+@contextmanager
+def attempt_scope(attempt_id: str | None) -> Iterator[None]:
+    """Tag every event emitted inside the block with `attemptId`. A missing id keeps the current scope."""
+    if not attempt_id:
+        yield
+        return
+    token = current_attempt.set(str(attempt_id))
+    try:
+        yield
+    finally:
+        current_attempt.reset(token)
+
+
+def configure(settings: Settings | None = None, transport=None, client: Any = None, announce: bool = False) -> bool:
+    """Enable telemetry. Call from the event loop (the loop is captured). Returns whether it is enabled now.
+
+    Nothing is enabled when `telemetry_enabled` is false. With a configured SPACETIME_TOKEN the client is built
+    immediately. Without one, an anonymous identity is minted (or read from the local store) in a background
+    task on the running loop; emits stay no-ops until it finishes, and a failure leaves telemetry disabled.
+    `transport` is used for every request, including the mint, so tests never reach the network. `announce`
+    emits `backend.up` once telemetry is live.
+    """
+    global _client, _http, _loop, _startup
     reset()
     try:
         _loop = asyncio.get_running_loop()
@@ -38,35 +71,174 @@ def configure(settings: Settings | None = None, transport=None, client: Any = No
     if client is not None:
         _client = client
         return True
-    if settings is None or not settings.spacetime_configured:
+    if settings is None or not settings.telemetry_enabled:
         return False
-    try:
-        from app.integrations.spacetime import SpacetimeClient, new_http_client
-
-        _http = new_http_client(settings, transport)
-        _client = SpacetimeClient(settings, transport, _http)
+    if settings.spacetime_configured:
+        try:
+            _install(settings, transport)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("telemetry disabled (%s)", type(exc).__name__)
+            _client = _http = None
+            return False
+        if announce:
+            emit_backend_up(settings, "configured")
         return True
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("telemetry disabled (%s)", type(exc).__name__)
-        _client = _http = None
+    if settings.spacetime_token or _loop is None:  # a real token without a database stays disabled, as before
         return False
+    _startup = _loop.create_task(_start_anonymous(settings, transport, announce, _generation))
+    return False
+
+
+def _install(settings: Settings, transport) -> None:
+    global _client, _http
+    from app.integrations.spacetime import SpacetimeClient, new_http_client
+
+    http = new_http_client(settings, transport)
+    _http, _client = http, SpacetimeClient(settings, transport, http)
+
+
+def identity_path(settings: Settings) -> Path:
+    from app.paths import BACKEND_ROOT
+
+    raw = Path(settings.store_dir)
+    return (raw if raw.is_absolute() else BACKEND_ROOT / raw) / IDENTITY_FILE
+
+
+def _read_cached(path: Path, uri: str) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and data.get("uri") == uri and data.get("token") and data.get("identity"):
+        return data
+    return None
+
+
+async def _mint(uri: str, transport) -> dict:
+    import httpx
+
+    async with httpx.AsyncClient(transport=transport, timeout=MINT_TIMEOUT_S) as http:
+        response = await http.post(f"{uri}/v1/identity")
+    response.raise_for_status()
+    data = response.json()
+    token, identity = data.get("token"), data.get("identity")
+    if not isinstance(token, str) or not token or not isinstance(identity, str) or not identity:
+        raise ValueError("identity response without token")
+    return {"uri": uri, "identity": identity, "token": token}
+
+
+async def _start_anonymous(settings: Settings, transport, announce: bool, generation: int) -> None:
+    uri = settings.spacetime_uri.rstrip("/")
+    database = settings.spacetime_database or settings.telemetry_database
+    try:
+        path = identity_path(settings)
+        cached = _read_cached(path, uri)
+        if cached is None:
+            cached = await _mint(uri, transport)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(cached), encoding="utf-8")
+            except OSError as exc:  # an uncached identity still works for this run
+                logger.info("telemetry identity not cached (%s)", type(exc).__name__)
+        if generation != _generation:
+            return
+        _install(settings.model_copy(update={"spacetime_database": database, "spacetime_token": cached["token"]}),
+                 transport)
+        logger.info("telemetry live: anonymous identity %s... on %s", cached["identity"][:12], database)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - telemetry must never affect the app
+        logger.info("telemetry disabled: anonymous identity unavailable (%s)", type(exc).__name__)
+        return
+    if announce:
+        emit_backend_up(settings, "anonymous")
+
+
+def live_model(settings: Settings) -> str:
+    return settings.live_openai_model if settings.live_coach_provider == "openai" else settings.live_coach_model
+
+
+def _classroom_configured(settings: Settings) -> bool:
+    """True when the classroom owner credentials are present (the classroom routes can reach the database)."""
+    try:
+        from app.classroom.owner import load_owner
+
+        return load_owner(settings) is not None
+    except Exception:  # noqa: BLE001 - an unreadable owner file means no classroom
+        return False
+
+
+def emit_backend_up(settings: Settings, identity: str) -> None:
+    payload = {
+        "provider": settings.live_coach_provider,
+        "model": live_model(settings),
+        "articulation": bool(settings.articulation_configured),
+        "pitchTable": bool(getattr(settings, "pitch_table_enabled", False)),
+        "praat": bool(getattr(settings, "word_acoustics_enabled", False)),
+        "azure": bool(settings.azure_configured),
+        "classroom": _classroom_configured(settings),
+        "coordination": settings.live_coordination,
+        "telemetryIdentity": identity,
+    }
+    emit("backend", "db", "backend.up", "backend online", payload)
+
+
+def enabled() -> bool:
+    return _client is not None
 
 
 def reset() -> None:
-    global _client, _http, _loop, _inflight
+    global _client, _http, _loop, _inflight, _startup, _generation
+    task = _startup
+    _startup = None
+    _generation += 1
+    if task is not None and not task.done():
+        try:
+            task.cancel()
+        except RuntimeError:  # its loop is already closed
+            pass
     _client = _http = _loop = None
     _inflight = 0
     _tasks.clear()
 
 
 async def aclose() -> None:
+    task = _startup
     http = _http
     reset()
+    if task is not None:
+        try:
+            await asyncio.gather(task, return_exceptions=True)  # cancelled by reset; installs nothing now
+        except Exception:  # noqa: BLE001
+            pass
     if http is not None:
         try:
             await http.aclose()
         except Exception:  # noqa: BLE001
             pass
+
+
+async def wait_live(timeout_s: float = MINT_TIMEOUT_S + 1.0) -> bool:
+    """Wait up to `timeout_s` for a pending anonymous-identity startup. For scripts outside the app lifespan,
+    whose first emits would otherwise be dropped while the identity is minted. Returns whether telemetry is live."""
+    task = _startup
+    if task is not None and not task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout_s)
+        except Exception:  # noqa: BLE001 - a slow or failed mint leaves telemetry off
+            pass
+    return enabled()
+
+
+async def drain(timeout_s: float = 1.5) -> None:
+    """Wait up to `timeout_s` for emits in flight on this loop, so a script can exit without dropping them."""
+    try:
+        await asyncio.sleep(0)  # let emits handed over from worker threads get scheduled
+        pending = [t for t in _tasks if not t.done()]
+        if pending:
+            await asyncio.wait(pending, timeout=timeout_s)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _clip(value: Any, limit: int) -> str:
@@ -115,6 +287,9 @@ def emit(source: str, target: str, kind: str, label: str, payload: dict | None =
     try:
         if _client is None:
             return
+        attempt = current_attempt.get()
+        if attempt and (payload is None or "attemptId" not in payload):
+            payload = {**(payload or {}), "attemptId": attempt}
         args = [source, target, kind, _clip(label, LABEL_MAX), _payload_json(payload)]
         with _lock:
             if _inflight >= MAX_IN_FLIGHT:

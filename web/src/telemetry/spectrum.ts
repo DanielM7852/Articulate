@@ -2,16 +2,51 @@ import { emit } from './client';
 
 /**
  * Streams a 32-band log-spaced spectrum of an audio source to the dashboard (docs/telemetry.md,
- * "Perception streams"). Uses a timer instead of rAF so it keeps running in background tabs.
- * Only one emitter runs at a time; later callers get a no-op stop function.
+ * "Perception streams"), with the same block's waveform decimated to 128 uint8 samples. Uses a
+ * timer instead of rAF so it keeps running in background tabs. Only one emitter runs at a time;
+ * later callers get a no-op stop function.
  */
 const BANDS = 32;
 const F_LO = 80;
 const F_HI = 8000;
 const INTERVAL_MS = 100;
 const KEEPALIVE_MS = 1000;
+/** Waveform samples per frame: 128 bytes -> 172 base64 chars, so the payload stays near 400 bytes. */
+const WAVE_SAMPLES = 128;
 
 let active = 0;
+
+/** Base64 of raw bytes (the lipTelemetry.ts helper). */
+function base64Bytes(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x2000) {
+    bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 0x2000)));
+  }
+  return btoa(bin);
+}
+
+/**
+ * Decimates a byte time-domain block (128 = zero) into `out`: each output sample is the sample of
+ * largest magnitude within its window of the block, sign kept, so clicks and plosive bursts survive.
+ */
+function decimateWave(time: Uint8Array, out: Uint8Array): void {
+  const n = out.length;
+  const step = time.length / n;
+  for (let w = 0; w < n; w++) {
+    const lo = Math.min(time.length - 1, Math.floor(w * step));
+    const hi = Math.min(time.length, Math.max(lo + 1, Math.floor((w + 1) * step)));
+    let best = 128;
+    let mag = -1;
+    for (let i = lo; i < hi; i++) {
+      const d = Math.abs(time[i] - 128);
+      if (d > mag) {
+        mag = d;
+        best = time[i];
+      }
+    }
+    out[w] = best;
+  }
+}
 
 export function startSpectrumEmitter(ctx: AudioContext, source: AudioNode): () => void {
   if (active > 0) return () => {};
@@ -28,6 +63,7 @@ export function startSpectrumEmitter(ctx: AudioContext, source: AudioNode): () =
 
   const freq = new Uint8Array(analyser.frequencyBinCount);
   const time = new Uint8Array(analyser.fftSize);
+  const wave = new Uint8Array(WAVE_SAMPLES);
   const binHz = ctx.sampleRate / analyser.fftSize;
   const ratio = F_HI / F_LO;
   // Inclusive [lo, hi] FFT bin range per band.
@@ -66,7 +102,8 @@ export function startSpectrumEmitter(ctx: AudioContext, source: AudioNode): () =
     const now = performance.now();
     if (silentTicks >= 2 && now - lastSent < KEEPALIVE_MS) return;
     lastSent = now;
-    emit('audio', 'db', 'audio.spectrum', 'spectrum', { bins, rms });
+    decimateWave(time, wave);
+    emit('audio', 'db', 'audio.spectrum', 'spectrum', { bins, rms, wave: base64Bytes(wave) });
   }, INTERVAL_MS);
 
   let stopped = false;
