@@ -1029,10 +1029,12 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineI
       if (Math.abs(aim - wAlpha) < 0.004) wAlpha = aim;
     }
     const k = reduce ? 1 : Math.min(1, Math.max(0, (now - wT0) / MESH_LERP_MS));
-    if (!wDirty && k === wDrawnK && wAlpha === wDrawnAlpha) return;
+    // While live the dot face breathes and drifts, so it redraws every frame; it fades back to still with the alpha.
+    const life = reduce || wMode !== 2 ? 0 : Math.max(0, (wAlpha - 0.25) / 0.75);
+    if (!wDirty && k === wDrawnK && wAlpha === wDrawnAlpha && !life) return;
     if (wMode === 2) {
       for (let i = 0; i < fCur.length; i++) fCur[i] = fFrom[i] + (fTo[i] - fFrom[i]) * k;
-      dotFace.draw(wCtx, px, fCur, wAlpha);
+      dotFace.draw(wCtx, px, fCur, wAlpha, life, now / 1000);
     } else {
       for (let i = 0; i < MESH_LEN; i++) wCur[i] = wFrom[i] + (wTo[i] - wFrom[i]) * k;
       drawWire(wCtx, px, wCur, wAlpha);
@@ -1405,8 +1407,9 @@ function Detail({
       return <p className="dash-status" data-on={s.micOpen === true || undefined}>{s.micOpen === null ? 'waiting' : s.micOpen ? 'listening' : 'closed'}</p>;
     case 'mediapipe':
       return (
-        <div className="dash-card dash-card--mesh">
-          {/* drawn by the canvas engine from lip.mesh (dot face, or the v1 wireframe); sized for the device in stepWire */}
+        <div className="dash-mesh">
+          {/* no card: the face floats on the paper like the clusters. Drawn by the canvas engine from lip.mesh (dot
+              face, or the v1 wireframe); sized for the device in stepWire */}
           <canvas ref={wireRef} className="dash-wire" data-live={s.meshLive || undefined} aria-hidden="true" />
           <dl className="dash-kv">
             <div><dt>open</dt><dd>{s.lip ? s.lip.opening.toFixed(2) : '—'}</dd></div>
