@@ -63,9 +63,12 @@ const SCATTER = {
   c: 11,
   maxOffset: 0.009,
   settle: 1.5e-4,
-  // A push can carry a dot a little into the head (a concave spot, or the wake), where the depth prepass would
-  // hide it and leave a hole. Its depth is drawn this many times its offset nearer the camera, so every dot shows.
-  depthBias: 1.5
+  // Only the surface facing the viewer is stirred (normal . ray below -facing): the far side and inner surfaces
+  // (mouth, eye sockets) stay put behind the depth prepass.
+  facing: 0.1,
+  // A dot never goes into the surface, where the prepass would hide it and leave a hole: a slide along the
+  // surface also lifts it off by ride x the slide, so it rides over creases (nose, lips) instead of sinking.
+  ride: 0.6
 };
 const PREPASS_OFFSET = { factor: 2, units: 4 };
 // dot size from the skin texture: darker texels (lips, brows, nostrils) get bigger dots, like the hologram style
@@ -158,7 +161,6 @@ const VERT = /* glsl */ `
 attribute vec3 aNormal;
 attribute vec4 aInfo; // x: size multiplier, y: kind, z: mouth weight, w: alpha
 attribute vec4 aFly; // xyz: fly-in start relative to the head centre, w: per-dot random in [0, 1)
-attribute float aDisp; // metres the pointer has pushed this dot (0 at rest)
 uniform float uProj; // device pixels per metre at one metre
 uniform float uDpr;
 uniform float uRadius;
@@ -276,12 +278,6 @@ void main() {
   float ps = clamp(px, minPx, ${DOT.maxPx.toFixed(1)} * uDpr);
   gl_PointSize = ps;
   gl_Position = projectionMatrix * mv;
-  if (aDisp > 0.0) {
-    // a pushed dot keeps its place on screen but its depth comes toward the camera, past the prepass
-    float dist = length(mv.xyz);
-    vec4 nearer = projectionMatrix * vec4(mv.xyz * (1.0 - min(0.5, ${SCATTER.depthBias.toFixed(2)} * aDisp / max(dist, 1e-3))), 1.0);
-    gl_Position.z = nearer.z / nearer.w * gl_Position.w;
-  }
   vRim = rim;
   vKind = aInfo.y;
   vMouth = aInfo.z;
@@ -770,7 +766,6 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   const positions = new Float32Array(count * 3);
   const normals = new Float32Array(count * 3);
   const offset = new Float32Array(count * 3);
-  const disp = new Float32Array(count); // |offset| per dot, for the shader's depth bias
   const vel = new Float32Array(count * 3);
   const activeIdx = new Uint32Array(count);
   const isActive = new Uint8Array(count);
@@ -787,9 +782,6 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   nrmAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("position", posAttr);
   geometry.setAttribute("aNormal", nrmAttr);
-  const dispAttr = new THREE.BufferAttribute(disp, 1);
-  dispAttr.setUsage(THREE.DynamicDrawUsage);
-  geometry.setAttribute("aDisp", dispAttr);
   const infoA = new Float32Array(info);
   geometry.setAttribute("aInfo", new THREE.BufferAttribute(infoA, 4));
   // fly-in starts: the shell, or (with a start shape) points on the picture in camera space
@@ -991,13 +983,29 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       const pz = hz - t * dz;
       const d2 = px * px + py * py + pz * pz;
       if (d2 >= reach2) continue;
+      const nx = normals[i * 3];
+      const ny = normals[i * 3 + 1];
+      const nz = normals[i * 3 + 2];
+      if (nx * dx + ny * dy + nz * dz > -SCATTER.facing) continue; // far side or an inner surface: left alone
       const g = Math.exp(-d2 * inv); // Gaussian falloff: no edge
       const d = Math.sqrt(d2);
       const radial = (SCATTER.outward * g) / Math.max(d, 1e-4);
       const lift = SCATTER.lift * g;
-      target[i * 3] = px * radial - dx * lift + wx * g;
-      target[i * 3 + 1] = py * radial - dy * lift + wy * g;
-      target[i * 3 + 2] = pz * radial - dz * lift + wz * g;
+      let tx = px * radial - dx * lift + wx * g;
+      let ty = py * radial - dy * lift + wy * g;
+      let tz = pz * radial - dz * lift + wz * g;
+      // keep it out of the surface: at least ride x its slide along it, off it
+      const tn = tx * nx + ty * ny + tz * nz;
+      const slide = Math.sqrt(Math.max(0, tx * tx + ty * ty + tz * tz - tn * tn));
+      const up = SCATTER.ride * slide - tn;
+      if (up > 0) {
+        tx += nx * up;
+        ty += ny * up;
+        tz += nz * up;
+      }
+      target[i * 3] = tx;
+      target[i * 3 + 1] = ty;
+      target[i * 3 + 2] = tz;
       touched[i] = frameId;
       activate(i);
     }
@@ -1043,18 +1051,31 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         vel[i * 3 + j] = v;
         if (Math.abs(no) > SCATTER.settle || Math.abs(v) > SCATTER.settle * 20 || Math.abs(tg) > SCATTER.settle) settled = false;
       }
+      // the spring's overshoot on the way home must not carry the dot into the surface either
+      const nx = normals[i * 3];
+      const ny = normals[i * 3 + 1];
+      const nz = normals[i * 3 + 2];
+      const on = offset[i * 3] * nx + offset[i * 3 + 1] * ny + offset[i * 3 + 2] * nz;
+      if (on < 0) {
+        offset[i * 3] -= on * nx;
+        offset[i * 3 + 1] -= on * ny;
+        offset[i * 3 + 2] -= on * nz;
+        const vn = vel[i * 3] * nx + vel[i * 3 + 1] * ny + vel[i * 3 + 2] * nz;
+        if (vn < 0) {
+          vel[i * 3] -= vn * nx;
+          vel[i * 3 + 1] -= vn * ny;
+          vel[i * 3 + 2] -= vn * nz;
+        }
+      }
       if (settled) {
         offset[i * 3] = offset[i * 3 + 1] = offset[i * 3 + 2] = 0;
         vel[i * 3] = vel[i * 3 + 1] = vel[i * 3 + 2] = 0;
-        disp[i] = 0;
         isActive[i] = 0;
       } else {
-        disp[i] = Math.hypot(offset[i * 3], offset[i * 3 + 1], offset[i * 3 + 2]);
         activeIdx[w++] = i;
       }
     }
     activeCount = w;
-    dispAttr.needsUpdate = true;
   }
 
   function place() {
@@ -1435,8 +1456,6 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       reduced = !!on;
       if (reduced) {
         offset.fill(0);
-        disp.fill(0);
-        dispAttr.needsUpdate = true;
         vel.fill(0);
         isActive.fill(0);
         activeCount = 0;
