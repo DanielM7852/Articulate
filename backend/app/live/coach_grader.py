@@ -242,7 +242,7 @@ async def _grade_batch(
             result = await asyncio.wait_for(
                 asyncio.to_thread(
                     llm._parse, client, settings, GRADER_SYSTEM, _batch_payload(batch), GradeBatch, effort, MAX_TOKENS,
-                    model, "on", "coach_grade",
+                    model, "on", "grade",  # telemetry.claude_call purpose
                 ),
                 timeout=timeout_s,
             )

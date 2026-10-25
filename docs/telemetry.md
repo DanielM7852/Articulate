@@ -53,7 +53,7 @@ At most 400 rows. When an insert pushes the count over, the oldest rows among th
 | pitch     | librosa F0 extraction                                        | server        |
 | sparc     | SPARC articulatory model service (`services/articulation`)   | server        |
 | db        | SpacetimeDB                                                  | maincloud     |
-| claude    | Anthropic Claude (coach decisions, notes, insights)          | Anthropic     |
+| claude    | Anthropic Claude (coach decisions, notes, insights, recaps, caption grading) | Anthropic |
 | ui        | the learner's screen                                         | browser       |
 
 The dashboard also derives extra nodes from event kinds and payload fields; see "Kind-routed components".
@@ -74,7 +74,7 @@ The dashboard also derives extra nodes from event kinds and payload fields; see 
 | tts.audio          | tts -> ui           | `{ms}` duration of audio received                                      |
 | coach.request      | ui -> backend       | `{sound, mode}`                                                        |
 | coach.decision     | backend -> ui       | `{verdict, cue}`                                                       |
-| claude.request     | backend -> claude   | `{model, purpose}` purpose in decide, word, notes, insight, session, ask |
+| claude.request     | backend -> claude   | `{model, purpose}` purpose in decide, word, notes, insight, session, ask, recap (session recap), grade (offline coach checker) |
 | claude.response    | claude -> backend   | `{model, purpose, latencyMs, inputTokens, outputTokens, line}` line <= 120 chars |
 | claude.error       | claude -> backend   | `{model, purpose, latencyMs, error}`                                   |
 | pitch.extract      | backend -> pitch    | `{seconds, method}` method `praat` (Parselmouth: word-coach acoustics and the pitch table) or `pyin` (legacy librosa path) |
@@ -102,6 +102,15 @@ The dashboard also derives extra nodes from event kinds and payload fields; see 
 | classroom.probe    | ui -> db            | `{rooms, updates, ms}` when a school probe write is acknowledged; updates = subscription updates seen across all rooms |
 | head.ready         | ui -> db            | `{driver}` `talkinghead`, `three` or `unknown`, once per guide mount   |
 | head.speak         | ui -> db            | `{ms?}` when the guide's speech playback starts, at most every 2 s; ms = delay from `speak()` to playback |
+| recap.start        | backend -> db       | `{attempts, word?}` when a new recap job starts (not when `POST /v1/live/recap` returns an existing one); attempts = distinct attempt ids; word only when it is a plain word |
+| recap.ready        | backend -> db       | `{ms}` the recap was built; ms = whole job (history load and the Claude call) |
+| recap.error        | backend -> db       | `{ms, error}` error = exception type name (`TimeoutError` when the overall recap timeout hit), or `empty` when none of the session's turns were found |
+| recap.limited      | backend -> db       | `{reason}` `per_learner` (a recap is already pending) or `per_hour`; the route answers 429 |
+| recap.email        | backend -> db       | `{ok, ms, provider: "resend"}` after each send attempt; the address is never sent |
+| recap.email_skipped | backend -> db      | `{reason: "not_configured"}` an address was given but Resend is not configured |
+| checker.run        | backend -> db       | `{source, turns, batches, dryRun, model}` once when the offline coach checker (`python -m scripts.grade_coach`) starts; source `local` or `spacetime`; sent on dry runs too |
+| checker.graded     | backend -> db       | `{graded, turns, ms}` after the grading calls; graded = turns Claude returned a grade for |
+| checker.report     | backend -> db       | `{rows, passRate?}` when report.md and grades.json are written; passRate 0..100 = graded captions with no failed rule (omitted when nothing was graded) |
 
 Rates: lip.frame and audio.frame are throttled to at most 5 per second each by the browser.
 Everything else is one event per occurrence.
@@ -114,6 +123,11 @@ phone recognizer in `services/phones`, called from the browser), `classroom.*` (
 (Ava's 3D head) all travel as `backend -> db` or `ui -> db`. The `provider` field on `stt.*` separates OpenAI Realtime
 from Cartesia Ink, and the `method` field on `pitch.*` separates Praat from pYIN. The dashboard routes these packets by
 kind and field and draws each of these components as its own node.
+
+- Recap: `recap.*`, `backend -> db`. The post-session recap job in the backend (`app/live/recap.py`) and its Resend email;
+  its Claude call is `claude.*` with purpose `recap`.
+- Checker: `checker.*`, `backend -> db`. The offline coach checker script (`scripts/grade_coach.py`), not the running
+  app; its grading calls are `claude.*` with purpose `grade`.
 
 ## Session id and presence
 
@@ -171,6 +185,10 @@ from a worker thread). Never raises. No-op until `configure` (called from the ap
   needed. A failure logs one INFO line and leaves telemetry off; app startup is never blocked.
 
 Once live, the backend emits `backend.up` with its live configuration.
+
+Scripts that run outside the app lifespan (the coach checker) call `configure(settings)` themselves, `await
+wait_live()` so an anonymous identity can finish minting before the first event, and `await drain()` (up to 1.5 s)
+before exiting so in-flight events are not dropped. A telemetry failure never changes their output or exit code.
 
 ## Publishing the module (teammate's machine)
 

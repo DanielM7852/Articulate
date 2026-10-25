@@ -17,6 +17,7 @@ from typing import Any, Awaitable, Callable, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app import telemetry
 from app.config import Settings
 from app.live import llm
 from app.live.notes import SOUND_SPELLING
@@ -227,6 +228,7 @@ class _Entry:
     email: str | None = None
     email_status: EmailState = "none"
     sending: bool = False
+    error_type: str | None = None  # telemetry only: exception type name of a failed recap
 
     def view(self) -> RecapStatus:
         return RecapStatus(recapId=self.recap_id, status=self.status, recap=self.recap, error=self.error,
@@ -398,6 +400,21 @@ class RecapLimitError(Exception):
     """Too many recaps for this profile (one pending at a time, a few per hour)."""
 
 
+def _ms_since(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
+
+
+def _emit_email(ok: bool, started: float) -> None:
+    """recap.email after one send attempt. The address is never sent."""
+    telemetry.emit("backend", "db", "recap.email", "recap email sent" if ok else "recap email failed",
+                   {"ok": ok, "ms": _ms_since(started), "provider": "resend"})
+
+
+def _emit_email_skipped() -> None:
+    telemetry.emit("backend", "db", "recap.email_skipped", "recap email skipped: not configured",
+                   {"reason": "not_configured"})
+
+
 class RecapService:
     def __init__(self, app) -> None:
         self.app = app
@@ -501,6 +518,8 @@ class RecapService:
         pending = sum(1 for e in self._entries.values() if e.profile_id == profile_id and e.status == "pending")
         if pending >= MAX_PENDING_PER_PROFILE or len(starts) >= MAX_STARTS_PER_HOUR:
             self._starts[profile_id] = starts
+            reason = "per_learner" if pending >= MAX_PENDING_PER_PROFILE else "per_hour"
+            telemetry.emit("backend", "db", "recap.limited", f"recap limited: {reason}", {"reason": reason})
             raise RecapLimitError(profile_id)
         starts.append(now)
         self._starts[profile_id] = starts
@@ -511,6 +530,10 @@ class RecapService:
             self._set_email(entry, email)
         safe_word = word.strip().lower() if isinstance(word, str) and WORD_RE.fullmatch(word.strip()) else None
         self._spawn(self._run(entry, set(attempt_ids), safe_word))
+        payload: dict[str, Any] = {"attempts": len(key[1])}
+        if safe_word:
+            payload["word"] = safe_word
+        telemetry.emit("backend", "db", "recap.start", "recap started", payload)
         return entry
 
     def _spawn(self, coro) -> None:
@@ -525,6 +548,8 @@ class RecapService:
     def _set_email(self, entry: _Entry, email: str) -> None:
         entry.email = email
         entry.email_status = "queued" if self._mailer() is not None else "not_configured"
+        if entry.email_status == "not_configured":
+            _emit_email_skipped()
 
     async def set_email(self, entry: _Entry, email: str) -> None:
         self._set_email(entry, email)
@@ -539,20 +564,24 @@ class RecapService:
         mailer = self._mailer()
         if mailer is None:
             entry.email_status = "not_configured"
+            _emit_email_skipped()
             return
         entry.sending = True
         try:
             while True:
                 to = entry.email
                 subject, html_body, text = render_email(entry.recap)
+                sent_at = time.perf_counter()
                 try:
                     await mailer(to, subject, html_body, text)
                 except Exception as exc:  # noqa: BLE001
+                    _emit_email(False, sent_at)
                     logger.warning("recap email failed: %s", type(exc).__name__)
                     if entry.email == to:
                         entry.email_status = "failed"
                         break
                 else:
+                    _emit_email(True, sent_at)
                     if entry.email == to:
                         entry.email_status = "sent"
                         break
@@ -564,13 +593,20 @@ class RecapService:
 
     # -- pipeline --
     async def _run(self, entry: _Entry, attempt_ids: set[str], word: str | None) -> None:
+        started = time.perf_counter()
         try:
             await asyncio.wait_for(self._pipeline(entry, attempt_ids, word), self._settings().live_recap_timeout_s)
         except asyncio.TimeoutError:
-            entry.status, entry.error = "failed", "timeout"
+            entry.status, entry.error, entry.error_type = "failed", "timeout", "TimeoutError"
         except Exception as exc:  # noqa: BLE001
             logger.warning("recap failed: %s", type(exc).__name__)
-            entry.status, entry.error = "failed", "recap_unavailable"
+            entry.status, entry.error, entry.error_type = "failed", "recap_unavailable", type(exc).__name__
+        if entry.status == "ready":
+            telemetry.emit("backend", "db", "recap.ready", "recap ready", {"ms": _ms_since(started)})
+        else:  # failed, or "empty" when none of the session's turns were found
+            error = entry.error_type or entry.status
+            telemetry.emit("backend", "db", "recap.error", f"recap failed: {error}",
+                           {"ms": _ms_since(started), "error": error})
         if entry.status != "ready" and entry.email_status == "queued":
             entry.email_status = "failed" if entry.status == "failed" else "none"
         await self.deliver(entry)
@@ -602,12 +638,12 @@ class RecapService:
                 s, self._claude(), RECAP_SYSTEM,
                 build_prompt(session, past, context.notes, word, words if len(words) > 1 else None), RecapDraft,
                 s.live_recap_effort, min(CALL_TIMEOUT_S, s.live_recap_timeout_s), RECAP_MAX_TOKENS,
-                model=s.live_recap_model)
+                model=s.live_recap_model, purpose="recap")
         except (asyncio.CancelledError, asyncio.TimeoutError):
             raise  # the caller reports a timeout
         except Exception as exc:  # noqa: BLE001
             logger.warning("recap call failed: %s", type(exc).__name__)
-            entry.status, entry.error = "failed", "summary_unavailable"
+            entry.status, entry.error, entry.error_type = "failed", "summary_unavailable", type(exc).__name__
             return
         entry.recap = build_recap(draft, len(session))
         entry.status = "ready"

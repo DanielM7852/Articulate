@@ -197,6 +197,29 @@ async def aclose() -> None:
             pass
 
 
+async def wait_live(timeout_s: float = MINT_TIMEOUT_S + 1.0) -> bool:
+    """Wait up to `timeout_s` for a pending anonymous-identity startup. For scripts outside the app lifespan,
+    whose first emits would otherwise be dropped while the identity is minted. Returns whether telemetry is live."""
+    task = _startup
+    if task is not None and not task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout_s)
+        except Exception:  # noqa: BLE001 - a slow or failed mint leaves telemetry off
+            pass
+    return enabled()
+
+
+async def drain(timeout_s: float = 1.5) -> None:
+    """Wait up to `timeout_s` for emits in flight on this loop, so a script can exit without dropping them."""
+    try:
+        await asyncio.sleep(0)  # let emits handed over from worker threads get scheduled
+        pending = [t for t in _tasks if not t.done()]
+        if pending:
+            await asyncio.wait(pending, timeout=timeout_s)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _clip(value: Any, limit: int) -> str:
     text = value if isinstance(value, str) else str(value)
     return text[:limit]
