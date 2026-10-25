@@ -19,4 +19,9 @@ export default __t.row({
   visible: __t.string(),
   status: __t.string(),
   ackPhase: __t.string().name("ack_phase"),
+  teacherName: __t.string().name("teacher_name"),
+  classroomName: __t.string().name("classroom_name"),
+  savedAt: __t.u64().name("saved_at"),
+  receivedAt: __t.u64().name("received_at"),
+  appliedAt: __t.u64().name("applied_at"),
 });

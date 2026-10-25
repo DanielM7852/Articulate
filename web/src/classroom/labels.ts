@@ -163,7 +163,10 @@ export function plainChange(visible: string): string {
     .replaceAll('open-jaw', 'Open jaw')
     .replaceAll('cue-target', 'Cue and target')
     .replaceAll('target-only', 'Target only')
-    .replaceAll(' -> ', ' to ');
+    .replaceAll(' -> ', ' to ')
+    // 2026-10-24: older saves wrote the new side on both ends. The values differed, so the new side is the real one.
+    .replaceAll('Reference on to on', 'Reference off to on')
+    .replaceAll('Reference off to off', 'Reference on to off');
 }
 
 export function clockLabel(micros: bigint): string {

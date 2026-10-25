@@ -833,6 +833,11 @@ const lessonView = t.row("ClassroomLessonRow", {
   visible: t.string(),
   status: t.string(),
   ack_phase: t.string(),
+  teacher_name: t.string(),
+  classroom_name: t.string(),
+  saved_at: t.u64(),
+  received_at: t.u64(),
+  applied_at: t.u64(),
 });
 
 const boardView = t.row("ClassroomBoardRow", {

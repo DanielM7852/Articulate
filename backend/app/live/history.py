@@ -31,6 +31,8 @@ class LearnerHistory(Protocol):
 
     async def record_articulation(self, profile_id: str, attempt_id: str, sound: str, features: dict) -> bool: ...
 
+    async def same_pitch_cue_count(self, profile_id: str, attempt_id: str, word: str, cue: str) -> int: ...
+
 
 ARTIC_LOOKBACK = 3  # load limit * 3 attempts so older on_target anchors are available to annotate_attempts
 
@@ -61,6 +63,8 @@ def compact_attempt(summary: dict, decision: dict | None = None) -> dict[str, An
         "videoVerdict": video.get("verdict") if video else None,
         "cueId": summary.get("cueId", decision.get("cueId")),
         "nextAction": summary.get("nextAction", decision.get("nextAction")),
+        "focusZoneId": summary.get("focusZoneId", decision.get("focusZoneId")),
+        "wordVerdict": (summary.get("word") or {}).get("verdict") if isinstance(summary.get("word"), dict) else None,
     }
 
 
@@ -143,6 +147,24 @@ class LocalHistory:
             logger.warning("local articulation write failed: %s", type(exc).__name__)
             return False
 
+    async def same_pitch_cue_count(self, profile_id: str, attempt_id: str, word: str, cue: str) -> int:
+        def work() -> int:
+            data = self._read(profile_id)
+            store = data.get("articulation")
+            if not isinstance(store, dict):
+                return 0
+            recent = []
+            for key, item in list(store.items())[-12:]:
+                features = item.get("features") if isinstance(item, dict) else None
+                recent.append((key, features if isinstance(features, dict) else {}))
+            return _same_pitch_count(recent, attempt_id, word, cue)
+
+        try:
+            return await asyncio.to_thread(work)
+        except OSError as exc:
+            logger.warning("local pitch cue count failed: %s", type(exc).__name__)
+            return 0
+
     async def save_notes(self, profile_id: str, notes: dict) -> bool:
         def work() -> None:
             data = self._read(profile_id)
@@ -156,6 +178,17 @@ class LocalHistory:
         except OSError as exc:
             logger.warning("local notes write failed: %s", type(exc).__name__)
             return False
+
+
+def _same_pitch_count(rows: list[tuple[Any, dict]], attempt_id: str, word: str, cue: str) -> int:
+    count = 0
+    for aid, features in rows:
+        if aid == attempt_id or not isinstance(features, dict):
+            continue
+        table = features.get("pitchTable")
+        if isinstance(table, dict) and table.get("word") == word and table.get("cue") == cue:
+            count += 1
+    return count
 
 
 def _loads(text: Any) -> dict[str, Any]:
@@ -225,6 +258,19 @@ class SpacetimeHistory:
         except Exception as exc:  # noqa: BLE001
             logger.warning("record_articulation failed: %s", type(exc).__name__)
             return False
+
+    async def same_pitch_cue_count(self, profile_id: str, attempt_id: str, word: str, cue: str) -> int:
+        lit = profile_literal(profile_id)
+        try:
+            rows = await self._client.sql(f"SELECT * FROM learner_articulation WHERE profile_id = {lit}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("pitch cue count failed: %s", type(exc).__name__)
+            return 0
+        rows.sort(key=lambda row: timestamp_micros(row.get("created_at")), reverse=True)
+        paired = []
+        for row in rows[:12]:
+            paired.append((unwrap(row.get("attempt_id")), _loads(row.get("features"))))
+        return _same_pitch_count(paired, attempt_id, word, cue)
 
     async def save_notes(self, profile_id: str, notes: dict) -> bool:
         try:

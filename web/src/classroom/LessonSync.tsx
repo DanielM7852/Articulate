@@ -4,7 +4,7 @@ import { parseSettings, type LessonSettings } from '@lesson-rules';
 import { decideLesson, type LessonSnap } from './applyLesson';
 import { isCaptureBusy, subscribeCaptureBusy } from './captureGate';
 import { IdentityForm } from './IdentityForm';
-import { cueName, exerciseName, plainChange, supportName } from './labels';
+import { clockLabel, cueName, exerciseName, plainChange, supportName } from './labels';
 import {
   loadAppliedRevision,
   loadNoticedRevision,
@@ -34,6 +34,7 @@ export function LessonSync() {
   });
   const [pending, setPending] = useState<string | null>(null);
   const [link, setLink] = useState<string | null>(null);
+  const [meta, setMeta] = useState<LessonMeta | null>(null);
   const [onQuiz, setOnQuiz] = useState(() => window.location.hash.startsWith('#/quiz') || window.location.hash.startsWith('#/dashboard'));
 
   useEffect(() => {
@@ -129,7 +130,10 @@ export function LessonSync() {
         .onConnect((connection) => {
           if (closed) return;
           conn = connection;
-          const take = (row: Parameters<typeof rowToSnap>[0]) => consider(rowToSnap(row), isCaptureBusy());
+          const take = (row: Parameters<typeof rowToSnap>[0] & LessonMeta) => {
+            setMeta(rowMeta(row));
+            consider(rowToSnap(row), isCaptureBusy());
+          };
           connection.db.myClassroomLesson.onInsert((_ctx, row) => take(row));
           connection.db.myClassroomLesson.onUpdate((_ctx, _old, row) => take(row));
           connection.subscriptionBuilder().onApplied((ctx) => {
@@ -199,7 +203,11 @@ export function LessonSync() {
   const practice = exerciseName(lessonTarget ?? plan.sound);
   return (
     <aside className="classroom-banner" aria-live="polite">
-      <p className="classroom-id__label">Classroom {session.classroomId}</p>
+      <p className="classroom-id__label">{meta?.classroomName || `Classroom ${session.classroomId}`}</p>
+      {meta?.teacherName && <p className="small">Teacher {meta.teacherName}</p>}
+      {meta && meta.savedAt !== 0n && <p className="small">Saved {clockLabel(meta.savedAt)}</p>}
+      {meta && meta.receivedAt !== 0n && <p className="small">Received {clockLabel(meta.receivedAt)}</p>}
+      {meta && meta.appliedAt !== 0n && <p className="small">Applied {clockLabel(meta.appliedAt)}</p>}
       {lessonRevision > 0 && (
         <p className="small">Your practice: {practice}. {supportName(plan.assistance)} · {cueName(lessonCue ?? '')} · {lessonRepetitions} {lessonRepetitions === 1 ? 'repetition' : 'repetitions'}</p>
       )}
@@ -211,6 +219,24 @@ export function LessonSync() {
       </button>
     </aside>
   );
+}
+
+type LessonMeta = {
+  teacherName: string;
+  classroomName: string;
+  savedAt: bigint;
+  receivedAt: bigint;
+  appliedAt: bigint;
+};
+
+function rowMeta(row: LessonMeta): LessonMeta {
+  return {
+    teacherName: row.teacherName || '',
+    classroomName: row.classroomName || '',
+    savedAt: row.savedAt || 0n,
+    receivedAt: row.receivedAt || 0n,
+    appliedAt: row.appliedAt || 0n,
+  };
 }
 
 function rowToSnap(row: {

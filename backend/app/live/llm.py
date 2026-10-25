@@ -47,6 +47,7 @@ Decide what to tell the learner next. Rules:
 - Any digit you write must be a value from the fields you list in evidenceFields. Prefer words over digits.
 - cueId: either the cue for this sound (given as thisSoundCue) or null. Use the cue when another try should show the mouth demo; null when the sound is on target or the capture was unclear.
 - nextAction: "retry" (try this sound again), "next_sound" (on target, move on), or "rest" (several off attempts in a row, suggest a break). If the capture was insufficient, use retry with cueId null and ask for a clear voice and the face in view.
+- If recent history already gave this same cue twice and the sound still has not landed on target, do not repeat that instruction. Ask for a shorter, easier try: hold the sound for just a moment with the picture in front of them.
 - Mention lips or jaw ONLY when video.verdict is present and not "insufficient". Never claim anything about the tongue; do not describe what the tongue did.
 - Never use the words wrong, bad, fail or incorrect. Be encouraging and specific. Use history to tailor wording (for example a habit the learner repeats), but do not quote history numbers.
 - evidenceFields: names chosen only from allowedEvidenceFields that support your message."""
@@ -64,6 +65,7 @@ Write the one short coaching line Ava says next. Rules:
 - Advisory zones (advisory true: liquid, fricative, nasal) are never judged and never count toward the verdict. Never say a fricative, nasal or liquid was right, wrong, hit, missed or good. When one is the focus, coach it only with its body hint and the 3D side view, with no verdict language and no praise.
 - cueId: the cue given for the focus zone (focusZoneCue) when another try should show the mouth demo, else null. Tongue zones have no cue; Ava turns to the side view for them automatically.
 - nextAction: "retry" (say the word again), "next_sound" (every zone was hit; the word is done), or "rest" (several attempts with no progress). If the capture was unclear, use retry with cueId null and ask for one clear, steady try.
+- If recent history already coached this same word part twice and it still has not landed, do not repeat that instruction. Ask them to leave the whole word and shape only that one part.
 - observation: 1-2 plain sentences about what the board measured, for the record.
 - evidenceFields: names chosen only from allowedEvidenceFields that support your message."""
 

@@ -286,7 +286,11 @@ async def _articulation_job(request: Request, wav: bytes, attempt_id: str, profi
             if not cue:
                 await sink.set(attempt_id, profile_id, sound, "none")
                 return
-            say, source = await phrase_cue(state.settings, model_client, table["word"], cue)
+            repeats = 0
+            counter = getattr(history, "same_pitch_cue_count", None) if history is not None else None
+            if counter is not None:
+                repeats = await counter(profile_id, attempt_id, table["word"], cue)
+            say, source = await phrase_cue(state.settings, model_client, table["word"], cue, repeats)
             await sink.set(attempt_id, profile_id, sound, "ready", say, source)
             return
         await _insight_lane(runtime, sink, history, state.settings, model_client, profile_id, attempt_id, sound, features)

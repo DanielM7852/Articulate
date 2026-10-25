@@ -33,6 +33,14 @@ _CUES = {
     "tongue_forward": "Compared with the reference {word}, your tongue sat a little further back. Move your tongue a little forward.",
     "tongue_back": "Compared with the reference {word}, your tongue sat a little further forward. Move your tongue a little back.",
 }
+_EASIER = {
+    "finish": "Let's make this easier. Say only the ending of {word}.",
+    "mouth_more_open": "Let's make this easier. Open your mouth a little and hold {word}.",
+    "mouth_less_open": "Let's make this easier. Close your mouth a little and hold {word}.",
+    "tongue_forward": "Let's make this easier. Move your tongue a little forward and hold {word}.",
+    "tongue_back": "Let's make this easier. Move your tongue a little back and hold {word}.",
+}
+SAME_CUE_LIMIT = 2
 
 
 def read_pcm16(wav: bytes) -> tuple[np.ndarray, int]:
@@ -253,9 +261,19 @@ def line_ok(text: str, cue: str, word: str) -> bool:
     return all(word in lowered for word in _ALLOWED[cue])
 
 
-async def phrase_cue(settings: Settings, client, word: str, cue: str) -> tuple[str, str]:
-    """Claude may rephrase the chosen cue. A line that adds another body part is dropped."""
+def easier_phrase(word: str, cue: str) -> str:
+    """A shorter task after the same measured cue has already missed twice."""
+    return _EASIER[cue].format(word=word)
+
+
+async def phrase_cue(settings: Settings, client, word: str, cue: str, repeats: int = 0) -> tuple[str, str]:
+    """Claude may rephrase the chosen cue. A line that adds another body part is dropped.
+
+    After the same cue has already been given twice, the shorter task is used instead.
+    """
     template = cue_line(word, cue)
+    if repeats >= SAME_CUE_LIMIT and cue in _EASIER:
+        return easier_phrase(word, cue), "fallback"
     if client is None and not settings.anthropic_configured:
         return template, "fallback"
     from pydantic import BaseModel, Field
@@ -265,6 +283,8 @@ async def phrase_cue(settings: Settings, client, word: str, cue: str) -> tuple[s
     class Draft(BaseModel):
         say: str = Field(max_length=280)
 
+    # 2026-10-24: this prompt kept the same instruction on every repeat.
+    # "Rewrite the coach line in one or two sentences. Keep the same comparison and the same instruction. "
     prompt = (
         "Rewrite the coach line in one or two sentences. Keep the same comparison and the same instruction. "
         "Do not add a body part that is not already in the line. Do not write digits. "

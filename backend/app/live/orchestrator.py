@@ -15,6 +15,7 @@ from app.config import Settings
 from app.integrations.spacetime import SpacetimeClient, unwrap, uuid_literal
 from app.live import llm
 from app.live.decision import (
+    ease_repeated_instruction,
     evidence_candidates,
     fallback_decision,
     show_side_view,
@@ -341,6 +342,14 @@ async def coach_attempt(
         source, decision, evidence = await _decide(deps, body, audio, video, context, timings)
         focus = None
         side = show_side_view(decision.cueId, decision.nextAction)
+    current_verdict = word_score.verdict if word_score is not None else audio.verdict
+    if current_verdict not in ("on_target", "insufficient"):
+        easier = ease_repeated_instruction(decision, sound=body.sound, recent=context.attempts, word=body.word)
+        if easier is not None:
+            decision = easier
+            source = "fallback"
+            focus = decision.focusZoneId
+            side = word_show_side_view(focus, decision.nextAction) if word_score is not None else show_side_view(decision.cueId, decision.nextAction)
     telemetry.emit("backend", "ui", "coach.decision", f"{decision.nextAction}: {decision.caption.strip()}",
                    {"verdict": word_score.verdict if word_score is not None else audio.verdict, "cue": decision.cueId})
     response = LiveCoachResponse(

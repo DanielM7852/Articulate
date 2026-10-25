@@ -150,6 +150,11 @@ export const ClassroomLessonRow = __t.object("ClassroomLessonRow", {
   visible: __t.string(),
   status: __t.string(),
   ackPhase: __t.string(),
+  teacherName: __t.string(),
+  classroomName: __t.string(),
+  savedAt: __t.u64(),
+  receivedAt: __t.u64(),
+  appliedAt: __t.u64(),
 });
 export type ClassroomLessonRow = __Infer<typeof ClassroomLessonRow>;
 

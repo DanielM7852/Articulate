@@ -101,7 +101,9 @@ export function describeChange(previous: LessonSettings | null, next: LessonSett
   if (previous.context !== next.context) parts.push(`Context ${previous.context} -> ${next.context}`);
   if (previous.cueId !== next.cueId) parts.push(`Cue ${previous.cueId || "none"} -> ${next.cueId || "none"}`);
   if (previous.assistance !== next.assistance) parts.push(`Assistance ${previous.assistance} -> ${next.assistance}`);
-  if (previous.referenceReplay !== next.referenceReplay) parts.push(`Reference replay ${next.referenceReplay ? "on" : "off"} -> ${next.referenceReplay ? "on" : "off"}`);
+  // 2026-10-24: both sides used next, so a real change was stored as "on -> on".
+  // if (previous.referenceReplay !== next.referenceReplay) parts.push(`Reference replay ${next.referenceReplay ? "on" : "off"} -> ${next.referenceReplay ? "on" : "off"}`);
+  if (previous.referenceReplay !== next.referenceReplay) parts.push(`Reference replay ${previous.referenceReplay ? "on" : "off"} -> ${next.referenceReplay ? "on" : "off"}`);
   if (previous.repetitions !== next.repetitions) parts.push(`Repetitions ${previous.repetitions} -> ${next.repetitions}`);
   if (previous.note !== next.note) parts.push(next.note ? `Note: ${next.note}` : "Note cleared");
   return parts.length ? `${parts.join(". ")}.` : "No visible setting changed.";

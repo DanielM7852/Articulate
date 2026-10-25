@@ -8,7 +8,7 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 
-from app.audio.pitch_table import advise_word, choose_cue, compare_wav, cue_line, extract_table, line_ok, read_pcm16
+from app.audio.pitch_table import advise_word, choose_cue, compare_wav, cue_line, easier_phrase, extract_table, line_ok, phrase_cue, read_pcm16
 from app.main import create_app
 from tests.support import make_settings
 from tests.test_articulation_route import AID, H, Q, URL, FakeHistory
@@ -57,6 +57,19 @@ def test_mouth_line_cannot_add_the_tongue():
         "mouth_more_open",
         "heed",
     )
+
+
+def test_same_measured_cue_steps_down_after_two_misses(tmp_path):
+    line, source = asyncio.run(phrase_cue(make_settings(tmp_path), object(), "head", "finish", 2))
+    assert source == "fallback"
+    assert line == easier_phrase("head", "finish")
+    assert "ending" in line
+
+
+def test_one_repeat_keeps_the_measured_line(tmp_path):
+    line, source = asyncio.run(phrase_cue(make_settings(tmp_path), None, "head", "finish", 1))
+    assert source == "fallback"
+    assert line == cue_line("head", "finish")
 
 
 def test_sine_becomes_a_voiced_table(tmp_path):

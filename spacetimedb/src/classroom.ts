@@ -781,7 +781,36 @@ export function markDisconnected(ctx: any): void {
   ctx.db.learnerRoll.profile_id.update({ ...roll, presence: "disconnected", presence_at: nowMicros(ctx) });
 }
 
-function lessonRow(profileId: string, lesson: EffectiveLesson, ackPhase: string) {
+function lessonFacts(ctx: any, profileId: string, classroomId: string, source: string, revision: number) {
+  const room = ctx.db.classRoom.id.find(classroomId);
+  let actor = "";
+  let savedAt = 0n;
+  if (source === "learner") {
+    const row = ctx.db.lessonOverride.profile_id.find(profileId);
+    if (row && row.revision === revision) {
+      actor = row.actor_profile || "";
+      savedAt = row.saved_at || 0n;
+    }
+  } else if (source === "classroom") {
+    const row = ctx.db.classAssignment.classroom_id.find(classroomId);
+    if (row && row.revision === revision) {
+      actor = row.actor_profile || "";
+      savedAt = row.saved_at || 0n;
+    }
+  }
+  const teacher = actor ? ctx.db.classIdentity.profile_id.find(actor) : null;
+  const ack = ctx.db.lessonAck.profile_id.find(profileId);
+  const matching = Boolean(ack && ack.revision === revision);
+  return {
+    teacher_name: teacher?.display_name || "",
+    classroom_name: room?.name || "",
+    saved_at: savedAt,
+    received_at: matching ? ack.received_at : 0n,
+    applied_at: matching ? ack.applied_at : 0n,
+  };
+}
+
+function lessonRow(ctx: any, profileId: string, classroomId: string, lesson: EffectiveLesson, ackPhase: string) {
   return {
     profile_id: profileId,
     revision: lesson.revision,
@@ -791,6 +820,7 @@ function lessonRow(profileId: string, lesson: EffectiveLesson, ackPhase: string)
     visible: lesson.visible,
     status: lesson.status,
     ack_phase: ackPhase,
+    ...lessonFacts(ctx, profileId, classroomId, lesson.source, lesson.revision),
   };
 }
 
@@ -800,7 +830,7 @@ export function myLessonRows(ctx: any): any[] {
   const roll = ctx.db.learnerRoll.profile_id.find(me.profile_id);
   if (!roll) {
     const lesson = effectiveLesson(ctx, me.profile_id, me.classroom_id, 0n);
-    return [lessonRow(me.profile_id, lesson, "none")];
+    return [lessonRow(ctx, me.profile_id, me.classroom_id, lesson, "none")];
   }
   return [{
     profile_id: me.profile_id,
@@ -811,6 +841,7 @@ export function myLessonRows(ctx: any): any[] {
     visible: roll.visible,
     status: roll.lesson_source === "default" ? "active" : "active",
     ack_phase: roll.ack_phase,
+    ...lessonFacts(ctx, me.profile_id, me.classroom_id, roll.lesson_source, roll.lesson_revision),
   }];
 }
 
