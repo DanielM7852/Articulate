@@ -216,7 +216,7 @@ export default function Intro() {
         assemble();
         return;
       }
-      // The dots take the picture's place and start moving at once; the 200 ms crossfade runs over the morph's start.
+      // The dots take the picture's place and start moving at once; their 80 ms fade-in and the picture's 200 ms fade-out run over the morph's start.
       setDotted(true);
       assemble();
     };

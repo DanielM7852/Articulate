@@ -117,7 +117,7 @@ const SHAPE = {
   toneWeight: 0.35, // dots per sample: toneWeight + tone, so darker samples carry more dots
   coverage: 0.72, // share of the picture's area the dots cover on average; sets their radius from their density
   minPx: 1.0, // device px: smallest dot drawn on the picture; smaller ones are drawn at this size, fainter
-  appearMs: 200 // the picture fades in when it is first shown (crossfading with the image it replaces)
+  appearMs: 80 // the picture fades in when it is first shown (under the image it replaces, which fades over 200 ms)
 };
 const DISSOLVE = { spread: 0.6, random: 0.3, out: 0.07, outZ: 0.3, up: 0.16, curl: 0.035, fadeStart: 0.1, fadeEnd: 0.9, shrink: 0.45 };
 const REDUCED_FADE_MS = 300; // reduced motion: a plain crossfade, no travel
@@ -1217,8 +1217,10 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   function syncShape(dtMs) {
     camera.updateMatrixWorld();
     uniforms.uShapeMatrix.value.copy(camera.matrixWorld);
-    if (showingShape()) shape.alpha = reduced ? 1 : Math.min(1, shape.alpha + Math.max(0, dtMs || 0) / SHAPE.appearMs);
-    else if (!(fly.anim && fly.mode === 0)) shape.alpha = 0; // the head is up: the next showing fades in again
+    // the fade-in keeps running into the morph, so a morph started at once (no hold on the picture) is still seen
+    const morphing = fly.anim && fly.mode === 0;
+    if (showingShape() || morphing) shape.alpha = reduced ? 1 : Math.min(1, shape.alpha + Math.max(0, dtMs || 0) / SHAPE.appearMs);
+    else shape.alpha = 0; // the head is up: the next showing fades in again
     uniforms.uShapeAlpha.value = shape.alpha;
   }
 
