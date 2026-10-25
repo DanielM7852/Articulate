@@ -1,15 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import type {
-  AssemblyOptions,
-  MouthCueId,
-  MouthDemo,
-  MouthView,
-  QualityChange,
-  SpeakOptions,
-  SpeechHandle,
-} from '@mouth-demo/src/mouth-demo.js';
+import type { AssemblyOptions, MouthCueId, MouthDemo, MouthView, SpeakOptions, SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
 import { acquireGuide, releaseGuide } from '../guide/guide';
-import { setQualitySetting, type QualitySetting } from '../guide/quality';
 import type { SoundId } from '../state/types';
 
 /**
@@ -20,7 +11,7 @@ import type { SoundId } from '../state/types';
  * camera closer (`zoom`) and can freeze it (`paused`). A ref exposes the demo's
  * imperative surface (cues, view, lip-synced `speak`) for session-driven screens.
  */
-export type { MouthCueId, MouthView, QualityChange, QualitySetting };
+export type { MouthCueId, MouthView };
 
 export const CUE_FOR_SOUND: Record<SoundId, MouthCueId> = {
   i: 'spread-lips',
@@ -54,11 +45,6 @@ export interface MouthReferenceHandle {
   clearStartShape(): void;
   /** Wash the stage toward a flat CSS colour; null returns to the default gradient. Reset when it leaves the screen. */
   setBackdrop(color: string | null, opts?: { durationMs?: number }): void;
-  /**
-   * The learner's quality choice: pin 'full' | 'light' | 'simple', or 'auto' (the hardware's tier, with
-   * automatic steps). Stored in localStorage 'articulate.quality' and applied live.
-   */
-  setQuality(setting: QualitySetting): void;
 }
 
 export interface MouthReferenceProps {
@@ -76,19 +62,15 @@ export interface MouthReferenceProps {
   onError?: () => void;
   /** Open on an empty stage (only the ambient particles); the screen calls assemble() through the ref. */
   startDispersed?: boolean;
-  /** The guide's quality tier was decided or changed while this screen shows it. */
-  onQualityChange?: (change: QualityChange) => void;
 }
 
 export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferenceProps>(function MouthReference(
-  { cue, view = 'front', slow = false, look = null, zoom = 1, paused = false, onReady, onError, startDispersed = false, onQualityChange },
+  { cue, view = 'front', slow = false, look = null, zoom = 1, paused = false, onReady, onError, startDispersed = false },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
   const demoRef = useRef<MouthDemo | null>(null);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
-  const onQualityRef = useRef(onQualityChange);
-  onQualityRef.current = onQualityChange;
 
   useImperativeHandle(
     ref,
@@ -129,9 +111,6 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
       setBackdrop(color, opts) {
         demoRef.current?.setBackdrop(color, opts);
       },
-      setQuality(setting) {
-        setQualitySetting(setting);
-      },
     }),
     [],
   );
@@ -140,9 +119,6 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
     const host = hostRef.current;
     if (!host) return;
     let cancelled = false;
-    // The demo's 'quality:change' bubbles from its mount node, which sits inside this host while it is shown.
-    const onQuality = (e: Event) => onQualityRef.current?.((e as CustomEvent<QualityChange>).detail);
-    host.addEventListener('quality:change', onQuality);
     acquireGuide(host, { startDispersed })
       .then((demo) => {
         if (cancelled) return;
@@ -157,7 +133,6 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
       });
     return () => {
       cancelled = true;
-      host.removeEventListener('quality:change', onQuality);
       // a screen's start picture and backdrop do not follow the guide to the next screen
       demoRef.current?.setStartShape(null);
       demoRef.current?.setBackdrop(null);

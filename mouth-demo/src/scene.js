@@ -29,13 +29,9 @@ function makeBackground() {
   return { tex, draw };
 }
 
-// Pixel-ratio caps per quality tier (quality.js): the fill rate is most of the GPU cost of the dots.
-export const PIXEL_RATIO_CAP = { full: 2, light: 1.25 };
-
-export function createScene(host, { pixelRatioCap = PIXEL_RATIO_CAP.full } = {}) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-  let ratioCap = pixelRatioCap > 0 ? pixelRatioCap : PIXEL_RATIO_CAP.full;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, ratioCap));
+export function createScene(host) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;
   const canvas = renderer.domElement;
@@ -76,14 +72,6 @@ export function createScene(host, { pixelRatioCap = PIXEL_RATIO_CAP.full } = {})
   let raf = 0;
   let last = 0;
   let disposed = false;
-
-  /** Cap the pixel ratio at x (the drawing buffer is resized at once; the CSS size is unchanged). */
-  function setPixelRatioCap(x) {
-    if (!(x > 0) || disposed) return;
-    ratioCap = x;
-    const next = Math.min(window.devicePixelRatio || 1, ratioCap);
-    if (next !== renderer.getPixelRatio()) renderer.setPixelRatio(next);
-  }
 
   function setSize(w, h) {
     if (!(w > 0) || !(h > 0)) return;
@@ -145,8 +133,7 @@ export function createScene(host, { pixelRatioCap = PIXEL_RATIO_CAP.full } = {})
 
   return {
     renderer, scene, camera, canvas, controls,
-    setSize, setSolidLighting, setPixelRatioCap, startLoop, stopLoop, dispose,
-    get pixelRatioCap() { return ratioCap; },
+    setSize, setSolidLighting, startLoop, stopLoop, dispose,
     /** Wash the gradient toward a flat colour: amount 0 is the plain gradient, 1 the colour. */
     setBackdrop: (color, amount) => backdrop.draw(color, amount),
   };

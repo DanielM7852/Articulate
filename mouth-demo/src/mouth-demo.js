@@ -2,20 +2,19 @@ import "@fontsource/atkinson-hyperlegible/400.css";
 import "@fontsource/atkinson-hyperlegible/700.css";
 import "./styles.css";
 
-import { createScene, PIXEL_RATIO_CAP } from "./scene.js";
+import { createScene } from "./scene.js";
 import { createViews } from "./views.js";
 import { computeMouthAnchor } from "./mouth-anchor.js";
 import { createHighlight } from "./highlight.js";
 import { createHologram } from "./hologram.js";
 import { createParticles } from "./particles.js";
-import { createPointCloud, LIGHT_DOTS } from "./pointcloud.js";
+import { createPointCloud } from "./pointcloud.js";
 import { createTalkingHeadDriver } from "./drivers/talkinghead.js";
 import { createThreeDriver } from "./drivers/three.js";
 import { CUES } from "./cues.js";
 import { createTimeline, easeInOutCubic } from "./timeline.js";
 import { createCutaway } from "./cutaway.js";
 import { createLipSync } from "./lipsync.js";
-import { TIERS, createFpsMonitor, urlParams } from "./quality.js";
 
 const DEFAULT_AVATAR = "/avatars/brunette.glb";
 const TH_TIMEOUT_MS = 10000;
@@ -36,40 +35,6 @@ const NOTE = "Mouth demonstrations are illustrative and would be reviewed by spe
 const SHAPE_IMG = { maxPx: 512, spacing: 1.6, threshold: 0.55, black: 0.08, paper: [250, 249, 246] };
 const DRIVERS = ["auto", "talkinghead", "three"];
 const STYLES = ["hologram", "particles", "porcelain", "hybrid", "solid"];
-// Runtime quality ladder (see quality.js). The frame-rate monitor steps down one rung at a time and back up at
-// most one rung after a step down. `dots` is the share of the full tier's dots, `stride` the deformer's frame stride.
-const LEVELS = [
-  { id: "full", tier: "full", dpr: PIXEL_RATIO_CAP.full, dots: 1, scatter: true, stride: 1 },
-  { id: "full-dpr", tier: "full", dpr: PIXEL_RATIO_CAP.light, dots: 1, scatter: true, stride: 1 },
-  { id: "full-dots", tier: "full", dpr: PIXEL_RATIO_CAP.light, dots: 0.5, scatter: true, stride: 1 },
-  { id: "light", tier: "light", dpr: PIXEL_RATIO_CAP.light, dots: LIGHT_DOTS, scatter: false, stride: 2 },
-  { id: "simple", tier: "simple" },
-];
-const LEVEL_OF = { full: 0, light: 3, simple: 4 };
-const SIMPLE = 4;
-
-// Stand-ins while there is no 3D stack (the simple tier, or before it is built): every call is a no-op.
-const NOOP = () => {};
-const STUB_DRIVER = { name: "none", setShape: NOOP, releaseShapes: NOOP, update: NOOP, dispose: NOOP };
-const STUB_HIGHLIGHT = { pulseValue: 0, setVisibility: NOOP, setPulse: NOOP, update: NOOP, toggleCalibration: NOOP, handleKey: () => false };
-const STUB_HOLOGRAM = { triggerRipple: NOOP, setSwing: NOOP, setHold: NOOP, update: NOOP, render: NOOP, setStyle: NOOP, setReducedMotion: NOOP, setSize: NOOP };
-const STUB_PARTICLES = { setSwing: NOOP, update: NOOP, setVisible: NOOP, setReducedMotion: NOOP, setPixelRatio: NOOP };
-const STUB_VIEWS = { setView: NOOP, setZoom: NOOP, update: NOOP, setReducedMotion: NOOP };
-// The head's intro / outro settle at once without a point cloud.
-function createStubCloud(startDispersed) {
-  let state = startDispersed ? "dispersed" : "assembled";
-  return {
-    active: false,
-    buildShare: 1,
-    get assembly() { return state; },
-    assemble() { state = "assembled"; return Promise.resolve(true); },
-    disperse() { state = "dispersed"; return Promise.resolve(true); },
-    setStartShape: () => false,
-    hasStartShape: false,
-    setHold: NOOP, update: NOOP, setActive: NOOP, setReducedMotion: NOOP,
-    setDotFraction: NOOP, setScatterEnabled: NOOP, setDeformerStride: NOOP,
-  };
-}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -86,17 +51,7 @@ function readParams() {
     style: pick("style", STYLES),
     debug: q.has("debug"),
     thfail: q.has("thfail"),
-    ...qualityParams(),
   };
-}
-
-// `?quality=` and `?fpsdebug[=fps]` also work inside a hash route (`#/lesson?quality=simple`).
-function qualityParams() {
-  const u = urlParams();
-  const quality = TIERS.includes(u.get("quality")) ? u.get("quality") : null;
-  const fpsdebug = u.has("fpsdebug");
-  const forced = Number.parseFloat(u.get("fpsdebug") ?? "");
-  return { quality, fpsdebug, fakeFps: fpsdebug && forced > 0 ? forced : null };
 }
 
 // "auto" tries TalkingHead (10 s budget) and falls back to the plain three.js driver.
@@ -137,12 +92,6 @@ export async function createMouthDemo(container, options = {}) {
     style: params.style ?? (STYLES.includes(options.style) ? options.style : "hologram"),
     controls: options.controls !== false,
     startDispersed: options.startDispersed === true,
-    quality: params.quality ?? (TIERS.includes(options.quality) ? options.quality : "full"),
-    // false pins the tier: the frame-rate monitor does not step it (a user's explicit choice)
-    adaptive: options.adaptive !== false,
-    qualityReason: typeof options.qualityReason === "string" ? options.qualityReason : params.quality ? "url" : "initial",
-    posterUrl: typeof options.posterUrl === "string" ? options.posterUrl : null,
-    onQualityChange: typeof options.onQualityChange === "function" ? options.onQualityChange : null,
   };
 
   // DOM
@@ -152,12 +101,6 @@ export async function createMouthDemo(container, options = {}) {
   const stage = el("div", "md-stage");
   const host = el("div", "md-canvas-host");
   stage.append(host);
-  // Simple tier: a still picture stands in for the 3D head (its src is set the first time it is shown).
-  const poster = el("img", "md-poster");
-  poster.alt = "";
-  poster.setAttribute("aria-hidden", "true");
-  poster.decoding = "async";
-  host.append(poster);
   const loading = el("div", "md-loading", "Loading model…");
   loading.setAttribute("role", "status");
   stage.append(loading);
@@ -185,7 +128,7 @@ export async function createMouthDemo(container, options = {}) {
   }
   root.append(el("p", "md-note", "Illustrative demonstration, to be reviewed by speech therapists."));
   let debugEl = null;
-  if (params.debug || params.fpsdebug) {
+  if (params.debug) {
     debugEl = el("div", "md-debug");
     root.append(debugEl);
   }
@@ -194,12 +137,11 @@ export async function createMouthDemo(container, options = {}) {
   // Teardown registry (run in reverse creation order)
   const disposers = [];
   let disposed = false;
-  const runAll = (list) => {
-    while (list.length) {
-      try { list.pop()(); } catch (err) { console.warn("[mouth-demo] dispose step failed:", err); }
+  const teardown = () => {
+    while (disposers.length) {
+      try { disposers.pop()(); } catch (err) { console.warn("[mouth-demo] dispose step failed:", err); }
     }
   };
-  const teardown = () => runAll(disposers);
 
   const timeline = createTimeline();
   const S = { w: 0, vis: 0, show: 0 }; // w: face toward cue target, vis: highlight, show: cutaway opacity
@@ -207,149 +149,72 @@ export async function createMouthDemo(container, options = {}) {
   let cueId = null;
   let cue = null;
   let driven = null; // cue whose shapes are currently overriding the face
-  // The 3D stack. Until it is built (and in the simple tier, never) these are the no-op stand-ins above.
-  let has3D = false;
-  let driver = STUB_DRIVER;
+  let driver = null;
   let scene = null;
-  let hologram = STUB_HOLOGRAM;
-  let particles = STUB_PARTICLES;
-  let cloud = createStubCloud(opts.startDispersed);
-  let highlight = STUB_HIGHLIGHT;
-  let views = STUB_VIEWS;
-  let anchor = null;
+  let hologram = null;
+  let particles = null;
+  let cloud = null;
+  let highlight = null;
+  let views = null;
   let cutaway = null;
   let style = opts.style;
   let look = null; // { x, y } in [-1, 1], +x = viewer's right, +y = up; null releases the head
   const lookNow = { x: 0, y: 0 };
   let headRest = null;
   let gazing = false; // eye shapes are being driven by the look target
-  let zoom = 1;
-  let level = LEVEL_OF[opts.quality];
-  const disposers3D = [];
 
   const renderDebug = () => {
-    if (!debugEl) return;
-    const q = `quality: ${LEVELS[level].id}${monitor ? ` | fps ${monitor.fps.toFixed(1)}` : ""}`;
-    debugEl.textContent = params.debug ? `driver: ${driver?.name ?? "-"} | style: ${style} | ${q} | ${NOTE}` : q;
+    if (debugEl) debugEl.textContent = `driver: ${driver?.name ?? "-"} | style: ${style} | ${NOTE}`;
   };
 
   // Size recorded by the ResizeObserver, applied at the start of the next frame
   // so the drawing buffer is never cleared after that frame has rendered.
   let pendingSize = null;
-  let lastSize = null;
-
-  const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const measure = () => {
-    const w = Math.floor(host.clientWidth);
-    const h = Math.floor(host.clientHeight);
-    if (w < 1 || h < 1) return null;
-    return { w, h };
-  };
-
-  /** Build the 3D stack (renderer, avatar, effects, point cloud) for `tier`. Leaves nothing behind if it fails. */
-  async function build3D(tier) {
-    const local = [];
-    try {
-      const sc = createScene(host, { pixelRatioCap: tier === "light" ? PIXEL_RATIO_CAP.light : PIXEL_RATIO_CAP.full });
-      local.push(() => sc.dispose());
-      sc.setSolidLighting(style === "solid");
-
-      const drv = await selectDriver(opts.driver, {
-        host, scene: sc.scene, camera: sc.camera, url: opts.avatarUrl, thfail: params.thfail,
-      });
-      local.push(() => drv.dispose());
-      if (disposed) throw new Error("disposed while loading");
-
-      const rest = drv.headBone.rotation.clone();
-      const anc = computeMouthAnchor(drv);
-      const hl = createHighlight({ headBone: drv.headBone, camera: sc.camera, anchor: anc });
-      if (!hl.mesh.parent) drv.headBone.add(hl.mesh);
-      local.push(() => hl.dispose());
-
-      const vw = createViews({ camera: sc.camera, controls: sc.controls, canvas: sc.canvas });
-      vw.setAnchor(drv.headBone, anc.headLocal);
-      vw.snap();
-      local.push(() => vw.dispose());
-
-      const holo = createHologram({
-        renderer: sc.renderer, scene: sc.scene, camera: sc.camera,
-        root: drv.root, style, reducedMotion: mq.matches,
-      });
-      holo.setMouth(anc.restCenter, anc.radius);
-      local.push(() => holo.dispose());
-
-      const parts = createParticles({ camera: sc.camera, reducedMotion: mq.matches });
-      if (!parts.points.parent) sc.scene.add(parts.points);
-      parts.setVisible(style === "hologram" || style === "particles");
-      parts.setPixelRatio(sc.renderer.getPixelRatio());
-      local.push(() => parts.dispose());
-
-      // The particle head: a sibling of the hologram style, sampled from the same meshes.
-      const pc = createPointCloud({
-        renderer: sc.renderer, scene: sc.scene, camera: sc.camera, canvas: sc.canvas,
-        root: drv.root, anchor: anc, reducedMotion: mq.matches,
-        startDispersed: cloud.assembly === "dispersed" || cloud.assembly === "dispersing",
-        quality: tier === "light" ? "light" : "full",
-      });
-      // once committed, the current cloud (it may be rebuilt for another tier); before that, this one
-      local.push(() => (has3D ? cloud : pc).dispose());
-
-      // commit
-      scene = sc;
-      driver = drv;
-      headRest = rest;
-      anchor = anc;
-      highlight = hl;
-      views = vw;
-      hologram = holo;
-      particles = parts;
-      cloud = pc;
-      has3D = true;
-      disposers3D.push(...local);
-      local.length = 0;
-
-      views.setReducedMotion(mq.matches);
-      views.setZoom(zoom);
-      if (view === "side") views.setView("side", { animate: false });
-      if (style === "particles") cloud.setActive(true);
-      scene.setBackdrop(backdrop.color, backdrop.amount);
-      const size = lastSize ?? measure();
-      if (size) {
-        scene.setSize(size.w, size.h);
-        hologram.setSize(size.w, size.h);
-        lastSize = size;
-      }
-      scene.setSolidLighting(style === "solid");
-      hologram.materialize(SWING_MS);
-      if (params.debug) {
-        window.__mouthDemo = Object.assign(window.__mouthDemo ?? {}, { scene, driver, anchor, highlight, views, hologram, particles, cloud });
-      }
-      renderDebug();
-    } catch (err) {
-      runAll(local);
-      throw err;
-    }
-  }
-
-  /** A new point cloud for `tier` (a light build has too few dots for the full tier). Keeps the assembly state. */
-  function rebuildCloud(tier) {
-    const away = cloud.assembly === "dispersed" || cloud.assembly === "dispersing";
-    cloud.dispose();
-    cloud = createPointCloud({
-      renderer: scene.renderer, scene: scene.scene, camera: scene.camera, canvas: scene.canvas,
-      root: driver.root, anchor, reducedMotion: mq.matches, startDispersed: away,
-      quality: tier === "light" ? "light" : "full",
-    });
-    if (params.debug && window.__mouthDemo) window.__mouthDemo.cloud = cloud;
-  }
-
-  let backdrop = null; // defined with the choreography below; build3D only runs after it exists
-  let monitor = null;
 
   try {
+    scene = createScene(host);
+    disposers.push(() => scene.dispose());
+    scene.setSolidLighting(style === "solid");
     cutaway = createCutaway(stage);
     disposers.push(() => cutaway.dispose());
-    disposers.push(() => runAll(disposers3D));
+
+    driver = await selectDriver(opts.driver, {
+      host, scene: scene.scene, camera: scene.camera, url: opts.avatarUrl, thfail: params.thfail,
+    });
+    disposers.push(() => driver.dispose());
+
+    headRest = driver.headBone.rotation.clone();
+    const anchor = computeMouthAnchor(driver);
+    highlight = createHighlight({ headBone: driver.headBone, camera: scene.camera, anchor });
+    if (!highlight.mesh.parent) driver.headBone.add(highlight.mesh);
+    disposers.push(() => highlight.dispose());
+
+    views = createViews({ camera: scene.camera, controls: scene.controls, canvas: scene.canvas });
+    views.setAnchor(driver.headBone, anchor.headLocal);
+    views.snap();
+    disposers.push(() => views.dispose());
+
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    hologram = createHologram({
+      renderer: scene.renderer, scene: scene.scene, camera: scene.camera,
+      root: driver.root, style, reducedMotion: mq.matches,
+    });
+    hologram.setMouth(anchor.restCenter, anchor.radius);
+    disposers.push(() => hologram.dispose());
+
+    particles = createParticles({ camera: scene.camera, reducedMotion: mq.matches });
+    if (!particles.points.parent) scene.scene.add(particles.points);
+    particles.setVisible(style === "hologram" || style === "particles");
+    disposers.push(() => particles.dispose());
+
+    // The particle head: a sibling of the hologram style, sampled from the same meshes.
+    cloud = createPointCloud({
+      renderer: scene.renderer, scene: scene.scene, camera: scene.camera, canvas: scene.canvas,
+      root: driver.root, anchor, reducedMotion: mq.matches, startDispersed: opts.startDispersed,
+    });
+    disposers.push(() => cloud.dispose());
+    if (style === "particles") cloud.setActive(true);
+    if (params.debug) window.__mouthDemo = { scene, driver, anchor, highlight, views, hologram, particles };
 
     const onMotion = (e) => {
       views.setReducedMotion(e.matches);
@@ -357,16 +222,27 @@ export async function createMouthDemo(container, options = {}) {
       particles.setReducedMotion(e.matches);
       cloud.setReducedMotion(e.matches);
     };
+    views.setReducedMotion(mq.matches);
     mq.addEventListener("change", onMotion);
     disposers.push(() => mq.removeEventListener("change", onMotion));
 
+    const measure = () => {
+      const w = Math.floor(host.clientWidth);
+      const h = Math.floor(host.clientHeight);
+      if (w < 1 || h < 1) return null;
+      return { w, h };
+    };
     const ro = new ResizeObserver(() => {
       const size = measure();
       if (size) pendingSize = size;
     });
     ro.observe(host);
     disposers.push(() => ro.disconnect());
-    lastSize = measure();
+    const initial = measure();
+    if (initial) {
+      scene.setSize(initial.w, initial.h);
+      hologram.setSize(initial.w, initial.h);
+    }
   } catch (err) {
     console.error("[mouth-demo] failed to start:", err);
     loading.textContent = "The mouth demonstration could not load.";
@@ -377,9 +253,7 @@ export async function createMouthDemo(container, options = {}) {
   }
 
   // Choreography
-  // The simple tier has no face, so the 2D cutaway is always on stage and runs the side-view loop (its highlight).
-  const diagramOn = () => view === "side" || level === SIMPLE;
-  const showTarget = () => (diagramOn() ? 1 : 0);
+  const showTarget = () => (view === "side" ? 1 : 0);
 
   const emit = (phase) => {
     container.dispatchEvent(new CustomEvent("cue:phase", { bubbles: true, detail: { cueId, phase } }));
@@ -488,7 +362,7 @@ export async function createMouthDemo(container, options = {}) {
 
   const startCueLoop = (force) => {
     const pre = prefix(cue, force);
-    const loop = diagramOn() ? sideLoop(cue) : frontLoop(cue);
+    const loop = view === "side" ? sideLoop(cue) : frontLoop(cue);
     run([...pre, ...loop], { loop: true, loopStart: pre.length });
   };
 
@@ -497,12 +371,7 @@ export async function createMouthDemo(container, options = {}) {
   // from rest. In the last sliver of an ease-out lip sync writes after paint() in the frame, so it wins.
   const cueOwnsFace = () => cue !== null || (driven !== null && S.w > 0.02);
   const emitSpeech = (type) => container.dispatchEvent(new CustomEvent(type, { bubbles: true }));
-  // Through a proxy: the driver is a stand-in until the 3D stack is built (lip sync drives the cutaway regardless).
-  const driverProxy = {
-    setShape: (name, value) => driver.setShape(name, value),
-    releaseShapes: (names) => driver.releaseShapes(names),
-  };
-  const lipsync = createLipSync({ driver: driverProxy, isBlocked: cueOwnsFace, emit: emitSpeech });
+  const lipsync = createLipSync({ driver, isBlocked: cueOwnsFace, emit: emitSpeech });
   disposers.push(() => lipsync.dispose());
 
   // Start picture: an image's dark pixels, laid out in a box on the canvas, become the dots' starting shape.
@@ -536,7 +405,7 @@ export async function createMouthDemo(container, options = {}) {
   };
 
   const shapeFromImage = async ({ src, box, fit = "fill", spacing = SHAPE_IMG.spacing, threshold = SHAPE_IMG.threshold } = {}) => {
-    if (disposed || !src || !box || !has3D || level === SIMPLE) return false;
+    if (disposed || !src || !box) return false;
     const token = ++shapeToken;
     let img;
     try {
@@ -545,7 +414,7 @@ export async function createMouthDemo(container, options = {}) {
       console.warn("[mouth-demo]", err?.message ?? err);
       return false;
     }
-    if (disposed || token !== shapeToken || !has3D || level === SIMPLE) return false; // a newer call (resize) wins
+    if (disposed || token !== shapeToken) return false; // a newer call (resize) wins
     const hw = host.clientWidth;
     const hh = host.clientHeight;
     const bw = +box.width;
@@ -603,128 +472,18 @@ export async function createMouthDemo(container, options = {}) {
   };
 
   // Stage backdrop: the gradient, washed toward a flat colour (eased in the frame loop).
-  backdrop = { color: null, amount: 0, target: 0, rate: 0 };
+  const backdrop = { color: null, amount: 0, target: 0, rate: 0 };
   const stepBackdrop = (dt) => {
     if (backdrop.amount === backdrop.target) return;
     const d = dt * backdrop.rate;
     backdrop.amount = backdrop.target > backdrop.amount
       ? Math.min(backdrop.target, backdrop.amount + d)
       : Math.max(backdrop.target, backdrop.amount - d);
-    if (has3D) scene.setBackdrop(backdrop.color, backdrop.amount);
+    scene.setBackdrop(backdrop.color, backdrop.amount);
   };
-
-  // ---- quality ----
-  let paused = false;
-  let raf = 0;
-  let lastT = 0;
-  const startLoop = () => {
-    stopLoop();
-    lastT = 0;
-    const tick = (now) => {
-      raf = requestAnimationFrame(tick);
-      const dt = lastT ? Math.min(100, Math.max(0, now - lastT)) : 0;
-      lastT = now;
-      frame(dt, now);
-    };
-    raf = requestAnimationFrame(tick);
-  };
-  const stopLoop = () => {
-    if (raf) cancelAnimationFrame(raf);
-    raf = 0;
-  };
-
-  let adaptive = opts.adaptive;
-  let baseLevel = level; // the monitor never climbs above the tier it was given
-  let canStepUp = false; // one step back up, and only right after a step down
-  let changing = Promise.resolve();
-
-  const emitQuality = (reason, fps = null) => {
-    const L = LEVELS[level];
-    const detail = { tier: L.tier, level: L.id, fps: fps == null ? null : Math.round(fps * 10) / 10, reason, adaptive };
-    container.dispatchEvent(new CustomEvent("quality:change", { bubbles: true, detail }));
-    try { opts.onQualityChange?.(detail); } catch (err) { console.warn("[mouth-demo] onQualityChange failed:", err); }
-  };
-
-  /** Apply a rung of the ladder to the live stack (the 3D stack exists unless the rung is simple). */
-  const applyLevel = (next) => {
-    const wasDiagram = diagramOn();
-    level = next;
-    const L = LEVELS[level];
-    root.dataset.quality = L.tier;
-    if (has3D) scene.canvas.style.display = level === SIMPLE ? "none" : "block"; // scene.js sets it inline
-    if (level === SIMPLE) {
-      // Park the 3D stack: not drawn or updated. Turning the cloud off ends any intro / outro at once.
-      if (opts.posterUrl && !poster.getAttribute("src")) poster.src = opts.posterUrl;
-      if (has3D) cloud.setActive(false);
-    } else {
-      cloud.setActive(style === "particles");
-      scene.setPixelRatioCap(L.dpr);
-      particles.setPixelRatio(scene.renderer.getPixelRatio());
-      const size = lastSize ?? measure();
-      if (size) hologram.setSize(size.w, size.h);
-      cloud.setDotFraction(Math.min(1, L.dots / cloud.buildShare));
-      cloud.setScatterEnabled(L.scatter);
-      cloud.setDeformerStride(L.stride);
-      scene.setBackdrop(backdrop.color, backdrop.amount);
-    }
-    if (wasDiagram !== diagramOn()) {
-      S.show = showTarget();
-      cutaway.show(S.show);
-      if (cue) startCueLoop(false);
-    }
-    monitor?.reset();
-    renderDebug();
-  };
-
-  /**
-   * Move to rung `next`, building the 3D stack if it is missing. `rebuild` (an explicit choice) also replaces a
-   * light-built point cloud when the full tier is asked for. Serialised: changes apply in the order asked.
-   */
-  const changeLevel = (next, { reason, fps = null, rebuild = false } = {}) => {
-    changing = changing.then(async () => {
-      if (disposed) return;
-      let target = Math.max(0, Math.min(SIMPLE, next));
-      let why = reason;
-      if (target !== SIMPLE) {
-        if (!has3D) {
-          try {
-            await build3D(LEVELS[target].tier);
-          } catch (err) {
-            if (disposed) return;
-            console.warn("[mouth-demo] the 3D guide could not load; staying on the simple view:", err?.message ?? err);
-            target = SIMPLE;
-            why = "3d-failed";
-          }
-        } else if (rebuild && cloud.buildShare < LEVELS[target].dots) {
-          rebuildCloud(LEVELS[target].tier);
-        }
-      }
-      if (disposed) return;
-      const changed = target !== level || why === "3d-failed";
-      applyLevel(target);
-      if (changed || reason === "user" || reason === "set") emitQuality(why, fps);
-    });
-    return changing;
-  };
-
-  monitor = createFpsMonitor({
-    onDown: ({ fps, fallback }) => {
-      if (!adaptive || level >= SIMPLE) return;
-      canStepUp = !fallback;
-      void changeLevel(level + 1, { reason: fallback ? "fps-fallback" : "fps-low", fps });
-    },
-    onUp: ({ fps }) => {
-      if (!adaptive || !canStepUp || level <= baseLevel) return;
-      canStepUp = false;
-      void changeLevel(level - 1, { reason: "fps-high", fps });
-    },
-    onSample: () => { if (debugEl) renderDebug(); },
-    fpsOverride: params.fakeFps ? () => params.fakeFps : null,
-  });
-  disposers.push(() => monitor.dispose());
 
   const demo = {
-    get driverName() { return driver.name; },
+    driverName: driver.name,
 
     showCue(id) {
       const next = CUES[id];
@@ -736,7 +495,7 @@ export async function createMouthDemo(container, options = {}) {
       cueId = id;
       cue = next;
       caption.textContent = next.caption;
-      const loop = diagramOn() ? sideLoop(next) : frontLoop(next);
+      const loop = view === "side" ? sideLoop(next) : frontLoop(next);
       run([...pre, ...loop], { loop: true, loopStart: pre.length });
     },
 
@@ -756,12 +515,6 @@ export async function createMouthDemo(container, options = {}) {
       view = next;
       root.dataset.view = next;
       syncButtons();
-      if (level === SIMPLE) {
-        // no camera to swing: the diagram is already on stage
-        if (has3D) views.setView(next, { animate: false });
-        if (cue) startCueLoop(false);
-        return Promise.resolve(true);
-      }
       const dir = next === "side" ? 1 : -1;
       const pre = prefix(cue);
       let finished;
@@ -806,45 +559,16 @@ export async function createMouthDemo(container, options = {}) {
     },
 
     setZoom(z) {
-      zoom = z;
       views.setZoom(z);
     },
 
     // Freeze everything (face, camera, effects, choreography clock) without losing state.
     pause() {
-      paused = true;
-      if (!disposed) stopLoop();
+      if (!disposed) scene.stopLoop();
     },
 
     resume() {
-      paused = false;
-      if (disposed) return;
-      monitor.reset(); // the time spent paused is not a slow frame
-      startLoop();
-    },
-
-    /**
-     * Switch tier: "full" | "light" | "simple". `adaptive: false` pins it (the frame-rate monitor leaves it
-     * alone); otherwise the monitor may step it down and back up one rung. Resolves once applied; the 3D stack
-     * is built on the way up from simple (if that fails the demo stays simple, reason "3d-failed").
-     */
-    setQuality(tier, { adaptive: auto = true, reason = "set" } = {}) {
-      if (!TIERS.includes(tier) || disposed) return Promise.resolve();
-      adaptive = auto !== false;
-      baseLevel = LEVEL_OF[tier];
-      canStepUp = false;
-      monitor.restart();
-      return changeLevel(LEVEL_OF[tier], { reason, rebuild: true });
-    },
-
-    /** The tier being drawn now (after any automatic step). */
-    getQuality() {
-      return LEVELS[level].tier;
-    },
-
-    /** The rung within the tier: "full" | "full-dpr" | "full-dots" | "light" | "simple". */
-    get qualityLevel() {
-      return LEVELS[level].id;
+      if (!disposed) scene.startLoop(frame);
     },
 
     setStyle(next) {
@@ -853,12 +577,12 @@ export async function createMouthDemo(container, options = {}) {
       root.dataset.style = next;
       if (next === "particles") {
         hologram.setStyle("solid"); // restores the meshes; the cloud then hides them behind its depth prepass
-        cloud.setActive(level !== SIMPLE);
+        cloud.setActive(true);
       } else {
         cloud.setActive(false);
         hologram.setStyle(next);
       }
-      scene?.setSolidLighting(next === "solid");
+      scene.setSolidLighting(next === "solid");
       particles.setVisible(next === "hologram" || next === "particles");
       renderDebug();
     },
@@ -899,7 +623,7 @@ export async function createMouthDemo(container, options = {}) {
         backdrop.rate = 1 / dur;
       } else if (backdrop.amount !== backdrop.target) {
         backdrop.amount = backdrop.target;
-        if (has3D) scene.setBackdrop(backdrop.color, backdrop.amount);
+        scene.setBackdrop(backdrop.color, backdrop.amount);
       }
     },
 
@@ -914,7 +638,7 @@ export async function createMouthDemo(container, options = {}) {
     dispose() {
       if (disposed) return;
       disposed = true;
-      stopLoop();
+      scene.stopLoop();
       timeline.stop();
       teardown();
       root.remove();
@@ -930,27 +654,8 @@ export async function createMouthDemo(container, options = {}) {
     get hasStartShape() { return cloud.hasStartShape; },
   };
 
-  // Build the 3D stack for the starting tier (the simple tier never builds it). A stack that cannot be built
-  // (no WebGL, the avatar fails to load) leaves the lesson on the simple view instead of failing it.
-  let startReason = opts.qualityReason;
-  if (level !== SIMPLE) {
-    try {
-      await build3D(LEVELS[level].tier);
-    } catch (err) {
-      if (disposed) throw err;
-      console.warn("[mouth-demo] the 3D guide could not load; using the simple view:", err?.message ?? err);
-      level = SIMPLE;
-      baseLevel = SIMPLE;
-      startReason = "3d-failed";
-    }
-  }
-  applyLevel(level);
-  S.show = showTarget(); // the simple tier opens with the diagram on stage
-  cutaway.show(S.show);
-
   if (params.debug) {
     // DevTools: __mouthDemo.disperse() / .assemble() / .assembly; the public object is __mouthDemo.demo
-    window.__mouthDemo = window.__mouthDemo ?? {};
     Object.assign(window.__mouthDemo, {
       demo,
       cloud,
@@ -959,29 +664,19 @@ export async function createMouthDemo(container, options = {}) {
     });
     Object.defineProperty(window.__mouthDemo, "assembly", { get: () => demo.assembly, configurable: true });
   }
-  if (params.fpsdebug) {
-    // DevTools: __mouthQuality.level / .fps / .setQuality("light")
-    window.__mouthQuality = {
-      get level() { return LEVELS[level].id; },
-      get fps() { return monitor.fps; },
-      setQuality: (t, o) => demo.setQuality(t, o),
-    };
-  }
 
   // Ready
+  scene.setSolidLighting(style === "solid");
+  hologram.materialize(SWING_MS);
   loading.remove();
   syncButtons();
   renderDebug();
 
   // One frame of the demo; also the resume target for pause()/resume().
-  function frame(dt, now) {
-    const live = has3D && level !== SIMPLE;
+  function frame(dt) {
     if (pendingSize) {
-      lastSize = pendingSize;
-      if (has3D) {
-        scene.setSize(pendingSize.w, pendingSize.h);
-        hologram.setSize(pendingSize.w, pendingSize.h);
-      }
+      scene.setSize(pendingSize.w, pendingSize.h);
+      hologram.setSize(pendingSize.w, pendingSize.h);
       pendingSize = null;
     }
     const step = Math.min(dt, 100);
@@ -991,8 +686,7 @@ export async function createMouthDemo(container, options = {}) {
     lipsync.update(step);
     // The side diagram follows the lip sync whenever no cue owns the face; otherwise paint()'s setPose
     // (run earlier this frame by timeline.update) holds it. With no speech the pose is all zero (neutral).
-    if (!cueOwnsFace() && (diagramOn() || S.show > 0)) cutaway.setBlend(lipsync.pose());
-    if (!live) return; // simple: nothing in 3D to update or draw
+    if (!cueOwnsFace() && (view === "side" || S.show > 0)) cutaway.setBlend(lipsync.pose());
     driver.update(step);
     if (look || Math.abs(lookNow.x) > 1e-3 || Math.abs(lookNow.y) > 1e-3) {
       const goal = look ?? { x: 0, y: 0 };
@@ -1028,14 +722,11 @@ export async function createMouthDemo(container, options = {}) {
     cloud.update(step);
     particles.update(scaled);
     hologram.render();
-    monitor.tick(now);
   }
-  if (!paused) startLoop();
+  scene.startLoop(frame);
 
   setTimeout(() => {
-    if (disposed) return;
-    container.dispatchEvent(new CustomEvent("demo:ready", { bubbles: true, detail: { driver: driver.name } }));
-    emitQuality(startReason); // the starting tier (after any fallback)
+    if (!disposed) container.dispatchEvent(new CustomEvent("demo:ready", { bubbles: true, detail: { driver: driver.name } }));
   }, 0);
 
   return demo;

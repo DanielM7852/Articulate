@@ -6,7 +6,6 @@ import { OnboardingFrame, useStepNav } from '../components/Onboarding';
 import { prepareTeacher, speakTeacher, unlockTeacherAudio, type TeacherSpeech } from '../audio/teacher';
 import type { SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
 import { useAppState } from '../state/AppState';
-import { useQuality } from '../guide/quality';
 import { useFaceTracking, usePointerLook } from '../vision/useLook';
 import brandMark from '../assets/landing/brand-mark.svg';
 import closingLinework from '../assets/landing/closing-linework.svg';
@@ -22,8 +21,6 @@ import '../styles/intro.css';
  * captions, and dissolves again on the way to the survey. The camera is asked
  * for on Begin so she looks at the learner; if that is denied she follows the
  * pointer instead. Returning learners get a shorter line and go to the lesson.
- * In the simple view (no 3D, see guide/quality.ts) there is no head to build: the picture stays and Begin
- * goes straight on to the next screen.
  */
 /** forming: Begin was tapped and the guide's dots are taking the ribbon picture's place. */
 type Phase = 'idle' | 'forming' | 'assembling' | 'talking' | 'leaving';
@@ -178,8 +175,6 @@ export default function Intro() {
   const [dotted, setDotted] = useState(false);
   // The landing page has left: it fades while the head is built.
   const pageGone = phase !== 'idle' && phase !== 'forming';
-  const quality = useQuality();
-  const leftEarly = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -204,14 +199,8 @@ export default function Intro() {
   // morph straight into her head. The stage takes the paper colour so the overlay can turn see-through.
   // Without a ready particle guide, or if the picture cannot be read, the overlay simply fades as before.
   const begin = () => {
-    if (phase !== 'idle' || leftEarly.current) return; // the overlay is also inert from here on
+    if (phase !== 'idle') return; // the overlay is also inert from here on
     void unlockTeacherAudio(); // inside the tap, so the voice may play
-    if (quality.tier === 'simple') {
-      // no dots to morph and no head to build: straight on, under the usual page crossfade
-      leftEarly.current = true;
-      go(onboarded ? '/lesson' : '/quiz/1');
-      return;
-    }
     const g = guideState === 'ready' ? guide.current : null;
     const rect = sculpture.current?.getBoundingClientRect();
     if (!g || !rect?.width || !rect.height) {

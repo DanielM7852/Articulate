@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { createPortal, flushSync } from 'react-dom';
+import { flushSync } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Check, ChevronLeft, Gauge, Volume2, VolumeX, X } from 'lucide-react';
+import { Check, ChevronLeft, Volume2, VolumeX, X } from 'lucide-react';
 import { useAppState } from '../state/AppState';
-import { setQualitySetting, useQuality, type QualitySetting } from '../guide/quality';
 
 /**
  * Onboarding frame, Duolingo-style: one question per screen, locked to the viewport.
@@ -217,106 +216,6 @@ export function AccessToggles() {
       >
         {audio ? <Volume2 size={17} aria-hidden="true" /> : <VolumeX size={17} aria-hidden="true" />}
       </button>
-      <QualityToggle />
-    </div>
-  );
-}
-
-const QUALITY_OPTIONS: { id: QualitySetting; label: string; hint: string }[] = [
-  { id: 'auto', label: 'Auto', hint: 'Matches this device' },
-  { id: 'full', label: 'Full', hint: 'The full 3D guide' },
-  { id: 'light', label: 'Light', hint: 'Fewer dots, smoother' },
-  { id: 'simple', label: 'Simple view', hint: 'A picture and the mouth diagram' },
-];
-const TIER_LABEL = { full: 'Full', light: 'Light', simple: 'Simple' } as const;
-
-/**
- * How the guide is drawn: Auto (the device decides and steps down if it struggles) or a pinned tier.
- * Shown only while a screen shows the guide. The choice is stored and applied at once. The menu is portalled
- * to <body> and placed under the pill, so the screens' stacked stages never cover it.
- */
-function QualityToggle() {
-  const { setting, tier, guideShown } = useQuality();
-  const [at, setAt] = useState<{ top: number; right: number } | null>(null);
-  const btn = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
-  const open = at !== null;
-  const close = useCallback(() => setAt(null), []);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (!menu.current?.contains(t) && !btn.current?.contains(t)) close();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      close();
-      btn.current?.focus();
-    };
-    document.addEventListener('pointerdown', onDown);
-    document.addEventListener('keydown', onKey);
-    window.addEventListener('resize', close);
-    // focus the chosen option so the menu is usable from the keyboard
-    menu.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
-    return () => {
-      document.removeEventListener('pointerdown', onDown);
-      document.removeEventListener('keydown', onKey);
-      window.removeEventListener('resize', close);
-    };
-  }, [open, close]);
-
-  if (!guideShown) return null;
-  const shown = setting === 'auto' ? (tier ? `Auto · ${TIER_LABEL[tier]}` : 'Auto') : TIER_LABEL[setting];
-  const toggle = () => {
-    if (open) return close();
-    const r = btn.current?.getBoundingClientRect();
-    if (r) setAt({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
-  };
-  const choose = (id: QualitySetting) => {
-    setQualitySetting(id);
-    close();
-    btn.current?.focus();
-  };
-  return (
-    <div className="ob-quality">
-      <button
-        ref={btn}
-        type="button"
-        className="ob-pill ob-quality-btn"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={`Display quality: ${shown}`}
-        title={`Display quality: ${shown}`}
-        onClick={toggle}
-      >
-        <Gauge size={16} aria-hidden="true" />
-        {setting !== 'auto' && <span className="ob-quality-tag">{TIER_LABEL[setting]}</span>}
-      </button>
-      {at && createPortal(
-        <div ref={menu} className="ob-quality-menu" role="menu" aria-label="Display quality" style={{ top: at.top, right: at.right }}>
-          {QUALITY_OPTIONS.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={setting === o.id}
-              className="ob-quality-item"
-              onClick={() => choose(o.id)}
-            >
-              <span className="ob-quality-copy">
-                <span className="ob-quality-label">
-                  {o.label}
-                  {o.id === 'auto' && tier ? <span className="ob-quality-now"> · now {TIER_LABEL[tier].toLowerCase()}</span> : null}
-                </span>
-                <span className="ob-quality-hint">{o.hint}</span>
-              </span>
-              <Check size={15} strokeWidth={2.6} aria-hidden="true" className="ob-quality-check" />
-            </button>
-          ))}
-        </div>,
-        document.body,
-      )}
     </div>
   );
 }

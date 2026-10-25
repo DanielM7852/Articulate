@@ -3,6 +3,5 @@ dist
 .env*.local
 *.log
 public/mediapipe/wasm/
-public/detect-gpu/
 tsconfig.tsbuildinfo
 smoke-out/

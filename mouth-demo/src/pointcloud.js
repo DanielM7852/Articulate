@@ -12,11 +12,6 @@ import { classify } from "./hologram.js";
  * invisible depth prepass so dots on the far side of the head are hidden.
  *
  * The pointer scatters dots near its ray; each dot springs back to its home.
- *
- * Quality (see quality.js): `quality: "light"` samples 30% of the dots (drawn larger so the coverage holds).
- * At runtime setDotFraction() draws only a share of them (the dot order is interleaved per mesh at build time,
- * so any prefix keeps the whole silhouette), setScatterEnabled() turns the pointer field off and
- * setDeformerStride(k) re-poses the dots only every k-th frame.
  */
 const COLOR_NAVY = "#203E68";
 const COLOR_HALO = "#CBD7E6";
@@ -25,8 +20,6 @@ const COLOR_GREY = "#DADFD9";
 // dots per square metre of surface, by mesh class; and an overall cap
 const DENSITY = { full: 230000, eyes: 360000, teeth: 260000, hair: 230000 };
 const MAX_DOTS = 320000;
-// The light tier's share of the full tier's dots. Its dots are drawn 1/sqrt(share) larger, so coverage holds.
-export const LIGHT_DOTS = 0.3;
 // Even spacing: candidates are generated at OVERSAMPLE x the density, then accepted only
 // if no accepted dot lies within SPACING / sqrt(density) of them (dart throwing).
 const OVERSAMPLE = 4;
@@ -431,33 +424,6 @@ function rankMatch(a, ax, ay, b, bx, by) {
 }
 
 /** Typed-array copy of a BufferAttribute (handles interleaved and normalized attributes). */
-/**
- * A permutation of the dots that interleaves the meshes in proportion: dot r of a mesh with m dots gets the key
- * (r + 0.5) / m and the dots are merged by key, so every prefix carries the same share of each mesh.
- */
-function stratifiedOrder(dotEntry, nEntries) {
-  const n = dotEntry.length;
-  const lists = Array.from({ length: nEntries }, () => []);
-  for (let i = 0; i < n; i++) lists[dotEntry[i]].push(i);
-  const next = new Uint32Array(nEntries);
-  const out = new Uint32Array(n);
-  for (let j = 0; j < n; j++) {
-    let best = -1;
-    let bestKey = Infinity;
-    for (let e = 0; e < nEntries; e++) {
-      const m = lists[e].length;
-      if (next[e] >= m) continue;
-      const key = (next[e] + 0.5) / m;
-      if (key < bestKey) {
-        bestKey = key;
-        best = e;
-      }
-    }
-    out[j] = lists[best][next[best]++];
-  }
-  return out;
-}
-
 function copyAttr(attr, itemSize, Ctor = Float32Array) {
   const n = attr.count;
   const out = new Ctor(n * itemSize);
@@ -542,8 +508,7 @@ function makeDeformer(mesh) {
   return { out, update };
 }
 
-export function createPointCloud({ renderer, scene, camera, canvas, root, anchor, reducedMotion = false, startDispersed = false, quality = "full" }) {
-  const light = quality === "light";
+export function createPointCloud({ renderer, scene, camera, canvas, root, anchor, reducedMotion = false, startDispersed = false }) {
   let reduced = !!reducedMotion;
   let active = false;
   let disposed = false;
@@ -612,21 +577,16 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     areas.set(e, { triArea, sum });
     total += sum * DENSITY[e.cls];
   }
-  // Fewer dots on small machines: the deformer and the scatter run on the CPU every frame. The light tier
-  // takes LIGHT_DOTS of the full count; the full tier keeps its old cut on machines with 4 cores or fewer.
+  // Fewer dots on small machines: the deformer and the scatter run on the CPU every frame.
   const cores = (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 8;
   const budget = cores <= 4 ? 0.45 : 1;
-  const scale = light
-    ? Math.min(1, MAX_DOTS / Math.max(1, total)) * LIGHT_DOTS
-    : Math.min(1, (MAX_DOTS * budget) / Math.max(1, total)) * budget;
-  const buildRadius = light ? DOT.radius / Math.sqrt(LIGHT_DOTS) : DOT.radius;
+  const scale = Math.min(1, (MAX_DOTS * budget) / Math.max(1, total)) * budget;
 
   // Dots reference a table of unique triangles, so each triangle's deformed frame and
   // normal are computed once per frame and shared by every dot on it.
   const uniq = []; // [entryIndex, ia, ib, ic] flattened, one record per triangle that carries dots
   const uniqIndex = new Map(); // numeric key (entry, directed edge a->b) -> record index
   const dotTri = []; // record index per dot
-  const dotEntry = []; // entry index per dot (for the interleaved draw order)
   const bary = [];
   const info = [];
   const P = new THREE.Vector3();
@@ -789,7 +749,6 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
         uniq.push(ei, cand[i], cand[i + 1], cand[i + 2]);
       }
       dotTri.push(tid);
-      dotEntry.push(ei);
       bary.push(cand[i + 3], cand[i + 4], cand[i + 5]);
       info.push(size, dotKind, mouth, alpha);
       kept++;
@@ -798,28 +757,12 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   }
   console.info("[pointcloud] sampling", perClass);
   const count = bary.length / 3;
-  // Draw order: the meshes' dots interleaved in proportion (each mesh's own order is its dart-throwing
-  // acceptance order, which is random and spread out), so any prefix holds the same share of every mesh
-  // and drawing only the first n * f keeps the silhouette (setDotFraction).
-  const order = stratifiedOrder(dotEntry, entries.length);
   const uniqA = new Uint32Array(uniq);
-  const dotTriA = new Uint32Array(count);
-  const baryA = new Float32Array(count * 3);
-  const infoA = new Float32Array(count * 4);
-  for (let j = 0; j < count; j++) {
-    const i = order[j];
-    dotTriA[j] = dotTri[i];
-    baryA[j * 3] = bary[i * 3];
-    baryA[j * 3 + 1] = bary[i * 3 + 1];
-    baryA[j * 3 + 2] = bary[i * 3 + 2];
-    infoA[j * 4] = info[i * 4];
-    infoA[j * 4 + 1] = info[i * 4 + 1];
-    infoA[j * 4 + 2] = info[i * 4 + 2];
-    infoA[j * 4 + 3] = info[i * 4 + 3];
-  }
+  const dotTriA = new Uint32Array(dotTri);
   const triCountU = uniqA.length / 4;
   const triFrame = new Float32Array(triCountU * 12); // per triangle: a, u = b - a, v = c - a, unit normal
   console.info(`[pointcloud] ${triCountU} triangles carry dots`);
+  const baryA = new Float32Array(bary);
   const positions = new Float32Array(count * 3);
   const normals = new Float32Array(count * 3);
   const offset = new Float32Array(count * 3);
@@ -839,6 +782,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   nrmAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("position", posAttr);
   geometry.setAttribute("aNormal", nrmAttr);
+  const infoA = new Float32Array(info);
   geometry.setAttribute("aInfo", new THREE.BufferAttribute(infoA, 4));
   // fly-in starts: the shell, or (with a start shape) points on the picture in camera space
   const shellFly = makeFlyStarts(count);
@@ -851,7 +795,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
   const uniforms = {
     uProj: { value: 1000 },
     uDpr: { value: 1 },
-    uRadius: { value: buildRadius },
+    uRadius: { value: DOT.radius },
     uHold: { value: 0 },
     uProg: { value: 1 },
     uMode: { value: 0 },
@@ -878,14 +822,6 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     fog: false
   });
   const points = new THREE.Points(geometry, material);
-  // runtime quality: dots drawn (a prefix of the interleaved order), pointer field, deformer stride
-  let drawn = count;
-  let dotFraction = 1;
-  let scatterOn = true;
-  let stride = 1;
-  let strideFrame = 0;
-  let shapeRadius = DOT.radius; // the start picture's dot radius with every dot drawn
-  geometry.setDrawRange(0, count);
   points.name = "head-pointcloud";
   points.frustumCulled = false;
   points.renderOrder = 1;
@@ -997,7 +933,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       let cy = 0;
       let cz = 0;
       let n = 0;
-      for (let i = 0; i < drawn; i += 97) {
+      for (let i = 0; i < count; i += 97) {
         cx += positions[i * 3];
         cy += positions[i * 3 + 1];
         cz += positions[i * 3 + 2];
@@ -1007,7 +943,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       bound.y = cy / n;
       bound.z = cz / n;
       let r2 = 0;
-      for (let i = 0; i < drawn; i += 97) {
+      for (let i = 0; i < count; i += 97) {
         const ex = positions[i * 3] - bound.x;
         const ey = positions[i * 3 + 1] - bound.y;
         const ez = positions[i * 3 + 2] - bound.z;
@@ -1036,7 +972,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     const wx = pointerVel.x * drag;
     const wy = pointerVel.y * drag;
     const wz = pointerVel.z * drag;
-    for (let i = 0; i < drawn; i++) {
+    for (let i = 0; i < count; i++) {
       const hx = positions[i * 3] - offset[i * 3] - ox;
       const hy = positions[i * 3 + 1] - offset[i * 3 + 1] - oy;
       const hz = positions[i * 3 + 2] - offset[i * 3 + 2] - oz;
@@ -1142,7 +1078,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     activeCount = w;
   }
 
-  function place(n = drawn) {
+  function place() {
     // 1. each triangle's deformed frame and normal, once
     for (let t = 0; t < triCountU; t++) {
       const out = entries[uniqA[t * 4]].deformer.out;
@@ -1176,8 +1112,8 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       triFrame[o + 10] = ny * inv;
       triFrame[o + 11] = nz * inv;
     }
-    // 2. every drawn dot from its triangle's frame (setStartShape places them all)
-    for (let i = 0; i < n; i++) {
+    // 2. every dot from its triangle's frame
+    for (let i = 0; i < count; i++) {
       const o = dotTriA[i] * 12;
       const w1 = baryA[i * 3 + 1];
       const w2 = baryA[i * 3 + 2];
@@ -1283,7 +1219,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     let x1 = -Infinity;
     let y1 = -Infinity;
     let z1 = -Infinity;
-    for (let i = 0; i < drawn; i += 61) {
+    for (let i = 0; i < count; i += 61) {
       const x = positions[i * 3];
       const y = positions[i * 3 + 1];
       const z = positions[i * 3 + 2];
@@ -1364,7 +1300,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
 
     // head dots where they are now, in camera space
     pose();
-    place(count);
+    place();
     camera.updateMatrixWorld();
     const V = camera.matrixWorldInverse.elements;
     const hx = new Float32Array(count);
@@ -1447,8 +1383,7 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     const area = s.area > 0 ? s.area : n * jit * jit;
     let radius = s.dotRadius > 0 ? s.dotRadius : 0;
     if (!radius && area > 0) radius = Math.sqrt(-Math.log(1 - SHAPE.coverage) / (Math.PI * (count / area)));
-    shapeRadius = radius || DOT.radius;
-    uniforms.uShapeRadius.value = shapeRadius / Math.sqrt(dotFraction);
+    uniforms.uShapeRadius.value = radius || DOT.radius;
 
     if (!shape.on || !showingShape()) shape.alpha = 0;
     shape.on = true;
@@ -1514,32 +1449,6 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
     get hasStartShape() {
       return shape.on;
     },
-    /** Share of the dots drawn, 0.05..1 (a prefix of the interleaved order); the dots grow by 1/sqrt(f). */
-    setDotFraction(f) {
-      const v = Math.min(1, Math.max(0.05, +f || 1));
-      dotFraction = v;
-      drawn = Math.max(1, Math.round(count * v));
-      geometry.setDrawRange(0, drawn);
-      uniforms.uRadius.value = buildRadius / Math.sqrt(v);
-      uniforms.uShapeRadius.value = shapeRadius / Math.sqrt(v);
-      bound.r = 0; // re-measure the scatter bound from the drawn dots
-    },
-    get dotFraction() {
-      return dotFraction;
-    },
-    /** Share of the full tier's dots this cloud was built with (LIGHT_DOTS for the light build, else 1). */
-    get buildShare() {
-      return light ? LIGHT_DOTS : 1;
-    },
-    /** Pointer scatter on or off; displaced dots spring home when it goes off. */
-    setScatterEnabled(on) {
-      scatterOn = !!on;
-    },
-    /** Re-pose the dots (CPU deformer) every k-th frame, 1 = every frame; they hold their pose in between. */
-    setDeformerStride(k) {
-      stride = Math.max(1, Math.min(4, Math.round(+k) || 1));
-      strideFrame = 0;
-    },
     setHold(v) {
       uniforms.uHold.value = Math.max(0, Math.min(1, v || 0));
     },
@@ -1564,13 +1473,10 @@ export function createPointCloud({ renderer, scene, camera, canvas, root, anchor
       }
       const t0 = performance.now();
       const dtSec = Math.min(0.05, Math.max(0, (dtMs || 0) / 1000));
-      // light tier: re-pose every stride-th frame and hold the dots in between (the fly-in still steps every frame)
-      const repose = stride <= 1 || strideFrame++ % stride === 0;
-      if (repose) pose();
-      if (scatterOn) scatter(dtSec);
-      else frameId++; // no new targets: displaced dots spring home
+      pose();
+      scatter(dtSec);
       springs(dtSec);
-      if (repose || activeCount) place();
+      place();
       if (fly.anim) {
         measureFly();
         stepFly(dtMs);

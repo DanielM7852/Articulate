@@ -3,23 +3,6 @@
  * the `@mouth-demo` Vite alias). Mirrors the API table in mouth-demo/README.md.
  */
 declare module '@mouth-demo/src/mouth-demo.js' {
-  import type { QualityTier } from '@mouth-demo/src/quality.js';
-  export type { QualityTier };
-  /** A rung of the runtime quality ladder: the tier, or a step within the full tier. */
-  export type QualityLevel = 'full' | 'full-dpr' | 'full-dots' | 'light' | 'simple';
-
-  /** Detail of the 'quality:change' event and the onQualityChange callback. */
-  export interface QualityChange {
-    tier: QualityTier;
-    level: QualityLevel;
-    /** Average fps that triggered an automatic step; null otherwise. */
-    fps: number | null;
-    /** e.g. 'initial', 'url', 'user', 'auto', 'fps-low', 'fps-high', 'fps-fallback', '3d-failed', or a detection reason. */
-    reason: string;
-    /** Whether the frame-rate monitor may step the tier. */
-    adaptive: boolean;
-  }
-
   export type MouthCueId = 'round-lips' | 'spread-lips' | 'open-jaw';
   export type MouthView = 'front' | 'side';
   export type MouthStyle = 'hologram' | 'particles' | 'porcelain' | 'hybrid' | 'solid';
@@ -133,15 +116,6 @@ declare module '@mouth-demo/src/mouth-demo.js' {
     /** Freeze the face, camera and choreography clock without losing state. */
     pause(): void;
     resume(): void;
-    /**
-     * Switch quality tier. `adaptive: false` pins it; otherwise the frame-rate monitor may step it down (and
-     * back up one rung). Builds the 3D stack on the way up from 'simple'; resolves once applied. Fires
-     * 'quality:change' (and onQualityChange).
-     */
-    setQuality(tier: QualityTier, opts?: { adaptive?: boolean; reason?: string }): Promise<void>;
-    /** The tier drawn now (after any automatic step). */
-    getQuality(): QualityTier;
-    readonly qualityLevel: QualityLevel;
     /** Frees GPU resources, listeners and DOM. Safe to call twice. */
     dispose(): void;
   }
@@ -154,74 +128,7 @@ declare module '@mouth-demo/src/mouth-demo.js' {
     controls?: boolean;
     /** Start with the particle head dispersed (empty stage) until assemble() is called. Default false. */
     startDispersed?: boolean;
-    /** Starting tier (`?quality=` on the URL wins). 'simple' builds no 3D at all. Default 'full'. */
-    quality?: QualityTier;
-    /** false pins the tier (no automatic steps). Default true. */
-    adaptive?: boolean;
-    /** Reason reported with the first 'quality:change'. */
-    qualityReason?: string;
-    /** Picture shown in the head's place in the simple tier. */
-    posterUrl?: string;
-    onQualityChange?: (change: QualityChange) => void;
   }
 
   export function createMouthDemo(container: HTMLElement, options?: MouthDemoOptions): Promise<MouthDemo>;
-}
-
-/** Typed surface of `mouth-demo/src/quality.js`: tier detection and the frame-rate monitor. */
-declare module '@mouth-demo/src/quality.js' {
-  export type QualityTier = 'full' | 'light' | 'simple';
-  export const TIERS: QualityTier[];
-  export const STORAGE_KEY: string;
-
-  export interface TierDetection {
-    tier: QualityTier;
-    /** e.g. 'no-webgl', 'software-renderer', 'performance-caveat', 'gpu-tier-1', 'mobile', 'cores-4', 'detect-error'. */
-    reason: string;
-    /** detect-gpu tier 0..3, null when unknown. */
-    gpuTier: number | null;
-    renderer: string;
-    isMobile: boolean;
-    software: boolean;
-  }
-
-  export interface TierDecision extends TierDetection {
-    source: 'url' | 'user' | 'detected';
-    /** The hardware's own tier (what "auto" means). */
-    detected: QualityTier;
-  }
-
-  export interface DetectOptions {
-    /** Where detect-gpu's benchmark JSON is served (default: unpkg). */
-    benchmarksURL?: string;
-  }
-
-  export function urlParams(): URLSearchParams;
-  export function readUrlQuality(): QualityTier | null;
-  export function readStoredQuality(): QualityTier | null;
-  export function storeQuality(tier: QualityTier | null): void;
-  export function detectHardwareTier(opts?: DetectOptions): Promise<TierDetection>;
-  export function detectTier(opts?: DetectOptions): Promise<TierDecision>;
-
-  export interface FpsMonitor {
-    tick(now?: number): void;
-    reset(): void;
-    restart(): void;
-    readonly fps: number;
-    readonly stopped: boolean;
-    dispose(): void;
-  }
-
-  export function createFpsMonitor(opts?: {
-    onDown?: (e: { fps: number; fallback: boolean }) => void;
-    onUp?: (e: { fps: number }) => void;
-    onSample?: (fps: number, avg: number) => void;
-    bounds?: [number, number];
-    sampleMs?: number;
-    samples?: number;
-    threshold?: number;
-    maxFlipflops?: number;
-    settleMs?: number;
-    fpsOverride?: (() => number | null | undefined) | null;
-  }): FpsMonitor;
 }

@@ -72,7 +72,6 @@ kind matches `^[a-z]+(\.[a-z_]+)+$`, label <= 120 chars, payload_json valid JSON
 | ui.join            | ui -> db            | `{sid, ua}` ua = coarse device class: phone, tablet or desktop; label "learner joined" |
 | ui.ping            | ui -> db            | `{sid}` every 20 s while the tab is visible                            |
 | ui.leave           | ui -> db            | `{sid}` on `pagehide`, best effort                                     |
-| ui.quality         | ui -> db            | `{tier, level, reason, gpuTier, fps, renderer, isMobile}` the guide's display tier (full, light, simple), on the first decision and every change; label "quality <tier>". level is the rung (full, full-dpr, full-dots, light, simple); reason e.g. software-renderer, gpu-tier-1, url, user, auto, fps-low, fps-high, fps-fallback, 3d-failed; gpuTier is detect-gpu's 0..3 or null; fps is the average that triggered an automatic step, else null; renderer is the WebGL renderer string truncated to 60 chars |
 
 Rates: lip.frame and audio.frame are throttled to at most 5 per second each by the browser.
 Everything else is one event per occurrence.
@@ -93,8 +92,6 @@ The header shows "N learners live" and the Learner node shows one dot per live s
 
 `web/src/telemetry/client.ts` exports:
 - `emit(source, target, kind, label, payload)` fire-and-forget, no-op when disconnected. Adds `sid`.
-- `emitWhenReady(...)` the same, except an event raised before the connection is ready is held (8 at most)
-  and sent once it is (used for `ui.quality`, decided at startup).
 - `getSessionId(): string` the anonymous per-tab id.
 - `subscribeTelemetry(cb: (e: TelemetryEvent) => void): () => void` live inserts, newest first on backfill.
 - `TelemetryEvent = { id: string; at: number; source; target; kind; label; payload: Record<string, unknown> }`
