@@ -22,6 +22,11 @@ interface AppState {
   preferences: Preferences;
   plan: Plan;
   attempts: Attempt[];
+  lessonInstruction: string | null;
+  lessonRevision: number;
+  lessonTarget: string | null;
+  lessonCue: string | null;
+  lessonRepetitions: number;
 }
 
 interface AppActions {
@@ -35,6 +40,16 @@ interface AppActions {
   setCamera: (on: boolean) => void;
   updatePreferences: (patch: Partial<Preferences>) => void;
   updatePlan: (patch: Partial<Plan>) => void;
+  applyTeacherLesson: (patch: {
+    instruction: string;
+    revision: number;
+    target: string;
+    assistance: Plan['assistance'];
+    sound: SoundId | null;
+    cue: string;
+    repetitions: number;
+    note: string;
+  }) => void;
   addAttempt: (attempt: Attempt) => void;
   updateAttempt: (attemptId: string, patch: Partial<Attempt>) => void;
   clearAttempts: () => void;
@@ -64,8 +79,13 @@ const defaultState: AppState = {
     assistance: 'cue-target',
     sound: 'i',
   },
-  attempts: [],
-};
+    attempts: [],
+    lessonInstruction: null,
+    lessonRevision: 0,
+    lessonTarget: null,
+    lessonCue: null,
+    lessonRepetitions: 1,
+  };
 
 /** Session-only fields: never restored from storage. */
 const SESSION_DEFAULTS = { quizDone: false, onboarded: false, preferences: EMPTY_PREFERENCES } satisfies Partial<AppState>;
@@ -113,6 +133,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setCamera: (on) => patch({ camera: on }),
       updatePreferences: (p) => setState((s) => ({ ...s, preferences: { ...s.preferences, ...p } })),
       updatePlan: (p) => setState((s) => ({ ...s, plan: { ...s.plan, ...p } })),
+      applyTeacherLesson: (patch) =>
+        setState((s) => ({
+          ...s,
+          lessonInstruction: patch.instruction,
+          lessonRevision: patch.revision,
+          lessonTarget: patch.target,
+          lessonCue: patch.cue || null,
+          lessonRepetitions: patch.repetitions,
+          plan: {
+            ...s.plan,
+            assistance: patch.assistance,
+            ...(patch.sound ? { sound: patch.sound } : {}),
+          },
+        })),
       addAttempt: (a) => setState((s) => ({ ...s, attempts: [...s.attempts, a] })),
       updateAttempt: (id, p) =>
         setState((s) => ({ ...s, attempts: s.attempts.map((a) => (a.attemptId === id ? { ...a, ...p } : a)) })),

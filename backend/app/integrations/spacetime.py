@@ -19,7 +19,7 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-_FROM = re.compile(r"from\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+_FROM = re.compile(r"\bfrom\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
 _PROFILE = re.compile(r"^[A-Za-z0-9_.:@-]{1,64}$")
 
 

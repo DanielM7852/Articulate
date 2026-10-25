@@ -1,0 +1,270 @@
+.teach {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 24px 72px;
+  color: var(--color-ink);
+}
+
+.teach-top {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.teach-top h1 {
+  margin: 0;
+}
+
+.teach-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.teach-board,
+.teach-detail {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.teach-board button,
+.teach-detail,
+.teach-empty,
+.teach-next,
+.teach-attempts li {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+}
+
+.teach-board button {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.teach-board button.is-selected {
+  border-color: var(--color-navy);
+  box-shadow: var(--focus-ring);
+}
+
+.teach-row__name {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.teach-row__exercise {
+  font-weight: 600;
+  color: var(--color-navy);
+}
+
+.teach-row__meta,
+.teach-detail .small,
+.teach-detail .fine {
+  overflow-wrap: anywhere;
+}
+
+.teach-pill {
+  justify-self: start;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.teach-pill--on {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.teach-pill--wait {
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+}
+
+.teach-pill--none {
+  background: var(--color-ivory);
+  color: var(--color-muted);
+}
+
+.teach-empty,
+.teach-detail,
+.teach-next,
+.teach-attempts li {
+  padding: 16px;
+}
+
+.teach-detail h2,
+.teach-h {
+  margin: 0;
+}
+
+.teach-h {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--color-navy);
+}
+
+.teach-next,
+.teach-editor,
+.teach-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.teach-editor {
+  grid-template-columns: 1fr 1fr;
+}
+
+.teach-note,
+.teach-check {
+  grid-column: 1 / -1;
+}
+
+.teach-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.teach-check input {
+  width: 18px;
+  height: 18px;
+}
+
+.teach-preview {
+  background: var(--color-navy-soft);
+  border-radius: var(--radius-tile);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.teach-diff {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.teach-diff li {
+  display: grid;
+  grid-template-columns: 120px 1fr 1fr;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.teach-diff li span:first-child {
+  font-weight: 600;
+  color: var(--color-navy);
+}
+
+.teach-actions .btn {
+  white-space: normal;
+  height: auto;
+  min-height: 50px;
+  text-align: center;
+}
+
+.teach-attempts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.is-capture {
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
+}
+
+.is-synthetic {
+  border-style: dashed;
+}
+
+.teach-alert {
+  color: var(--color-warn);
+}
+
+.teach-details {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.teach-path {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  background: var(--color-ivory);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+}
+
+.teach-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.teach-step {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-tile);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  overflow-wrap: anywhere;
+}
+
+.teach-step__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-navy);
+}
+
+.teach-step--done {
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
+}
+
+.teach-step--now {
+  background: var(--color-warn-soft);
+  border-color: var(--color-warn);
+}
+
+.teach-step--waiting {
+  color: var(--color-muted);
+}
+
+.teach-details summary {
+  cursor: pointer;
+  color: var(--color-navy);
+  font-weight: 600;
+}
+
+@media (max-width: 800px) {
+  .teach {
+    padding: 20px 16px 48px;
+  }
+
+  .teach-layout,
+  .teach-editor,
+  .teach-diff li,
+  .teach-actions {
+    grid-template-columns: 1fr;
+  }
+}

@@ -16,6 +16,7 @@ __pycache__/
 # Local secrets and data
 .env
 .env.secrets
+.tools/spacetime-worker.json
 .data/
 .local_store/
 spacetimedb/node_modules/
@@ -23,3 +24,7 @@ spacetimedb/dist/
 spacetimedb/target/
 apps/web/public/mediapipe/wasm/
 services/articulation/.models/
+
+# SpacetimeDB CLI binaries (download locally; see docs/teacher-dashboard.md)
+.tools/spacetime.zip
+.tools/spacetime/*.exe
