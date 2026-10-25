@@ -69,6 +69,12 @@ export interface UseAvaRealtimeOptions {
   bargeIn?: boolean;
   /** Mute the outgoing mic while Ava speaks (disables barge-in). Default false. */
   muteMicWhileSpeaking?: boolean;
+  /**
+   * True while the learner must not be heard (the lesson's "Give feedback" toggle is off). Results relayed to Ava
+   * (relayResult, attemptFinished, learner_attempt, end_practice) then let her speak her reply but keep the mic
+   * disabled and VAD off.
+   */
+  keepGated?: () => boolean;
 }
 
 export type DemoKind = 'mouth_cue' | 'side_view' | 'ghost_path';
@@ -166,6 +172,8 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
   /** Time we asked for a response (or the learner's turn ended) and response.created has not arrived yet; 0 = none. */
   const awaitingSince = useRef(0);
   const learnerSpeaking = useRef(false);
+  /** Practice mode is still on (mic and VAD off) but Ava's reply to a relayed result may be heard; cleared by the next gate change. */
+  const replyOnly = useRef(false);
   /** Count of sentences handed to a stream; compare before/after a relay to see whether Ava started speaking. */
   const spokenCount = useRef(0);
 
@@ -282,6 +290,20 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
     const timer = setInterval(() => { if (check()) { clearInterval(timer); resolve(); } }, IDLE_POLL_MS);
   });
 
+  /**
+   * Leave practice after a result so Ava's reply is not dropped. While keepGated() the mic and VAD stay off (the session
+   * remains in practice mode) and only her reply is let through; otherwise the mic reopens as usual.
+   */
+  const leavePractice = async (session: RealtimeSession) => {
+    if (opts.current.keepGated?.()) {
+      replyOnly.current = true;
+      return;
+    }
+    replyOnly.current = false;
+    await session.setPracticeMode(false).catch(() => undefined);
+    setPractice(false);
+  };
+
   const runTools = useCallback(async (session: RealtimeSession, calls: FunctionCall[]) => {
     toolsBusy.current += 1;
     let needsReply = false;
@@ -334,10 +356,7 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
             } catch {
               output = LEARNER_ATTEMPT_UNMEASURED;
             }
-            if (gate && sessionRef.current === session) {
-              await session.setPracticeMode(false).catch(() => undefined);
-              setPractice(false);
-            }
+            if (gate && sessionRef.current === session) await leavePractice(session);
             break;
           }
           case 'think_it_through': {
@@ -368,10 +387,7 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
             break;
           }
           case 'end_practice':
-            if (session.practiceMode) {
-              await session.setPracticeMode(false).catch(() => undefined);
-              setPractice(false);
-            }
+            if (session.practiceMode) await leavePractice(session);
             opts.current.onEndPractice?.();
             output = { ok: true };
             break;
@@ -399,11 +415,12 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
     learnerSpeaking.current = false;
     const session = new RealtimeSession({ ...opts.current.sessionOptions, profileId: opts.current.profileId ?? opts.current.sessionOptions?.profileId });
     sessionRef.current = session;
+    replyOnly.current = false;
     session.on('state', setState);
     session.on('error', (m) => setError(m));
     session.on('textDelta', ({ responseId, delta }) => {
       if (dropped.current.has(responseId) || silent.current.has(responseId)) return;
-      if (session.practiceMode || !(opts.current.canSpeak?.() ?? true)) {
+      if ((session.practiceMode && !replyOnly.current) || !(opts.current.canSpeak?.() ?? true)) {
         // Ava stays silent while the board is live or a scripted line has the floor; a late response (for example
         // after a relay fallback) is discarded.
         const plan = planRepair(session);
@@ -509,6 +526,7 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
   const setPracticeMode = useCallback(async (on: boolean) => {
     const session = sessionRef.current;
     if (!session) return;
+    replyOnly.current = false;
     setPractice(on);
     try {
       if (on) {
@@ -530,25 +548,26 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
   /** Attempt end, tool path: leave practice and let Ava call review_attempt(attemptId) herself. */
   const attemptFinished = useCallback(async (attemptId: string) => {
     lastAttemptId.current = attemptId;
-    await setPracticeMode(false);
+    const session = sessionRef.current;
+    if (session) await leavePractice(session);
     sessionRef.current?.injectResult(
       `The learner finished a practice attempt. attemptId: ${attemptId}.`,
       ATTEMPT_FINISHED_INSTRUCTIONS,
     );
-  }, [setPracticeMode]);
+  }, []);
 
   /** Attempt end, direct path: the lesson already has the notes; skip the tool turn and hand them to Ava. */
   const relayResult = useCallback(async (coaching: AvaCoaching, attemptId?: string, instructions?: string) => {
     if (attemptId) lastAttemptId.current = attemptId;
-    await setPracticeMode(false);
     const session = sessionRef.current;
+    if (session) await leavePractice(session);
     if (!session || session.state !== 'open') throw new Error('Realtime session is not open.');
     awaitingSince.current = Date.now(); // pending until response.created, so waitForIdle cannot slip through the gap
     session.injectResult(
       `Your notes on the try the learner just finished: ${JSON.stringify(coaching)}`,
       instructions ?? RESULT_INSTRUCTIONS,
     );
-  }, [setPracticeMode]);
+  }, []);
 
   /** No response pending or generating, no learner turn in progress, sentence queue empty, nothing playing. */
   const isIdle = useCallback(() => {

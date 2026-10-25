@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from app.live.scoring import practice_scope
-from app.live.schemas import AudioScore, ClientSummary, CoachDecision, EvidenceItem, VideoScore, WordAttempt, WordScore
+from app.live.schemas import ADVISORY_KINDS, AudioScore, ClientSummary, CoachDecision, EvidenceItem, VideoScore, WordAttempt, WordScore
 from app.live.targets import SOUND_CUE, SOUND_SPELLING
 from app.live.words import ZONE_CUE, ZoneInfo, word_info
 
@@ -507,13 +507,16 @@ def word_fallback_line(
             f"Let's work on the {info.label}{where}. {hint}",
             zone_id,
         )
+    heard = zone.phone_judged and zone.kind in ADVISORY_KINDS  # an r, sh or n the phone model judged
     if zone.verdict == "partial":
         observation = f"The board marked the {info.label}{where} as partly there."
-        lead = f"The {info.label}{where} was faint." if zone.kind == "stop" else f"The {info.label}{where} was nearly there."
+        lead = f"The {info.label}{where} was faint." if zone.kind == "stop" or heard else f"The {info.label}{where} was nearly there."
     else:
         observation = f"The board marked the {info.label}{where} as missed."
         lead = (
-            f"The {info.label}{where} went missing."
+            f"The {info.label}{where} didn't come through."
+            if heard
+            else f"The {info.label}{where} went missing."
             if zone.kind == "stop" or zone.verdict == "skipped"
             else f"The {info.label}{where} didn't reach its target yet."
         )

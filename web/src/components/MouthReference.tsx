@@ -35,6 +35,8 @@ export interface MouthReferenceHandle {
   setView(v: MouthView): Promise<void>;
   showCue(id: MouthCueId): void;
   stop(): void;
+  /** Subscribe to the cue timeline's phase starts ('in', 'hold', 'glide', 'relax', 'rest', ...). Returns unsubscribe; a no-op when not mounted. */
+  onCuePhase(fn: (cueId: string, phase: string) => void): () => void;
   /** Lip-synced speech on the guide; null until the guide is ready. */
   speak(opts: SpeakOptions): SpeechHandle | null;
   /** Build the particle head from the stage. Resolves true when assembled, false if interrupted or not ready. */
@@ -93,6 +95,16 @@ export const MouthReference = forwardRef<MouthReferenceHandle, MouthReferencePro
       },
       stop() {
         demoRef.current?.stop();
+      },
+      onCuePhase(fn) {
+        const host = hostRef.current;
+        if (!host || demoRef.current === null) return () => undefined;
+        const h = (e: Event) => {
+          const d = (e as CustomEvent<{ cueId?: string; phase?: string }>).detail;
+          if (d && typeof d.cueId === 'string' && typeof d.phase === 'string') fn(d.cueId, d.phase);
+        };
+        host.addEventListener('cue:phase', h);
+        return () => host.removeEventListener('cue:phase', h);
       },
       speak(opts) {
         const demo = demoRef.current;

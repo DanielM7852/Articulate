@@ -38,7 +38,7 @@ export function lessonPlan(spec: GhostWordSpec): LessonStep[] {
 }
 
 /** Close attempts in a row that move the learner on. */
-export const NAIL_STREAK = 2;
+export const NAIL_STREAK = 1;
 /** Attempts per step before moving on anyway. */
 export const MAX_TRIES = 4;
 

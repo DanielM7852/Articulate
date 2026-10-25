@@ -6,7 +6,7 @@ import { SCORING, clamp, lipOk, lipShape, loudnessFromRms, smoothToward } from '
 import { GhostAttempt, ghostAt, sizeModel, unitDurationMs, unitSegments, unitWindow } from '../game/ghost/follow';
 import type { GhostPathModel, GhostUnit } from '../game/ghost/types';
 import type { GhostWordSpec } from '../game/ghost/words';
-import { SOUND_ORDER, type SoundId } from '../state/types';
+import type { SoundId } from '../state/types';
 import { AXES, project, type VowelTarget } from '../vowel/targets';
 import { GhostInk } from '../game/ghost/ghostInk';
 import { phoneCursorState } from '../live/phoneCursor';
@@ -30,7 +30,7 @@ export interface GhostBoardProps {
   model: GhostPathModel;
   /** The learner's ln voice factor (Karsten's single multiplier). */
   learnerFactor: number;
-  /** The learner's vowel targets (targetsFor): only the backdrop outline uses them; ghost sizing stays on the factor. */
+  /** The learner's vowel targets (targetsFor). Kept for the caller; the board no longer draws the outline. */
   targets: Record<SoundId, VowelTarget>;
   unit: GhostUnit;
   mode: 'idle' | 'watch' | 'live';
@@ -60,6 +60,16 @@ export interface GhostBoardProps {
   phoneCursor?: PhoneCursorInput;
   /** The zone Ava is coaching: emphasised on the path. */
   focusZoneId?: string | null;
+  /**
+   * A new non-zero value runs one "sound draw" in any mode: over demoMs the active line fills in from its start while the ghost dot
+   * travels it (no lead-in, so it lines up with an audio onset), holds, fades and parks. A new value mid-draw restarts it.
+   * It never calls onWatchEnd or onAttemptEnd.
+   */
+  demoRun?: number;
+  /** Duration of the sound draw in ms (default 650, at least 400). */
+  demoMs?: number;
+  /** The attempt was judged correct: the line stays fully drawn and a checkmark circle sits at the end of the path. */
+  success?: boolean;
 }
 
 const INK_WIDTH = 5;
@@ -73,6 +83,29 @@ const DOT_BASE = 30;
 const WATCH_LEAD_MS = 400;
 const WATCH_TAIL_MS = 350;
 const STOP_RADIUS = 17;
+/** Sound draw: default duration, floor, then the hold and fade of the finished line. */
+const DEMO_MS = 650;
+const DEMO_MIN_MS = 400;
+const DEMO_HOLD_MS = 350;
+const DEMO_FADE_MS = 250;
+/** A liquid-ended line is only trimmed back to the dot while that leaves at least this much line (px). */
+const MIN_TRIM_PX = 40;
+const CUE_DY = 26;
+const CUE_H = 24;
+
+interface Box {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+const boxHit = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+const centred = (x: number, y: number, hw: number, hh: number): Box => ({ x0: x - hw, y0: y - hh, x1: x + hw, y1: y + hh });
+/** Box of a centred serif text label drawn with its baseline at y. */
+const textBox = (x: number, y: number, chars: number, size: number): Box => {
+  const hw = (chars * size * 0.55 + 4) / 2;
+  return { x0: x - hw, x1: x + hw, y0: y - size * 0.85, y1: y + size * 0.25 };
+};
 /** The learner counts as on the ghost for the cursor colour above this closeness. */
 const INSIDE_CLOSENESS = 0.6;
 /** Phone map: off-target hysteresis (back on target below this fraction of OFF_PATH_MAP_DIST). */
@@ -99,8 +132,8 @@ const VERDICT_WORD: Record<ZoneVerdict, string> = {
   skipped: 'not scored',
 };
 
-/** Soft grid and the dashed vowel-space outline, in plot percent (same projection as VowelGraph). */
-const PlotBackdrop = memo(function PlotBackdrop({ targets }: { targets: Record<SoundId, VowelTarget> }) {
+/** Soft grid in plot percent (same projection as VowelGraph). */
+const PlotBackdrop = memo(function PlotBackdrop() {
   return (
     <svg className="wb-backdrop" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
       {[25, 50, 75].map((g) => (
@@ -109,13 +142,6 @@ const PlotBackdrop = memo(function PlotBackdrop({ targets }: { targets: Record<S
           <line x1={0} y1={g} x2={100} y2={g} className="wb-grid" />
         </g>
       ))}
-      <polygon
-        className="wb-space"
-        points={SOUND_ORDER.map((id) => {
-          const c = project(targets[id]);
-          return `${c.x},${c.y}`;
-        }).join(' ')}
-      />
     </svg>
   );
 });
@@ -125,11 +151,22 @@ interface Px {
   y: number;
 }
 
+/** How far along a segment the line is drawn at word time t: ts are the point times, fs the length fraction at each point. */
+function fillFraction(ts: number[], fs: number[], t: number): number {
+  const last = ts.length - 1;
+  if (t <= ts[0]) return 0;
+  if (t >= ts[last]) return 1;
+  let k = 0;
+  while (k < last - 1 && ts[k + 1] < t) k++;
+  const span = ts[k + 1] - ts[k];
+  const w = span > 0 ? clamp((t - ts[k]) / span, 0, 1) : 0;
+  return fs[k] + w * (fs[k + 1] - fs[k]);
+}
+
 export function GhostBoard({
   spec,
   model,
   learnerFactor,
-  targets,
   unit,
   mode,
   speed,
@@ -141,6 +178,9 @@ export function GhostBoard({
   judge,
   phoneCursor,
   focusZoneId = null,
+  demoRun = 0,
+  demoMs = DEMO_MS,
+  success = false,
 }: GhostBoardProps) {
   const plotRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -149,6 +189,8 @@ export function GhostBoard({
   const lipRingRef = useRef<SVGEllipseElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
   const livePathRefs = useRef<(SVGPathElement | null)[]>([]);
+  const fillLayerRef = useRef<SVGGElement>(null);
+  const fillRefs = useRef<(SVGPathElement | null)[]>([]);
 
   const [size, setSize] = useState({ w: 0, h: 0 });
   const sizeRef = useRef(size);
@@ -172,8 +214,8 @@ export function GhostBoard({
 
   const lipRef = useRef(lip);
   lipRef.current = lip;
-  const props = useRef({ spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge });
-  props.current = { spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge };
+  const props = useRef({ spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge, success });
+  props.current = { spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge, success };
 
   // Phone-map cursor: the unit's target phones, the start of its path and the path itself in map space.
   const phoneCfg = useMemo(() => {
@@ -217,6 +259,13 @@ export function GhostBoard({
     lastY: NaN,
   });
   const watchRef = useRef({ elapsed: 0, ended: false, passed: new Set<string>() });
+  /** The sound draw: start is a performance.now() stamp (-1 = not running). */
+  const demoRef = useRef({ start: -1, ms: DEMO_MS, passed: new Set<string>() });
+  const lastDemoRun = useRef(demoRun);
+  /** Per active segment, the point times and the fraction of the line's pixel length reached at each (rebuilt with the geometry). */
+  const fillGeomRef = useRef<{ ts: number[]; fs: number[] }[]>([]);
+  // Model time where a trimmed unit's line ends (the r dot); the travelling dot holds there. Null when untrimmed.
+  const drawEndTRef = useRef<number | null>(null);
   const sig = useRef({
     lastFrameTs: 0,
     lastFramePerf: -Infinity,
@@ -324,6 +373,14 @@ export function GhostBoard({
     }
     // `sized`, `unit` and `spec` are read when an attempt starts (keyed by id): re-sizing mid-attempt would move the target under the learner.
   }, [mode, attemptId, unit.id, spec.word, publish, syncAttempt]);
+
+  // Sound draw: a new non-zero demoRun restarts it from empty; the rAF loop does the drawing.
+  useEffect(() => {
+    if (demoRun === lastDemoRun.current) return;
+    lastDemoRun.current = demoRun;
+    if (!demoRun) return;
+    demoRef.current = { start: performance.now(), ms: Math.max(DEMO_MIN_MS, demoMs), passed: new Set() };
+  }, [demoRun, demoMs]);
 
   // Frames: scoring and cursor inputs update synchronously; drawing happens in the rAF loop.
   const subscribe = frames.subscribe;
@@ -492,42 +549,84 @@ export function GhostBoard({
         }
       }
 
-      // Watch: the dot travels the unit's ghost at speed, pausing in the lead-in and the tail.
+      // Watch and sound draw: the dot travels the unit's ghost and the line fills in behind it. Watch runs at speed, pausing in
+      // the lead-in and the tail; the sound draw starts at once. Markers light as the dot passes them.
       const ghost = ghostRef.current;
+      const [t0, t1] = unitWindow(model, u);
+      const demo = demoRef.current;
+      const demoElapsed = demo.start < 0 ? -1 : now - demo.start;
+      const demoOn = md !== 'watch' && demoElapsed >= 0 && demoElapsed < demo.ms + DEMO_HOLD_MS + DEMO_FADE_MS;
+      if (demo.start >= 0 && md !== 'watch' && !demoOn) {
+        // Finished: park the dot and clear the lit markers.
+        demo.start = -1;
+        if (demo.passed.size && md !== 'live') publish(emptyView());
+        demo.passed.clear();
+      }
+      let drawT: number | null = null;
+      let fillOpacity = 0;
       if (md === 'watch') {
         const w = watchRef.current;
-        const [t0, t1] = unitWindow(model, u);
         const unitMs = Math.max(1, unitDurationMs(model, u));
         const travelMs = unitMs / Math.max(0.1, sp);
         if (!w.ended) w.elapsed += dt;
         const progress = clamp((w.elapsed - WATCH_LEAD_MS) / travelMs, 0, 1);
-        const t = t0 + progress * (t1 - t0);
-        const g = ghostAt(model, t);
-        const at = toPx(g);
-        if (ghost) {
-          ghost.style.transform = `translate(${at.x}px, ${at.y}px)`;
-          setData(ghost, 'shown', 'true');
-          setData(ghost, 'voiced', String(g.voiced));
-        }
-        // Markers light as the dot passes them.
+        drawT = t0 + progress * (t1 - t0);
+        fillOpacity = 1;
         let passedNow = false;
         if (progress > 0) {
           for (const m of model.markers) {
-            if (u.zoneIds.includes(m.zoneId) && m.t >= t0 - 1e-6 && m.t <= t && !w.passed.has(m.zoneId)) {
+            if (u.zoneIds.includes(m.zoneId) && m.t >= t0 - 1e-6 && m.t <= drawT && !w.passed.has(m.zoneId)) {
               w.passed.add(m.zoneId);
               passedNow = true;
             }
           }
         }
         if (passedNow) publish({ done: false, stops: {}, verdicts: {}, judged: false, passed: [...w.passed] });
-        setData(board, 'passing', String(model.markers.some((m) => u.zoneIds.includes(m.zoneId) && Math.abs(m.t - t) * model.durationMs < 60)));
         if (!w.ended && w.elapsed >= WATCH_LEAD_MS + travelMs + WATCH_TAIL_MS) {
           w.ended = true;
           props.current.onWatchEnd?.();
         }
-      } else if (ghost) {
-        setData(ghost, 'shown', 'false');
-        setData(board, 'passing', 'false');
+      } else if (demoOn) {
+        const progress = s.reducedMotion ? 1 : clamp(demoElapsed / demo.ms, 0, 1);
+        drawT = t0 + progress * (t1 - t0);
+        fillOpacity = 1 - clamp((demoElapsed - demo.ms - DEMO_HOLD_MS) / DEMO_FADE_MS, 0, 1);
+        if (md !== 'live') {
+          let passedNow = false;
+          for (const m of model.markers) {
+            if (u.zoneIds.includes(m.zoneId) && m.t >= t0 - 1e-6 && m.t <= drawT && !demo.passed.has(m.zoneId)) {
+              demo.passed.add(m.zoneId);
+              passedNow = true;
+            }
+          }
+          if (passedNow) publish({ done: false, stops: {}, verdicts: {}, judged: false, passed: [...demo.passed] });
+        }
+      }
+      if (ghost) {
+        if (drawT !== null) {
+          const g = ghostAt(model, Math.min(drawT, drawEndTRef.current ?? Infinity));
+          const at = toPx(g);
+          ghost.style.transform = `translate(${at.x}px, ${at.y}px)`;
+          setData(ghost, 'shown', String(fillOpacity > 0));
+          setData(ghost, 'voiced', String(g.voiced));
+        } else {
+          setData(ghost, 'shown', 'false');
+        }
+      }
+      const t = drawT;
+      setData(board, 'passing', String(t !== null && model.markers.some((m) => u.zoneIds.includes(m.zoneId) && Math.abs(m.t - t) * model.durationMs < 60)));
+
+      // The progressive line: each active segment is filled to the dot's place along it; success shows it whole.
+      const whole = props.current.success && md !== 'live';
+      const layer = fillLayerRef.current;
+      if (layer) {
+        const opacity = whole ? '1' : fillOpacity.toFixed(3);
+        if (layer.style.opacity !== opacity) layer.style.opacity = opacity;
+        fillGeomRef.current.forEach((seg, i) => {
+          const path = fillRefs.current[i];
+          if (!path) return;
+          const offset = (1 - (whole ? 1 : t === null ? 0 : fillFraction(seg.ts, seg.fs, t))).toFixed(4);
+          if (path.style.strokeDashoffset !== offset) path.style.strokeDashoffset = offset;
+        });
       }
     };
     raf = requestAnimationFrame(draw);
@@ -564,28 +663,110 @@ export function GhostBoard({
       width: bandWidth(seg.points, seg.spread),
       active: seg.points.some((p) => activeSet.has(p.t)),
     }));
-    const activeLines = active.map((seg) => ({ d: line(seg.points), width: bandWidth(seg.points, seg.spread) }));
     const zoneById = new Map(spec.zones.map((z) => [z.id, z]));
     const markers = shown.markers.map((m) => {
       const zone = zoneById.get(m.zoneId);
       const at = toPx(ghostAt(shown, m.t));
       return { marker: m, zone, at };
     });
-    const labels = shown.parts.flatMap((part) => {
-      const pts = shown.segments.flatMap((s) => s.points).filter((p) => p.t >= part.t0 && p.t <= part.t1);
-      if (!pts.length) return [];
-      const mid = pts[pts.length >> 1];
-      const at = toPx(mid);
-      return [{ part, at }];
+    // The unit's target: the last marker inside its window. It takes the check and, when a liquid, ends the drawn line.
+    const [winT0, endT] = unitWindow(shown, unit);
+    const target = shown.markers
+      .filter((m) => unit.zoneIds.includes(m.zoneId) && m.t >= winT0 - 1e-6 && m.t <= endT + 1e-6)
+      .sort((a, b) => a.t - b.t)
+      .pop();
+    let drawn = active;
+    drawEndTRef.current = null;
+    if (target && target.kind === 'liquid') {
+      const cut = target.t;
+      const trimmed = active.flatMap((seg) => {
+        const keep = seg.points.map((_, i) => i).filter((i) => seg.points[i].t <= cut + 1e-6);
+        if (!keep.length) return [];
+        const points = keep.map((i) => seg.points[i]);
+        const spread = keep.map((i) => seg.spread[i]);
+        const last = points[points.length - 1];
+        const next = seg.points[keep[keep.length - 1] + 1];
+        if (last.t < cut - 1e-6 && next && next.t > cut) {
+          const g = ghostAt(shown, cut);
+          points.push({ ...last, t: cut, f1: g.f1, f2: g.f2 });
+          spread.push(g.spread);
+        }
+        return [{ points, spread }];
+      });
+      let px = 0;
+      trimmed.forEach((seg) =>
+        seg.points.forEach((p, i) => {
+          if (!i) return;
+          const a = toPx(seg.points[i - 1]);
+          const b = toPx(p);
+          px += Math.hypot(b.x - a.x, b.y - a.y);
+        }),
+      );
+      if (px >= MIN_TRIM_PX) {
+        drawn = trimmed;
+        drawEndTRef.current = cut;
+      }
+    }
+    const activeLines = drawn.map((seg) => ({ d: line(seg.points), width: bandWidth(seg.points, seg.spread) }));
+    // Fraction of each active segment's pixel length reached at each point: the fill follows the dot along the drawn line.
+    fillGeomRef.current = drawn.map((seg) => {
+      const lens = [0];
+      seg.points.forEach((p, i) => {
+        if (i === 0) return;
+        const a = toPx(seg.points[i - 1]);
+        const b = toPx(p);
+        lens.push(lens[i - 1] + Math.hypot(b.x - a.x, b.y - a.y));
+      });
+      const total = lens[lens.length - 1];
+      return { ts: seg.points.map((p) => p.t), fs: lens.map((l, i) => (total > 0 ? l / total : i === 0 ? 0 : 1)) };
     });
+    // Check position: a target marker takes it (cue badges at their centre); no marker leaves a ring at the window end.
+    const targetPx = target ? markers.find((m) => m.marker === target)!.at : null;
+    const end = {
+      at: target && targetPx ? (target.kind === 'stop' || target.kind === 'liquid' ? targetPx : { x: targetPx.x, y: targetPx.y + CUE_DY }) : toPx(ghostAt(shown, endT)),
+      ring: !target,
+    };
+    // Phone labels sit at the phone-map place, except for cue badges: just below the badge.
     const phoneLabels = displayModel
       ? spec.zones.flatMap((z) => {
           const sym = ZONE_PHONES[spec.word]?.[z.id];
           const place = sym ? phonePlace(sym) : null;
           if (!sym || !place) return [];
-          return [{ id: z.id, sym, active: unit.zoneIds.includes(z.id), at: toPx(mapToFormants(place.x, place.y)) }];
+          const mk = markers.find((m) => m.marker.zoneId === z.id);
+          const cue = !!mk && mk.marker.kind !== 'stop' && mk.marker.kind !== 'liquid';
+          const at = cue && mk ? { x: mk.at.x, y: mk.at.y + CUE_DY + CUE_H / 2 + 14 } : { ...toPx(mapToFormants(place.x, place.y)), y: toPx(mapToFormants(place.x, place.y)).y + STOP_RADIUS + 16 };
+          return [{ id: z.id, sym, active: unit.zoneIds.includes(z.id), at }];
         })
       : [];
+    // Part labels: skip one that repeats its lone stop; lift the rest clear of markers, phone labels and each other.
+    const obstacles: Box[] = [];
+    markers.forEach(({ marker, at }) => {
+      if (marker.kind === 'stop') obstacles.push(centred(at.x, at.y, STOP_RADIUS + 2, STOP_RADIUS + 2));
+      else if (marker.kind === 'liquid') obstacles.push(centred(at.x, at.y, 8, 8));
+      else {
+        const z = zoneById.get(marker.zoneId);
+        obstacles.push(centred(at.x, at.y + CUE_DY, (18 + (z?.label.length ?? 1) * 9) / 2, CUE_H / 2));
+      }
+    });
+    phoneLabels.forEach((p) => obstacles.push(textBox(p.at.x, p.at.y, p.sym.length, 15)));
+    const labels: { part: GhostPathModel['parts'][number]; at: Px }[] = [];
+    shown.parts.forEach((part) => {
+      const zs = part.zoneIds.map((id) => zoneById.get(id));
+      if (zs.length === 1 && zs[0]?.kind === 'stop' && zs[0].label === part.label) return;
+      const pts = shown.segments.flatMap((s) => s.points).filter((p) => p.t >= part.t0 && p.t <= part.t1);
+      if (!pts.length) return;
+      const at = toPx(pts[pts.length >> 1]);
+      let best = { y: at.y - 22, hits: Infinity };
+      for (const off of [22, 28, 34, 40, 46, 52, 58, -26, -34, -42, -50]) {
+        const y = at.y - off;
+        const box = textBox(at.x, y, part.label.length, 20);
+        const hits = obstacles.filter((o) => boxHit(box, o)).length;
+        if (hits < best.hits) best = { y, hits };
+        if (!hits) break;
+      }
+      obstacles.push(textBox(at.x, best.y, part.label.length, 20));
+      labels.push({ part, at: { x: at.x, y: best.y } });
+    });
     const mapLabels =
       displayModel && debug
         ? mapSymbols().map((sym) => {
@@ -593,7 +774,7 @@ export function GhostBoard({
             return { sym, at: toPx(mapToFormants(place.x, place.y)) };
           })
         : [];
-    return { all, activeLines, markers, labels, phoneLabels, mapLabels };
+    return { all, activeLines, end, markers, labels, phoneLabels, mapLabels };
   }, [size.w, size.h, shown, displayModel, unit, spec, debug]);
 
   const unitZones = spec.zones.filter((z) => unit.zoneIds.includes(z.id));
@@ -625,7 +806,7 @@ export function GhostBoard({
         data-scoring={scoring}
       >
         <div className="wb-plot" ref={plotRef}>
-          <PlotBackdrop targets={targets} />
+          <PlotBackdrop />
           {geometry && (
             <svg className="wb-layer" viewBox={`0 0 ${size.w} ${size.h}`} aria-hidden="true">
               {/* Close-zone band, then the model line: dim everywhere, solid on the active unit. */}
@@ -638,6 +819,22 @@ export function GhostBoard({
               {geometry.activeLines.map((seg, i) => (
                 <path key={`active-${i}`} className="gb-line" data-active d={seg.d} />
               ))}
+              {/* The line drawn in as the dot travels (watch, sound draw) or whole on success. */}
+              <g className="gb-fill-layer" ref={fillLayerRef} data-success={success} style={{ opacity: 0 }}>
+                {geometry.activeLines.map((seg, i) => (
+                  <path
+                    key={`fill-${i}`}
+                    ref={(el) => {
+                      fillRefs.current[i] = el;
+                    }}
+                    className="gb-fill"
+                    d={seg.d}
+                    pathLength={1}
+                    strokeDasharray={1}
+                    style={{ strokeDashoffset: 1 }}
+                  />
+                ))}
+              </g>
 
               {geometry.labels.map(({ part, at }) => (
                 <text
@@ -645,7 +842,7 @@ export function GhostBoard({
                   className="gb-part-label"
                   data-active={unit.partIds.includes(part.id)}
                   x={at.x}
-                  y={at.y - 22}
+                  y={at.y}
                 >
                   {part.label}
                 </text>
@@ -655,7 +852,7 @@ export function GhostBoard({
                 if (!zone) return null;
                 const active = unit.zoneIds.includes(zone.id);
                 const focus = zone.id === focusZoneId;
-                const lit = mode === 'watch' && view.passed.includes(zone.id);
+                const lit = mode !== 'live' && view.passed.includes(zone.id);
                 if (marker.kind === 'stop') {
                   const hit = active && view.stops[zone.id] === true;
                   const verdict = view.verdicts[zone.id];
@@ -693,7 +890,7 @@ export function GhostBoard({
                     data-active={active}
                     data-focus={focus}
                     data-lit={lit}
-                    transform={`translate(${at.x} ${at.y + 26})`}
+                    transform={`translate(${at.x} ${at.y + CUE_DY})`}
                   >
                     <rect className="gb-cue-box" x={-w / 2} y={-12} width={w} height={24} rx={12} />
                     <text className="gb-cue-text">{zone.label}</text>
@@ -701,13 +898,25 @@ export function GhostBoard({
                 );
               })}
 
+              {/* End of the path: an open ring, or the success check (on the stop when one ends the path). */}
+              <g className="gb-end" data-success={success} transform={`translate(${geometry.end.at.x} ${geometry.end.at.y})`}>
+                {success ? (
+                  <>
+                    <circle className="gb-end-disc" r={STOP_RADIUS + 2} />
+                    <path className="gb-end-check" d="M-7,0.5 L-2,5.5 L7.5,-5" pathLength={1} />
+                  </>
+                ) : (
+                  geometry.end.ring && <circle className="gb-end-ring" r={STOP_RADIUS} />
+                )}
+              </g>
+
               {geometry.mapLabels.map(({ sym, at }) => (
                 <text key={`map-${sym}`} className="gb-map-label" x={at.x} y={at.y}>
                   {sym}
                 </text>
               ))}
               {geometry.phoneLabels.map(({ id, sym, active, at }) => (
-                <text key={`phone-${id}`} className="gb-phone-label" data-active={active} x={at.x} y={at.y + STOP_RADIUS + 16}>
+                <text key={`phone-${id}`} className="gb-phone-label" data-active={active} x={at.x} y={at.y}>
                   {sym}
                 </text>
               ))}

@@ -573,7 +573,8 @@ export async function createMouthDemo(container, options = {}) {
 
     setView(next) {
       if (next !== "front" && next !== "side") return Promise.resolve(false);
-      if (next === view) return Promise.resolve(true);
+      // `view` changes before the swing starts, so a stop() in between can leave the camera behind: check both.
+      if (next === view && views.view === next) return Promise.resolve(true);
       view = next;
       root.dataset.view = next;
       syncButtons();
@@ -616,7 +617,9 @@ export async function createMouthDemo(container, options = {}) {
       cue = null;
       caption.textContent = "";
       cutaway.setCueLabel(null);
-      run([tween("reset", 300, { w: 0, vis: 0, show: showTarget() }, d)]);
+      // A swing that was queued but never started (stop() replaced it) still has to happen.
+      const hooks = views.view !== view ? swingHooks(view === "side" ? 1 : -1) : {};
+      run([tween("reset", 300, { w: 0, vis: 0, show: showTarget() }, d, hooks)]);
     },
 
     // Turn the head toward a point in front of the screen (camera or pointer). Eased in the render loop.

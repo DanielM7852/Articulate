@@ -40,23 +40,22 @@ test('plan: parts are in word order, the two word steps share a unit and end the
   }
 });
 
-test('progress: two close attempts in a row advance', () => {
-  let r = nextStep(startProgress(), true);
-  expect(r.advance).toBe(false);
-  r = nextStep(r.state, true);
-  expect(NAIL_STREAK).toBe(2);
+test('progress: one close attempt advances', () => {
+  const r = nextStep(startProgress(), true);
+  expect(NAIL_STREAK).toBe(1);
   expect(r.advance).toBe(true);
   expect(r.gentle).toBe(false);
   expect(r.state.step).toBe(1);
   expect(r.state.tries).toBe(0);
 });
 
-test('progress: a miss resets the streak', () => {
-  let r = nextStep(startProgress(), true);
-  r = nextStep(r.state, false);
-  r = nextStep(r.state, true);
+test('progress: a miss stays on the step, then one close attempt passes', () => {
+  let r = nextStep(startProgress(), false);
   expect(r.advance).toBe(false);
-  expect(r.state.streak).toBe(1);
+  expect(r.state.streak).toBe(0);
+  r = nextStep(r.state, true);
+  expect(r.advance).toBe(true);
+  expect(r.gentle).toBe(false);
 });
 
 test('progress: MAX_TRIES advances gently', () => {

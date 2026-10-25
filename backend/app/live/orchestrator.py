@@ -212,8 +212,10 @@ def _word_user_message(
             "points inside the close zone); liquid and legacy tuner (r): "
             "valueMedian/valueBest are the F3-F2 gap in Hz (lower is a stronger r), inBandFraction the share in the "
             "green band; stop: burstDetected 1 when a release burst was seen; lips: spreadMean, roundingMean, "
-            "lipOpeningMean when the camera was usable; advisory zones (liquid, fricative, nasal) are never judged: "
-            "fricative and nasal arrive skipped with no evidence and are taught from their hint only"
+            "lipOpeningMean when the camera was usable; zones with advisory true are never judged and are taught from their hint only; "
+            "a liquid, fricative or nasal with advisory false carries phone-model evidence (phonePost, phoneGop, "
+            "judgedByPhones 1) and its verdict is real: it may be named (the r didn't come through) but never as a "
+            "tongue, lip or jaw position"
         ),
         "allowedEvidenceFields": sorted(candidates),
         "recentAttempts": [

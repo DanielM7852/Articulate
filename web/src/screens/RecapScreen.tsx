@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Mail } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Mail, MessageSquareText } from 'lucide-react';
 import {
   RecapHttpError, emailRecap, getRecap, rememberRecapEmail, rememberedRecapEmail,
   type Recap, type RecapEmailStatus, type RecapStatus, type RecapTrend,
@@ -55,9 +55,12 @@ function EmailBox({ status, onUpdate, recapId }: { status: RecapStatus; onUpdate
       onUpdate(await emailRecap(recapId, learnerProfileId(), address));
       setChanging(false);
     } catch (err) {
-      setError(err instanceof RecapHttpError && err.status === 422
+      const status = err instanceof RecapHttpError ? err.status : null;
+      setError(status === 422
         ? "That doesn't look like an email address. Check it and try again."
-        : "Couldn't send that request. Try again in a moment.");
+        : status === 404 || status === 403
+          ? "This recap has expired. Finish a lesson to get a new one."
+          : "Couldn't send that request. Try again in a moment.");
     } finally {
       setBusy(false);
     }
@@ -286,7 +289,12 @@ export default function RecapScreen() {
             }
           }}
         />
-        <div className="recap-foot">{homeButton}</div>
+        <div className="recap-foot btn-row">
+          <Link className="btn btn--primary" to={`/phrases?recap=${encodeURIComponent(recapId)}`}>
+            <MessageSquareText size={16} aria-hidden="true" /> Practise in your own words
+          </Link>
+          {homeButton}
+        </div>
       </>
     );
   } else {
