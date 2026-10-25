@@ -16,6 +16,8 @@ import { useVoiceFrames, type VoiceFrames } from '../audio/useVoiceFrames';
 import { useLipTracking, type LipTrackingStatus } from '../vision/useLipTracking';
 import { CUE_MIN_MS, useCoachSequence, type SequenceLine } from '../live/useCoachSequence';
 import type { CueId } from '../live/liveCoach';
+import { usePhoneCursor } from '../live/usePhoneCursor';
+import { ASSUMED_END_LAG_MS, applyPhoneJudgement, clipOffsetMs, isPhoneJudged, scorePhones, unitPhoneZones } from '../live/phoneJudge';
 import { isScored, requestWordAsk, requestWordCoach, scoreWord, wordFallbackLine } from '../live/wordCoach';
 import { isClose, unitDurationMs } from '../game/ghost/follow';
 import { ghostModel } from '../game/ghost/models';
@@ -119,7 +121,7 @@ const START_PRACTICE_IDLE_MS = 10_000;
 /** Talk window: how far back a board result still counts for learner_attempt, how long that call waits for one
  *  (the board ends an attempt 600 ms after the voice stops), how many results are kept, and the quiet after Ava speaks. */
 const ATTEMPT_LOOKBACK_MS = 6000;
-const ATTEMPT_WAIT_MS = 1500;
+const ATTEMPT_WAIT_MS = 3000; // also covers the phone judge (<= 1.5 s) after the board's own end
 const MAX_HELD = 4;
 const ECHO_SETTLE_MS = 700;
 const TALK_POLL_MS = 120;
@@ -224,6 +226,8 @@ export default function WordLesson() {
   const navigate = useNavigate();
   const mic = useMicrophone();
   const attemptTap = useAttemptAudio(mic.stream);
+  /** When the board produced the result being judged (Date.now() clock), so the coach clip ends there, not after scoring. */
+  const judgedAt = useRef<{ attemptId: string; at: number } | null>(null);
   const voice = useVoiceFrames(mic.stream);
   const { camera, setCamera, narration: voiceOn, captions, completeOnboarding } = useAppState();
   const profileId = useMemo(() => learnerProfileId(), []);
@@ -981,9 +985,31 @@ export default function WordLesson() {
     [avaOpen, beginTurn, endWindow, line, newAttempt, quietAva, runStep, wordDone],
   );
 
+  /**
+   * The board's second opinion: for a phone-judged word, cut the attempt's clip, score the unit's phones and replace
+   * the unit's zone verdicts. Any problem (no tap, offline service, timeout) returns the formant result unchanged.
+   */
+  const judgeAttempt = useCallback(async (result: WordAttemptResult): Promise<WordAttemptResult> => {
+    judgedAt.current = { attemptId: result.attemptId, at: Date.now() };
+    try {
+      const { spec: word, plan } = cur.current;
+      const step = plan[shownStep.current];
+      if (!step || result.word !== word.word || result.quality !== 'usable') return result;
+      const zones = unitPhoneZones(word.word, step.unit);
+      if (zones.length === 0) return result;
+      const clip = attemptTap.current?.clip(judgedAt.current.at, Math.min(MAX_CLIP_MS, result.durationMs + CLIP_TAIL_MS + CLIP_PREROLL_MS)) ?? null;
+      if (!clip) return result;
+      const resp = await scorePhones(clip, zones.map((z) => z.phone));
+      if (!resp) return result;
+      return applyPhoneJudgement(result, step.unit, resp, clipOffsetMs(clip.durationMs, result, ASSUMED_END_LAG_MS));
+    } catch {
+      return result;
+    }
+  }, []);
+
   /** One finished attempt: coach it (filler, backend coach, then Ava relays or the script speaks) and progress. */
   const runAttempt = useCallback(
-    async (result: WordAttemptResult) => {
+    async (result: WordAttemptResult, endedAt: number = Date.now()) => {
       const { spec: word, plan: steps } = cur.current;
       const step = steps[shownStep.current];
       if (!step || !step.practisable) return;
@@ -997,7 +1023,7 @@ export default function WordLesson() {
         const session = avaRef.current.session();
         if (realtimeActive() && session && !session.practiceMode) gate = avaRef.current.setPracticeMode(true);
         void seq.say(LINES.filler, { narration: voiceOnRef.current });
-      });
+      }, endedAt);
       if (!coached) return;
       const { prog, finalStep, caption, focus, cueId, side, verdict } = coached;
       setPhase('coaching');
@@ -1111,15 +1137,17 @@ export default function WordLesson() {
   /** Board result: a normal attempt end while live, or a measurement the talk window holds until Ava decides. */
   const onAttemptEnd = (result: WordAttemptResult) => {
     if (result.attemptId !== attemptIdRef.current) return;
+    // A judged result arrives after scoring; the coach clip must still end where the attempt ended.
+    const endedAt = judgedAt.current?.attemptId === result.attemptId ? judgedAt.current.at : Date.now();
     if (phaseRef.current === 'live') {
-      void runAttempt(result).catch(() => undefined);
+      void runAttempt(result, endedAt).catch(() => undefined);
       return;
     }
     const w = win.current;
     // Not gated on windowLiveRef: a result can land just after the board went idle (Ava's acknowledgement started);
     // the attempt id check above already drops stale ones.
     if (!w.active || w.deciding || w.pending || runId.current !== w.run) return;
-    w.results = [...w.results, { result, at: Date.now() }].slice(-MAX_HELD);
+    w.results = [...w.results, { result, at: endedAt }].slice(-MAX_HELD);
     newAttempt(); // the board keeps listening for the next utterance
   };
 
@@ -1220,6 +1248,8 @@ export default function WordLesson() {
   const step = plan[Math.min(stepIdx, plan.length - 1)];
   const nextWord = WORD_KEYS[WORD_KEYS.indexOf(spec.word) + 1] ?? null;
   const boardMode = phase === 'watch' ? 'watch' : phase === 'live' || (phase === 'coaching' && talking && windowLive) ? 'live' : 'idle';
+  // Phone-judged words: the live cursor follows the phone recognizer (reset per live attempt); falls back to F1/F2 when offline.
+  const phoneCursor = usePhoneCursor(mic.stream, isPhoneJudged(spec.word) && micReady && phase !== 'setup', boardMode === 'live' ? attemptId : null);
   const lipFrame = camera && lip.status === 'tracking' ? lip.latest : null;
   const micWarning =
     mic.status === 'denied' ? 'Microphone blocked · allow it in site settings' : mic.status === 'unsupported' ? 'Microphone unsupported in this browser' : null;
@@ -1428,6 +1458,8 @@ export default function WordLesson() {
               attemptId={attemptId}
               onWatchEnd={() => watchDone.current?.()}
               onAttemptEnd={onAttemptEnd}
+              judge={isPhoneJudged(spec.word) ? judgeAttempt : undefined}
+              phoneCursor={isPhoneJudged(spec.word) ? phoneCursor : undefined}
               focusZoneId={focusZoneId}
             />
           )}

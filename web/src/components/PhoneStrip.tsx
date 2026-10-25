@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { connectPhoneStream, type Phone, type PhoneStreamHandle, type PhoneUpdate, type StreamInfo, type StreamState } from '../live/phoneStream';
+import { connectPhoneStream, normPhone, type Phone, type PhoneStreamHandle, type PhoneUpdate, type StreamInfo, type StreamState } from '../live/phoneStream';
 import '../styles/phone-strip.css';
 
 const DEFAULT_TARGETS = ['t', 'ɹ', 'æ', 'k'];
 const VISIBLE = 14;
 
-/** r and ɹ are the same target, and an aspirated stop (KoelLabs emits kʰ, pʰ) counts as the plain one. */
-function norm(p: string): string {
-  const q = p.endsWith('ʰ') ? p.slice(0, -1) : p;
-  return q === 'r' ? 'ɹ' : q;
-}
+const norm = normPhone;
 
 export interface PhoneStripProps {
   stream: MediaStream | null;

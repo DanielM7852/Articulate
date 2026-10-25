@@ -37,19 +37,32 @@ normalization/softmax layers) to FP32.
 services/phones/.venv/Scripts/python.exe -m uvicorn phones.app:app --app-dir services/phones/src --host 127.0.0.1 --port 8020
 ```
 
-Settings (env): `PHONES_MODEL_ID`, `PHONES_BACKEND` (auto|tensorrt|torch-fp16|torch-cpu), `PHONES_HOP_MS=250`,
-`PHONES_WINDOW_MS=2000`, `PHONES_MIN_WINDOW_MS=500`, `PHONES_COMMIT_LAG_MS=500`, `PHONES_SILENCE_RMS=0.004`.
+Settings (env): `PHONES_MODEL_ID`, `PHONES_BACKEND` (auto|tensorrt|torch-fp16|torch-cpu), `PHONES_HOP_MS=100`,
+`PHONES_WINDOW_MS=2000`, `PHONES_MIN_WINDOW_MS=500`, `PHONES_COMMIT_LAG_MS=300`, `PHONES_SILENCE_RMS=0.004`.
 
 ## API
 
 - `GET /health` -> `{ok, model, engine, device}`
 - `POST /v1/phones` (WAV body, or JSON `{"audio": "<base64 wav>"}`) -> `{phones:[{p,startMs,endMs,conf}], inferMs, model, engine}`
+- `POST /v1/phones/score` JSON `{"audioBase64": "<base64 wav>", "targets": ["t","ɹ","æ","k"]}` ->
+  `{targets:[{p,startMs,endMs,peakMs,post,gop,best,bestPost}], phones, alignLogProb, inferMs, model, engine}`.
+  CTC forced alignment of the targets (`src/phones/align.py`); `post` is the mean target posterior over its aligned
+  frames (aspirated `Xʰ` folded into `X`, `r` accepted as `ɹ`), `gop` the log ratio against the best other phone.
+  The lesson board's verdicts come from this (thresholds in `web/src/live/phoneJudge.ts`).
 - `WS /ws/phones` (Origin allowlist `http://127.0.0.1:5176`, `http://localhost:5176`)
   - client -> server: binary little-endian Int16 mono 16 kHz PCM, any length; text `{"type":"reset"}` clears buffer and clock
   - server -> client: `{"type":"ready","model","engine","frameMs","sampleRate":16000}`,
-    `{"type":"phones","seq","windowEndMs","committed":[...],"provisional":[...],"inferMs"}`, `{"type":"error","message"}`
-  - every 250 ms the latest 2 s (>= 500 ms at stream start) is decoded; windows below the RMS gate are skipped
-    (an empty `provisional` is sent); phones ending >= 500 ms before the window edge are committed once.
+    `{"type":"phones","seq","windowEndMs","committed":[...],"provisional":[...],"frames":[...],"inferMs"}`, `{"type":"error","message"}`
+  - every hop (100 ms) the latest 2 s (>= 500 ms at stream start) is decoded; windows below the RMS gate are skipped
+    (an empty `provisional` is sent); phones ending >= 300 ms before the window edge are committed once.
+  - `frames`: the frames new since the last message, `{t, mass (1 - blank), top: [[sym, p], ...<=5]}`; the board's
+    phone-map cursor is their probability-weighted average place (`web/src/game/ghost/phone-map.json`).
+
+## Scripts
+
+- `scripts/build_word_timing.py`: force-aligns the word recordings and writes the median per-phone timing to
+  `web/src/game/ghost/models/recorded-timing.json` (the board's "track" timing).
+- `scripts/phone_map_check.py`: checks how close the recordings' centroids land to their places on the phone map.
 
 ## Test
 

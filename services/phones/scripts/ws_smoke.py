@@ -33,6 +33,7 @@ CH = 2560  # 160 ms
 
 async def main():
     committed = []
+    nframes = []
     async with websockets.connect(a.url, origin="http://127.0.0.1:5176") as ws:
         print("ready:", await ws.recv())
 
@@ -43,8 +44,13 @@ async def main():
                     print(m)
                     continue
                 committed.extend(m["committed"])
+                fr = m.get("frames") or []
+                top = max(fr, key=lambda f: f["mass"]) if fr else None
+                fr_txt = (f" frames={len(fr)} maxmass={top['mass']:.2f}@{top['t']:.0f}ms {top['top'][0][0] if top['top'] else '-'}"
+                          if top else f" frames={len(fr)}")
+                nframes.append(len(fr))
                 print(f"seq={m['seq']:3d} end={m['windowEndMs']:7.0f}ms inferMs={m['inferMs']:6.2f} "
-                      f"+{' '.join(p['p'] for p in m['committed']) or '-':20s} | prov: {' '.join(p['p'] for p in m['provisional'])}")
+                      f"+{' '.join(p['p'] for p in m['committed']) or '-':20s} | prov: {' '.join(p['p'] for p in m['provisional'])} |{fr_txt}")
 
         rt = asyncio.create_task(reader())
         for i in range(0, len(pcm), CH):
@@ -54,6 +60,9 @@ async def main():
         await asyncio.sleep(1.0)
         await ws.close()
         await rt
+    if nframes:
+        print(f"FRAMES: {len(nframes)} msgs, {sum(nframes)} frames total, per msg min/mean/max "
+              f"{min(nframes)}/{sum(nframes) / len(nframes):.1f}/{max(nframes)}")
     print("COMMITTED:", " ".join(p["p"] for p in committed))
 
 

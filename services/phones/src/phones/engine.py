@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import Settings
-from .ctc import Phone, greedy_decode, normalize
+from .ctc import Phone, frame_posteriors, greedy_decode, normalize
 
 log = logging.getLogger("phones.engine")
 
@@ -97,11 +97,44 @@ class Recognizer:
     def device(self) -> str:
         return self.backend.device
 
+    # TensorRT profile covers 8000..64000 samples. Longer clips run in overlapping 4 s chunks (stride 3 s, cut at
+    # the middle of each 1 s overlap; both multiples of the 320-sample frame hop so frames line up); shorter ones
+    # are zero-padded and the extra frames dropped.
+    MIN_SAMPLES, CHUNK, STRIDE = 8000, 64000, 48000
+
     def logits(self, wave: np.ndarray) -> np.ndarray:
-        return self.backend(normalize(wave))
+        x = normalize(wave)
+        n = len(x)
+        if n < self.MIN_SAMPLES:
+            y = self.backend(np.concatenate([x, np.zeros(self.MIN_SAMPLES - n, np.float32)]))
+            return y[: max(1, (n - 400) // SAMPLES_PER_FRAME + 1)]
+        if n <= self.CHUNK:
+            return self.backend(x)
+        half = (self.CHUNK - self.STRIDE) // SAMPLES_PER_FRAME // 2  # frames dropped at each chunk seam
+        parts, start = [], 0
+        while True:
+            end = min(start + self.CHUNK, n)
+            if end - start < self.MIN_SAMPLES:  # tiny tail: it is already covered by the previous chunk
+                break
+            y = self.backend(x[start:end])
+            last = end >= n
+            lo = 0 if start == 0 else half
+            hi = len(y) if last else len(y) - half
+            parts.append(y[lo:hi])
+            if last:
+                break
+            start += self.STRIDE
+        return np.concatenate(parts, axis=0)
 
     def phones(self, wave: np.ndarray, offset_ms: float = 0.0) -> list[Phone]:
         return greedy_decode(self.logits(wave), self.id2tok, self.blank_id, self.frame_ms, offset_ms)
+
+
+    def analyze(self, wave: np.ndarray, offset_ms: float = 0.0) -> tuple[list[Phone], list[dict]]:
+        """One inference -> (greedy phones, per-frame posteriors), both in stream time."""
+        lg = self.logits(wave)
+        return (greedy_decode(lg, self.id2tok, self.blank_id, self.frame_ms, offset_ms),
+                frame_posteriors(lg, self.id2tok, self.blank_id, self.frame_ms, offset_ms))
 
 
 def load_vocab(model_dir: Path) -> tuple[dict[int, str], int]:

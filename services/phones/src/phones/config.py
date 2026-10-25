@@ -20,10 +20,10 @@ class Settings:
     # "auto" = tensorrt -> torch-fp16 -> torch-cpu. Or force one of: tensorrt, torch-fp16, torch-cpu.
     backend: str = field(default_factory=lambda: os.environ.get("PHONES_BACKEND", "auto"))
     sample_rate: int = 16000
-    hop_ms: float = field(default_factory=lambda: _f("PHONES_HOP_MS", 250))
+    hop_ms: float = field(default_factory=lambda: _f("PHONES_HOP_MS", 100))
     window_ms: float = field(default_factory=lambda: _f("PHONES_WINDOW_MS", 2000))
     min_window_ms: float = field(default_factory=lambda: _f("PHONES_MIN_WINDOW_MS", 500))
-    commit_lag_ms: float = field(default_factory=lambda: _f("PHONES_COMMIT_LAG_MS", 500))
+    commit_lag_ms: float = field(default_factory=lambda: _f("PHONES_COMMIT_LAG_MS", 300))
     # Window RMS below this (full scale = 1.0) skips inference.
     silence_rms: float = field(default_factory=lambda: _f("PHONES_SILENCE_RMS", 0.004))
     allowed_origins: tuple[str, ...] = ("http://127.0.0.1:5176", "http://localhost:5176")

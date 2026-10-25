@@ -8,7 +8,12 @@ import type { GhostPathModel, GhostUnit } from '../game/ghost/types';
 import type { GhostWordSpec } from '../game/ghost/words';
 import { SOUND_ORDER, type SoundId } from '../state/types';
 import { AXES, project, type VowelTarget } from '../vowel/targets';
-import { InkTrail } from './board/ink';
+import { GhostInk } from '../game/ghost/ghostInk';
+import { phoneCursorState } from '../live/phoneCursor';
+import { ZONE_PHONES, isPhoneJudged, unitPhoneZones } from '../live/phoneJudge';
+import { easePlace, frameCentroid, latestPhonePlace } from '../live/phoneCentroid';
+import { OFF_PATH_MAP_DIST, distanceToPolylines, formantsToMap, mapSymbols, mapToFormants, phoneMapModel, phonePlace, type PhonePlace } from '../game/ghost/phoneMap';
+import type { PhoneCursorInput } from '../live/usePhoneCursor';
 import '../styles/word-board.css';
 import '../styles/ghost-board.css';
 
@@ -41,6 +46,18 @@ export interface GhostBoardProps {
   attemptId: string;
   onWatchEnd?: () => void;
   onAttemptEnd?: (result: WordAttemptResult) => void;
+  /**
+   * Optional second opinion on a usable result (the phone judge): the board shows "Scoring…" while it runs, then shows
+   * and reports the returned result. Must resolve (reject = the formant result stands). A new attempt discards a late answer.
+   */
+  judge?: (result: WordAttemptResult) => Promise<WordAttemptResult>;
+  /**
+   * Phone-recognizer cursor input (phone-judged words). When its state is 'ready' the board becomes a phone map: the path is
+   * drawn through the fixed places of the word's phones (phoneMapModel) and the cursor sits at the probability-weighted
+   * centroid of the phones the model hears, turning warm when it strays from the path. Any other state, or no prop, keeps
+   * today's sized formant ghost and F1/F2 cursor. Scoring (GhostAttempt) and judging always use the formant model.
+   */
+  phoneCursor?: PhoneCursorInput;
   /** The zone Ava is coaching: emphasised on the path. */
   focusZoneId?: string | null;
 }
@@ -58,18 +75,22 @@ const WATCH_TAIL_MS = 350;
 const STOP_RADIUS = 17;
 /** The learner counts as on the ghost for the cursor colour above this closeness. */
 const INSIDE_CLOSENESS = 0.6;
+/** Phone map: off-target hysteresis (back on target below this fraction of OFF_PATH_MAP_DIST). */
+const OFF_RETURN = 0.85;
 
 interface BoardView {
   done: boolean;
   stops: Record<string, boolean>;
   verdicts: Record<string, ZoneVerdict>;
+  /** True when the verdicts come from the judge (a stop's verdict then replaces its formant burst circle). */
+  judged: boolean;
   /** Watch mode: markers the dot has passed. */
   passed: string[];
 }
 
-const emptyView = (): BoardView => ({ done: false, stops: {}, verdicts: {}, passed: [] });
+const emptyView = (): BoardView => ({ done: false, stops: {}, verdicts: {}, judged: false, passed: [] });
 const viewKey = (v: BoardView) =>
-  `${v.done}|${Object.entries(v.stops).filter(([, hit]) => hit).map(([id]) => id).join()}|${Object.entries(v.verdicts).map(([k, x]) => `${k}:${x}`).join()}|${v.passed.join()}`;
+  `${v.done}|${v.judged}|${Object.entries(v.stops).filter(([, hit]) => hit).map(([id]) => id).join()}|${Object.entries(v.verdicts).map(([k, x]) => `${k}:${x}`).join()}|${v.passed.join()}`;
 
 const VERDICT_WORD: Record<ZoneVerdict, string> = {
   hit: 'landed',
@@ -117,6 +138,8 @@ export function GhostBoard({
   attemptId,
   onWatchEnd,
   onAttemptEnd,
+  judge,
+  phoneCursor,
   focusZoneId = null,
 }: GhostBoardProps) {
   const plotRef = useRef<HTMLDivElement>(null);
@@ -134,16 +157,65 @@ export function GhostBoard({
 
   // The ghost drawn for this learner. Everything below reads this one sized copy.
   const sized = useMemo(() => sizeModel(model, learnerFactor), [model, learnerFactor]);
+  // The model that is DRAWN. For a phone-judged word with the phone stream ready it is the phone map's fixed-place path;
+  // sized stays the JUDGING model (GhostAttempt: try start/end, quality, formant fallback).
+  const phoneReady = phoneCursor?.state === 'ready' && isPhoneJudged(spec.word);
+  const displayModel = useMemo(() => {
+    if (!phoneReady) return null;
+    try {
+      return phoneMapModel(spec.word);
+    } catch {
+      return null;
+    }
+  }, [phoneReady, spec.word]);
+  const shown = displayModel ?? sized;
 
   const lipRef = useRef(lip);
   lipRef.current = lip;
-  const props = useRef({ spec, sized, unit, mode, speed, onWatchEnd, onAttemptEnd });
-  props.current = { spec, sized, unit, mode, speed, onWatchEnd, onAttemptEnd };
+  const props = useRef({ spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge });
+  props.current = { spec, sized, shown, unit, mode, speed, onWatchEnd, onAttemptEnd, judge };
+
+  // Phone-map cursor: the unit's target phones, the start of its path and the path itself in map space.
+  const phoneCfg = useMemo(() => {
+    const zones = unitPhoneZones(spec.word, unit);
+    if (zones.length === 0 || !displayModel) return null;
+    const [t0] = unitWindow(displayModel, unit);
+    const g = ghostAt(displayModel, t0);
+    const lines: PhonePlace[][] = unitSegments(displayModel, unit).map((seg) => seg.points.map((p) => formantsToMap(p.f1, p.f2)));
+    return { targets: zones.map((z) => z.phone), start: formantsToMap(g.f1, g.f2), lines };
+  }, [displayModel, unit, spec.word]);
+  const phoneState = phoneCursor?.state === 'ready' && phoneCfg ? phoneCursorState(phoneCfg.targets, phoneCursor.phones) : null;
+  const phoneInput = { cfg: phoneCfg, st: phoneState, resetAt: phoneCursor?.resetAt ?? 0, attemptId, frames: phoneCursor?.frames ?? [], phones: phoneCursor?.phones ?? [] };
+  const phoneRef = useRef(phoneInput);
+  phoneRef.current = phoneInput;
+  const debug = useMemo(() => {
+    try {
+      return new URLSearchParams(location.search).has('debug');
+    } catch {
+      return false;
+    }
+  }, []);
 
   const attemptRef = useRef<GhostAttempt | null>(null);
   const reportedRef = useRef<string | null>(null);
+  /** The attempt id whose judge call is in flight, and the judged result once it is back. */
+  const judgingRef = useRef<string | null>(null);
+  const judgedRef = useRef<WordAttemptResult | null>(null);
+  const [scoring, setScoring] = useState(false);
   const armedPerfRef = useRef(0);
-  const liveInk = useRef(new InkTrail());
+  const liveInk = useRef(new GhostInk());
+  /** Which space the ink points are in ('px' = phone cursor, 'f' = F1/F2), so switching clears it. */
+  const inkSpace = useRef<'px' | 'f'>('f');
+  const phoneRt = useRef({
+    sig: '',
+    lastN: -1,
+    cur: { x: 0, y: 0 } as PhonePlace,
+    target: { x: 0, y: 0 } as PhonePlace,
+    heard: false,
+    off: false,
+    lastX: NaN,
+    lastY: NaN,
+  });
   const watchRef = useRef({ elapsed: 0, ended: false, passed: new Set<string>() });
   const sig = useRef({
     lastFrameTs: 0,
@@ -167,14 +239,35 @@ export function GhostBoard({
     if (!attempt) return;
     const snap = attempt.snapshot();
     const verdicts: Record<string, ZoneVerdict> = {};
-    if (attempt.result && attempt.result.quality === 'usable') {
-      for (const z of attempt.result.zones) if (attempt.unit.zoneIds.includes(z.zoneId)) verdicts[z.zoneId] = z.verdict;
+    const judgedResult = judgedRef.current?.attemptId === attempt.attemptId ? judgedRef.current : null;
+    const shown = judgedResult ?? (judgingRef.current === attempt.attemptId ? null : attempt.result); // no verdicts while scoring
+    if (shown && shown.quality === 'usable') {
+      for (const z of shown.zones) if (attempt.unit.zoneIds.includes(z.zoneId)) verdicts[z.zoneId] = z.verdict;
     }
-    publish({ done: snap.done, stops: snap.stops, verdicts, passed: [] });
-    if (attempt.result && reportedRef.current !== attempt.attemptId) {
-      reportedRef.current = attempt.attemptId;
-      props.current.onAttemptEnd?.(attempt.result);
+    publish({ done: snap.done, stops: snap.stops, verdicts, judged: judgedResult !== null, passed: [] });
+    const raw = attempt.result;
+    if (!raw || reportedRef.current === attempt.attemptId || judgingRef.current === attempt.attemptId) return;
+    const id = attempt.attemptId;
+    const judgeFn = props.current.judge;
+    if (judgeFn && raw.quality === 'usable') {
+      judgingRef.current = id;
+      setScoring(true);
+      publish({ done: snap.done, stops: snap.stops, verdicts: {}, judged: false, passed: [] });
+      const finish = (final: WordAttemptResult) => {
+        // A new attempt (or leaving live) replaced this one while it was being scored: drop the late answer.
+        if (attemptRef.current?.attemptId !== id || reportedRef.current === id) return;
+        judgingRef.current = null;
+        setScoring(false);
+        if (final !== raw) judgedRef.current = final;
+        reportedRef.current = id;
+        syncAttempt();
+        props.current.onAttemptEnd?.(final);
+      };
+      judgeFn(raw).then(finish, () => finish(raw));
+      return;
     }
+    reportedRef.current = id;
+    props.current.onAttemptEnd?.(raw);
   }, [publish]);
 
   useLayoutEffect(() => {
@@ -208,6 +301,9 @@ export function GhostBoard({
       const stale = !current || current.attemptId !== attemptId || current.unit.id !== unit.id || current.spec !== spec;
       if (reportedRef.current !== attemptId && stale) {
         attemptRef.current = new GhostAttempt(spec, sized, unit, attemptId);
+        judgingRef.current = null;
+        judgedRef.current = null;
+        setScoring(false);
         armedPerfRef.current = performance.now();
         liveInk.current.clear();
       }
@@ -215,7 +311,11 @@ export function GhostBoard({
       return;
     }
     // Leaving live before the attempt resolved abandons it without a callback.
-    if (attemptRef.current && !attemptRef.current.done) attemptRef.current = null;
+    if (attemptRef.current && !attemptRef.current.done) {
+      attemptRef.current = null;
+      judgingRef.current = null;
+      setScoring(false);
+    }
     if (mode === 'watch') {
       watchRef.current = { elapsed: 0, ended: false, passed: new Set() };
       publish(emptyView());
@@ -238,7 +338,7 @@ export function GhostBoard({
       if (frame.voiced) {
         s.unvoicedSince = null;
         s.voiced = true;
-        if (frame.f1 !== undefined && frame.f2 !== undefined && props.current.mode === 'live') {
+        if (frame.f1 !== undefined && frame.f2 !== undefined && props.current.mode === 'live' && !phoneRef.current.st) {
           liveInk.current.add(frame.f1, frame.f2, ts, now);
         }
       } else {
@@ -291,13 +391,62 @@ export function GhostBoard({
       const dt = Math.min(64, now - last);
       last = now;
       if (sizeRef.current.w === 0) return;
-      const { sized: model, unit: u, mode: md, speed: sp } = props.current;
+      const { shown: model, unit: u, mode: md, speed: sp } = props.current;
       const smooth = !s.reducedMotion;
       const board = boardRef.current;
 
       // Learner cursor and ink: only while live.
       s.loud = smooth ? smoothToward(s.loud, s.loudTarget, dt, LOUDNESS_TAU_MS) : s.loudTarget;
-      const live = liveInk.current.step(now, dt, toPx, smooth, INK_WIDTH);
+      // Phone-map cursor: eases (exponential) toward the centroid of the phones the model hears and holds through silence.
+      const ph = phoneRef.current;
+      const phoneOn = md === 'live' && ph.st !== null && ph.cfg !== null;
+      const rt = phoneRt.current;
+      const space = phoneOn ? 'px' : 'f';
+      if (inkSpace.current !== space) {
+        inkSpace.current = space;
+        liveInk.current.clear();
+        rt.sig = '';
+      }
+      if (phoneOn && ph.cfg) {
+        const sig = `${ph.attemptId}|${ph.resetAt}|${u.id}`;
+        if (rt.sig !== sig) {
+          // Frames present now belong to before this attempt: skip them (numbers only grow, so new ones are always newer).
+          const lastN = ph.frames.length ? ph.frames[ph.frames.length - 1].n : rt.lastN;
+          Object.assign(rt, { sig, lastN, cur: { ...ph.cfg.start }, target: { ...ph.cfg.start }, heard: false, off: false, lastX: NaN, lastY: NaN });
+          liveInk.current.clear();
+        }
+        for (const f of ph.frames) {
+          if (f.n <= rt.lastN) continue;
+          rt.lastN = f.n;
+          const c = frameCentroid(f);
+          if (c) {
+            rt.target = c;
+            rt.heard = true;
+          }
+        }
+        if (ph.frames.length === 0) {
+          // Old server (no frames): sit at the place of the latest heard phone.
+          const c = latestPhonePlace(ph.phones);
+          if (c) {
+            rt.target = c;
+            rt.heard = true;
+          }
+        }
+        rt.cur = smooth ? easePlace(rt.cur, rt.target, dt) : { ...rt.target };
+        const away = distanceToPolylines(rt.cur, ph.cfg.lines);
+        rt.off = rt.heard && (rt.off ? away > OFF_PATH_MAP_DIST * OFF_RETURN : away > OFF_PATH_MAP_DIST);
+        const at = toPx(mapToFormants(rt.cur.x, rt.cur.y));
+        if (!liveInk.current.hasPoint || Math.hypot(at.x - rt.lastX, at.y - rt.lastY) > 0.4) {
+          liveInk.current.add(at.x, at.y, now, now);
+          rt.lastX = at.x;
+          rt.lastY = at.y;
+        }
+      } else {
+        rt.sig = '';
+      }
+      const pxToPx = (p: { f1: number; f2: number }): Px => ({ x: p.f1, y: p.f2 });
+      const live = liveInk.current.step(now, dt, phoneOn ? pxToPx : toPx, smooth, INK_WIDTH);
+      const phoneVoiced = Boolean(phoneOn && rt.heard);
       const ribbons = md === 'live' ? live.ribbons : [];
       const refs = livePathRefs.current;
       const start = Math.max(0, ribbons.length - refs.length);
@@ -311,15 +460,18 @@ export function GhostBoard({
       if (cursor) {
         if (live.cursor) cursor.style.transform = `translate(${live.cursor.x}px, ${live.cursor.y}px)`;
         setData(cursor, 'shown', String(showCursor));
-        setData(cursor, 'voiced', String(s.voiced));
+        setData(cursor, 'voiced', String(phoneOn ? phoneVoiced : s.voiced));
       }
       setData(board, 'cursor', String(showCursor));
       const diameter = DOT_MIN + (DOT_MAX - DOT_MIN) * s.loud;
       if (dotRef.current) dotRef.current.style.transform = `scale(${(diameter / DOT_BASE).toFixed(3)})`;
 
       const attempt = md === 'live' ? attemptRef.current : null;
-      const inside = Boolean(attempt && !attempt.done && s.voiced && attempt.liveCloseness >= INSIDE_CLOSENESS);
+      const inside = phoneOn
+        ? Boolean(attempt && !attempt.done && rt.heard && !rt.off)
+        : Boolean(attempt && !attempt.done && s.voiced && attempt.liveCloseness >= INSIDE_CLOSENESS);
       setData(board, 'inside', String(inside));
+      setData(board, 'veer', String(Boolean(phoneOn && rt.off)));
 
       // Lip ring: wide and flat when spread, small and round when rounded; hidden without a usable camera.
       const ring = lipRingRef.current;
@@ -366,7 +518,7 @@ export function GhostBoard({
             }
           }
         }
-        if (passedNow) publish({ done: false, stops: {}, verdicts: {}, passed: [...w.passed] });
+        if (passedNow) publish({ done: false, stops: {}, verdicts: {}, judged: false, passed: [...w.passed] });
         setData(board, 'passing', String(model.markers.some((m) => u.zoneIds.includes(m.zoneId) && Math.abs(m.t - t) * model.durationMs < 60)));
         if (!w.ended && w.elapsed >= WATCH_LEAD_MS + travelMs + WATCH_TAIL_MS) {
           w.ended = true;
@@ -404,29 +556,44 @@ export function GhostBoard({
       });
       return Math.max(8, sum / Math.max(1, points.length));
     };
-    const active = unitSegments(sized, unit);
+    const active = unitSegments(shown, unit);
     const activeSet = new Set(active.flatMap((s) => s.points.map((p) => p.t)));
-    const all = sized.segments.map((seg) => ({
+    const all = shown.segments.map((seg) => ({
       d: line(seg.points),
       width: bandWidth(seg.points, seg.spread),
       active: seg.points.some((p) => activeSet.has(p.t)),
     }));
     const activeLines = active.map((seg) => ({ d: line(seg.points), width: bandWidth(seg.points, seg.spread) }));
     const zoneById = new Map(spec.zones.map((z) => [z.id, z]));
-    const markers = sized.markers.map((m) => {
+    const markers = shown.markers.map((m) => {
       const zone = zoneById.get(m.zoneId);
-      const at = toPx(ghostAt(sized, m.t));
+      const at = toPx(ghostAt(shown, m.t));
       return { marker: m, zone, at };
     });
-    const labels = sized.parts.flatMap((part) => {
-      const pts = sized.segments.flatMap((s) => s.points).filter((p) => p.t >= part.t0 && p.t <= part.t1);
+    const labels = shown.parts.flatMap((part) => {
+      const pts = shown.segments.flatMap((s) => s.points).filter((p) => p.t >= part.t0 && p.t <= part.t1);
       if (!pts.length) return [];
       const mid = pts[pts.length >> 1];
       const at = toPx(mid);
       return [{ part, at }];
     });
-    return { all, activeLines, markers, labels };
-  }, [size.w, size.h, sized, unit, spec]);
+    const phoneLabels = displayModel
+      ? spec.zones.flatMap((z) => {
+          const sym = ZONE_PHONES[spec.word]?.[z.id];
+          const place = sym ? phonePlace(sym) : null;
+          if (!sym || !place) return [];
+          return [{ id: z.id, sym, active: unit.zoneIds.includes(z.id), at: toPx(mapToFormants(place.x, place.y)) }];
+        })
+      : [];
+    const mapLabels =
+      displayModel && debug
+        ? mapSymbols().map((sym) => {
+            const place = phonePlace(sym)!;
+            return { sym, at: toPx(mapToFormants(place.x, place.y)) };
+          })
+        : [];
+    return { all, activeLines, markers, labels, phoneLabels, mapLabels };
+  }, [size.w, size.h, shown, displayModel, unit, spec, debug]);
 
   const unitZones = spec.zones.filter((z) => unit.zoneIds.includes(z.id));
   const focusZone = focusZoneId ? spec.zones.find((z) => z.id === focusZoneId) ?? null : null;
@@ -437,8 +604,9 @@ export function GhostBoard({
       ? ` ${unitZones.map((z) => `${z.label} ${VERDICT_WORD[view.verdicts[z.id] ?? 'skipped']}`).join(', ')}.`
       : '';
   const focusText = focusZone && !unit.zoneIds.includes(focusZone.id) ? ` Look at ${focusZone.label}: ${focusZone.hint}` : '';
-  const label = `Tongue board for “${spec.word}”, practising “${unit.label}”. ${modeText}. ${how}${resultText}${focusText}`;
-  const status = mode === 'watch' ? 'Watch the model' : mode === 'live' ? (view.done ? 'Done' : 'Your turn') : 'Ready';
+  const heard = debug && phoneCursor?.state === 'ready' ? ` Heard: ${phoneCursor.phones.map((x) => x.p).join(' ') || 'nothing yet'}.` : '';
+  const label = `Tongue board for “${spec.word}”, practising “${unit.label}”. ${modeText}. ${how}${resultText}${focusText}${heard}`;
+  const status = mode === 'watch' ? 'Watch the model' : mode === 'live' ? (scoring ? 'Scoring…' : view.done ? 'Done' : 'Your turn') : 'Ready';
 
   return (
     <div className="gb" data-mode={mode}>
@@ -450,7 +618,9 @@ export function GhostBoard({
         data-mode={mode}
         data-cursor="false"
         data-inside="false"
+        data-veer="false"
         data-passing="false"
+        data-scoring={scoring}
       >
         <div className="wb-plot" ref={plotRef}>
           <PlotBackdrop targets={targets} />
@@ -487,7 +657,7 @@ export function GhostBoard({
                 if (marker.kind === 'stop') {
                   const hit = active && view.stops[zone.id] === true;
                   const verdict = view.verdicts[zone.id];
-                  const state = hit || verdict === 'hit' ? 'hit' : verdict === 'miss' ? 'miss' : lit ? 'hit' : 'open';
+                  const state = view.judged && verdict ? (verdict === 'hit' ? 'hit' : verdict === 'miss' ? 'miss' : 'open') : hit || verdict === 'hit' ? 'hit' : verdict === 'miss' ? 'miss' : lit ? 'hit' : 'open';
                   return (
                     <g
                       key={zone.id}
@@ -528,6 +698,17 @@ export function GhostBoard({
                   </g>
                 );
               })}
+
+              {geometry.mapLabels.map(({ sym, at }) => (
+                <text key={`map-${sym}`} className="gb-map-label" x={at.x} y={at.y}>
+                  {sym}
+                </text>
+              ))}
+              {geometry.phoneLabels.map(({ id, sym, active, at }) => (
+                <text key={`phone-${id}`} className="gb-phone-label" data-active={active} x={at.x} y={at.y + STOP_RADIUS + 16}>
+                  {sym}
+                </text>
+              ))}
 
               <g className="wb-ink">
                 {Array.from({ length: LIVE_PATHS }, (_, i) => (

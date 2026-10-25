@@ -94,7 +94,8 @@ test('validator catches broken models', () => {
 
 test('models: markers per consonant, only stops scored, path breaks at stops', () => {
   const track = ghostModel('track');
-  expect(track.source).toBe('synthetic');
+  expect(track.source).toBe('recorded');
+  expect(ghostModel('rent').source).toBe('synthetic');
   expect(track.factor).toBe(0);
   expect(track.markers.map((m) => `${m.zoneId}:${m.kind}:${m.scored}`).join()).toBe('t:stop:true,r:liquid:false,k:stop:true');
   const rent = ghostModel('rent');

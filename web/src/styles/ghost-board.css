@@ -186,3 +186,34 @@
     opacity: 0.8;
   }
 }
+
+/* Phone cursor: a wrong sound pushes the dot off the path; it turns warm until the right sound brings it back. */
+.gb-board[data-veer='true'] .wb-cursor[data-voiced='true'] .wb-dot {
+  background: var(--color-warn);
+  border-color: var(--color-warn);
+  box-shadow: 0 0 0 4px var(--color-warn-soft), 0 2px 6px rgba(32, 62, 104, 0.25);
+}
+
+/* Phone map: IPA labels at the fixed places of the word's phones, and (?debug) every phone on the map. */
+.gb-phone-label {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  text-anchor: middle;
+  fill: var(--color-muted);
+  paint-order: stroke;
+  stroke: var(--color-cream);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.gb-phone-label[data-active='true'] {
+  fill: var(--color-navy);
+}
+.gb-map-label {
+  font-family: var(--font-serif);
+  font-size: 12px;
+  text-anchor: middle;
+  dominant-baseline: central;
+  fill: var(--color-navy-mist);
+  opacity: 0.45;
+  pointer-events: none;
+}

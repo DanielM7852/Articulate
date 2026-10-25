@@ -54,6 +54,34 @@ def greedy_decode(
     return out
 
 
+def frame_posteriors(
+    logits: np.ndarray,
+    id2tok: dict[int, str],
+    blank_id: int,
+    frame_ms: float,
+    offset_ms: float = 0.0,
+    top_k: int = 5,
+    min_p: float = 0.01,
+) -> list[dict]:
+    """Per-frame {t (frame centre, ms), mass (1 - blank posterior), top [[sym, p], ...]} from logits [frames, vocab].
+    top: up to top_k non-blank, non-special symbols by prob desc (not renormalised, 3 decimals, entries < min_p dropped)."""
+    if logits.ndim != 2 or logits.shape[0] == 0:
+        return []
+    probs = softmax(logits)
+    skip = {blank_id} | {i for i, t in id2tok.items() if t in SKIP_TOKENS}
+    keep = np.array([i for i in range(probs.shape[1]) if i not in skip], dtype=int)
+    sub = probs[:, keep]
+    k = min(top_k, len(keep))
+    out = []
+    for f in range(probs.shape[0]):
+        row = sub[f]
+        idx = np.argsort(-row)[:k]
+        top = [[id2tok[int(keep[j])], round(float(row[j]), 3)] for j in idx if row[j] >= min_p]
+        mass = min(1.0, max(0.0, 1.0 - float(probs[f, blank_id])))
+        out.append({"t": round(offset_ms + (f + 0.5) * frame_ms, 1), "mass": round(mass, 3), "top": top})
+    return out
+
+
 def split_commit(
     phones: list[Phone],
     window_end_ms: float,

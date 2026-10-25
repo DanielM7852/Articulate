@@ -13,8 +13,9 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from .align import resolve_symbol, score_targets, spans_to_boundaries, log_softmax
 from .config import Settings
-from .ctc import rms
+from .ctc import greedy_decode, rms
 from .stream import StreamSession
 
 log = logging.getLogger("phones.app")
@@ -55,12 +56,15 @@ def create_app(recognizer=None, settings: Settings | None = None) -> FastAPI:
         CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_methods=["*"], allow_headers=["*"]
     )
 
-    async def infer(wave: np.ndarray, offset_ms: float):
+    async def infer(wave: np.ndarray, offset_ms: float, with_frames: bool = False):
         rec = state["rec"]
         async with lock:
             t0 = time.perf_counter()
-            phones = await asyncio.to_thread(rec.phones, wave, offset_ms)
-            return phones, (time.perf_counter() - t0) * 1000.0
+            if with_frames and hasattr(rec, "analyze"):
+                phones, frames = await asyncio.to_thread(rec.analyze, wave, offset_ms)
+            else:
+                phones, frames = await asyncio.to_thread(rec.phones, wave, offset_ms), None
+            return phones, (time.perf_counter() - t0) * 1000.0, frames
 
     @app.get("/health")
     async def health():
@@ -84,9 +88,54 @@ def create_app(recognizer=None, settings: Settings | None = None) -> FastAPI:
         if wave.size < settings.sample_rate * 0.1:
             raise HTTPException(400, "clip too short")
         wave = wave[: int(settings.sample_rate * settings.max_clip_s)]
-        phones, ms = await infer(wave, 0.0)
+        phones, ms, _ = await infer(wave, 0.0)
         return {"phones": [p.as_dict() for p in phones], "inferMs": round(ms, 2),
                 "model": rec.model_id, "engine": rec.engine_name}
+
+    @app.post("/v1/phones/score")
+    async def phones_score(request: Request):
+        rec = state["rec"]
+        if rec is None:
+            raise HTTPException(503, "model not loaded")
+        try:
+            payload = json.loads(await request.body())
+            raw = payload.get("audioBase64") or payload.get("audio") or payload.get("wav")
+            targets_in = payload.get("targets")
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, f"invalid JSON body: {e}") from e
+        if not isinstance(targets_in, list) or not targets_in or len(targets_in) > 12 \
+                or not all(isinstance(t, str) for t in targets_in):
+            raise HTTPException(400, "targets must be a list of 1 to 12 phone symbols")
+        tok2id = {t: i for i, t in rec.id2tok.items()}
+        targets = []
+        for t in targets_in:
+            r = resolve_symbol(t, tok2id)
+            if r is None:
+                raise HTTPException(400, f"unknown target phone {t!r} (not in the model vocab)")
+            targets.append(r)
+        try:
+            wave = _decode_wav(base64.b64decode(raw), settings.sample_rate)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, f"could not decode audio: {e}") from e
+        if wave.size < settings.sample_rate * 0.1:
+            raise HTTPException(400, "clip too short")
+        wave = wave[: int(settings.sample_rate * settings.max_clip_s)]
+        async with lock:
+            t0 = time.perf_counter()
+            logits = await asyncio.to_thread(rec.logits, wave)
+            ms = (time.perf_counter() - t0) * 1000.0
+        lp = log_softmax(logits)
+        try:
+            scores, spans, total = score_targets(lp, targets, tok2id, rec.id2tok, rec.blank_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        bounds = spans_to_boundaries(spans, rec.frame_ms, lp.shape[0])
+        out = [{"p": s.p, "startMs": round(b["startMs"], 1), "endMs": round(b["endMs"], 1),
+                "peakMs": round(b["peakMs"], 1), "post": round(s.post, 4), "gop": round(s.gop, 3),
+                "best": s.best, "bestPost": round(s.bestPost, 4)} for s, b in zip(scores, bounds)]
+        phones = greedy_decode(logits, rec.id2tok, rec.blank_id, rec.frame_ms, 0.0)
+        return {"targets": out, "phones": [p.as_dict() for p in phones], "alignLogProb": round(total, 3),
+                "inferMs": round(ms, 2), "model": rec.model_id, "engine": rec.engine_name}
 
     @app.websocket("/ws/phones")
     async def ws_phones(ws: WebSocket):
@@ -124,12 +173,12 @@ def create_app(recognizer=None, settings: Settings | None = None) -> FastAPI:
                         out = sess.finish([], end_ms, 0.0)
                     else:
                         try:
-                            phones, ms = await infer(wave, start_ms)
+                            phones, ms, frames = await infer(wave, start_ms, True)
                         except Exception as e:  # noqa: BLE001
                             log.exception("inference failed")
                             await ws.send_json({"type": "error", "message": f"inference failed: {e}"})
                             continue
-                        out = sess.finish(phones, end_ms, ms)
+                        out = sess.finish(phones, end_ms, ms, frames)
                     await ws.send_json(out)
         except WebSocketDisconnect:
             pass
