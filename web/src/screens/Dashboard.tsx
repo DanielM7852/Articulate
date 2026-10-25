@@ -11,6 +11,8 @@ import '../styles/dashboard.css';
  * ripples. One 2D canvas draws all the dots; the labels and live detail cards are HTML laid out in
  * a fixed 1600 x 900 design space that is scaled to fit the viewport (the canvas uses the same
  * transform). Animation state lives in refs; React only re-renders the cards, at most 10 times a second.
+ * The perception streams (lip.mesh, audio.spectrum) are drawn by the same frame loop: the MediaPipe card's
+ * wireframe canvas, and the Audio cluster as a radial equaliser on per-band springs.
  *
  * Live events come from `subscribeTelemetry`. `?demo` (or `d`) replays /telemetry-demo.json through
  * the same path, and with no live event 15 s after connecting the replay starts on its own, tagged.
@@ -38,10 +40,10 @@ interface NodeDef {
 }
 
 const NODES: NodeDef[] = [
-  { id: 'camera', name: 'Camera', caption: 'webcam capture', loc: 'browser', x: 84, y: 250, r: 28, n: 150, ann: [52, 290, 170] },
-  { id: 'mediapipe', name: 'MediaPipe', caption: 'FaceLandmarker → LipFrame', loc: 'browser', x: 300, y: 250, r: 40, n: 230, ann: [350, 112, 236] },
+  { id: 'camera', name: 'Camera', caption: 'webcam capture', loc: 'browser', x: 340, y: 112, r: 28, n: 150, ann: [384, 90, 170] },
+  { id: 'mediapipe', name: 'MediaPipe', caption: 'FaceLandmarker → LipFrame', loc: 'browser', x: 340, y: 252, r: 40, n: 230, ann: [52, 82, 226], align: 'right' },
   { id: 'mic', name: 'Microphone', caption: 'microphone capture', loc: 'browser', x: 84, y: 500, r: 28, n: 150, ann: [52, 540, 170] },
-  { id: 'audio', name: 'Audio', caption: 'formant / loudness analysis (vowel-mapper worklet)', loc: 'browser', x: 300, y: 500, r: 40, n: 230, ann: [284, 552, 196] },
+  { id: 'audio', name: 'Audio', caption: 'formant / loudness analysis (vowel-mapper worklet)', loc: 'browser', x: 300, y: 500, r: 40, n: 230, ann: [236, 584, 214] },
   { id: 'stt', name: 'Ink', caption: 'Cartesia Ink speech to text', loc: 'Cartesia', x: 640, y: 176, r: 40, n: 220, ann: [636, 228, 214] },
   { id: 'tts', name: 'Sonic', caption: 'Cartesia Sonic text to speech (Ava’s voice)', loc: 'Cartesia', x: 930, y: 176, r: 40, n: 220, ann: [930, 228, 196] },
   { id: 'backend', name: 'Backend', caption: 'FastAPI app', loc: 'server', x: 790, y: 488, r: 52, n: 320, ann: [566, 404, 160], align: 'right' },
@@ -75,8 +77,10 @@ const EDGES: [NodeId, NodeId, number][] = [
   ['backend', 'db', 0.05],
 ];
 
+/** Perception streams (10 Hz): they drive the wireframe and the audio equaliser in place, no packets. */
+const PERCEPT = new Set(['lip.mesh', 'audio.spectrum']);
 /** High-rate kinds: they animate but stay out of the ticker. */
-const QUIET = new Set(['lip.frame', 'audio.frame', 'lip.batch', 'audio.batch']);
+const QUIET = new Set(['lip.frame', 'audio.frame', 'lip.batch', 'audio.batch', ...PERCEPT]);
 
 const PACKET_MS = 600;
 const RIPPLE_MS = 760;
@@ -89,6 +93,19 @@ const TICK_MS = 6000;
 const PRESENCE_MS = 60000;
 const FADE_MS = 500;
 const MAX_DOTS = 24;
+/** A perception stream with no frame for this long reads as gone (wireframe fades, equaliser relaxes). */
+const PERCEPT_MS = 1500;
+/** lip.mesh: 81 points as flat x, y pairs (docs/telemetry.md, "Perception streams"). */
+const MESH_LEN = 162;
+const MESH_LERP_MS = 80;
+/** Wireframe canvas, design px. */
+const WIRE = 200;
+const SPEC_BINS = 32;
+/** Equaliser springs, per second: lively but not jittery (damping ratio ~0.64). */
+const SPRING_K = 120;
+const SPRING_C = 14;
+/** rms that fills the meter and the breathing. */
+const RMS_FULL = 0.3;
 
 const TONES = ['#203e68', '#3b5884', '#8fa5c3', '#c2cedd'];
 const TONE_ALPHA = [0.94, 0.9, 1, 1];
@@ -109,7 +126,11 @@ interface Model {
   camera: boolean | null;
   micOpen: boolean | null;
   lip: { ok: boolean; opening: number; width: number; rounding: number } | null;
-  audio: { f1: number; f2: number; env: number[] } | null;
+  audio: { f1: number; f2: number; rms: number; env: number[] } | null;
+  /** latest lip.mesh, pts 0..255; `at` is performance.now() on arrival */
+  mesh: { pts: number[]; at: number; sid: string | null } | null;
+  /** latest audio.spectrum, bins 0..1 */
+  spectrum: { bins: number[]; rms: number; at: number; sid: string | null } | null;
   stt: { text: string; final: boolean } | null;
   tts: { chars: number; voice: string; ms: number | null } | null;
   pitch: { mean: number; min: number; max: number; voiced: number | null; latency: number | null } | null;
@@ -136,6 +157,8 @@ const freshModel = (): Model => ({
   micOpen: null,
   lip: null,
   audio: null,
+  mesh: null,
+  spectrum: null,
   stt: null,
   tts: null,
   pitch: null,
@@ -161,6 +184,9 @@ interface Snap {
   micOpen: boolean | null;
   lip: Model['lip'];
   audio: Model['audio'];
+  meshLive: boolean;
+  /** only while the stream is live */
+  spectrum: { bins: number[]; rms: number } | null;
   stt: Model['stt'];
   tts: Model['tts'];
   pitch: Model['pitch'];
@@ -187,6 +213,9 @@ function within(list: number[], now: number, ms: number) {
   return list.length;
 }
 
+const meshLive = (m: Model, now: number) => m.mesh !== null && now - m.mesh.at < PERCEPT_MS;
+const specLive = (m: Model, now: number) => m.spectrum !== null && now - m.spectrum.at < PERCEPT_MS;
+
 function snapshot(m: Model, now: number): Snap {
   return {
     count: m.count,
@@ -195,6 +224,8 @@ function snapshot(m: Model, now: number): Snap {
     micOpen: m.micOpen,
     lip: m.lip,
     audio: m.audio,
+    meshLive: meshLive(m, now),
+    spectrum: m.spectrum && specLive(m, now) ? { bins: m.spectrum.bins, rms: m.spectrum.rms } : null,
     stt: m.stt,
     tts: m.tts,
     pitch: m.pitch,
@@ -273,7 +304,27 @@ function apply(m: Model, e: TelemetryEvent, now: number, live: boolean) {
       break;
     case 'audio.frame': {
       const env = Array.isArray(p.env) ? p.env.map((v) => clamp01(Number(v) || 0)).slice(0, 32) : [];
-      m.audio = { f1: num(p.f1) ?? 0, f2: num(p.f2) ?? 0, env };
+      m.audio = { f1: num(p.f1) ?? 0, f2: num(p.f2) ?? 0, rms: clamp01(num(p.rms) ?? 0), env };
+      break;
+    }
+    case 'lip.mesh': {
+      // Backfill is stale by definition; and one face at a time: a second tab waits until the first goes quiet.
+      if (!live || !Array.isArray(p.pts) || p.pts.length !== MESH_LEN) break;
+      if (m.mesh && m.mesh.sid !== psid && now - m.mesh.at < PERCEPT_MS) break;
+      m.mesh = { pts: p.pts.map((v) => Math.min(255, Math.max(0, Number(v) || 0))), at: now, sid: psid };
+      if (m.camera === null) m.camera = true;
+      break;
+    }
+    case 'audio.spectrum': {
+      if (!live || !Array.isArray(p.bins) || p.bins.length < SPEC_BINS) break;
+      if (m.spectrum && m.spectrum.sid !== psid && now - m.spectrum.at < PERCEPT_MS) break;
+      m.spectrum = {
+        bins: p.bins.slice(0, SPEC_BINS).map((v) => clamp01((Number(v) || 0) / 255)),
+        rms: clamp01(num(p.rms) ?? 0),
+        at: now,
+        sid: psid,
+      };
+      if (m.micOpen === null) m.micOpen = true;
       break;
     }
     case 'stt.transcript':
@@ -412,6 +463,133 @@ const LIGHT = (() => {
   return v.map((c) => c / l);
 })();
 
+/** Lit-from-the-upper-left shade of a point on a unit disc: 0 lit .. 1 shadow (same rule as the clusters). */
+function shadeAt(x: number, y: number) {
+  const d = Math.min(1, Math.hypot(x, y));
+  const z = Math.sqrt(1 - d * d);
+  const lum = (x * LIGHT[0] + y * LIGHT[1] + z * LIGHT[2] + 1) / 2;
+  return Math.pow(1 - lum, 1.15);
+}
+
+// ---------- MediaPipe wireframe ----------
+
+/** A neutral face in lip.mesh order, shown faintly until the first frame arrives. */
+function restingMesh(): Float32Array {
+  const a = new Float32Array(MESH_LEN);
+  const put = (i: number, x: number, y: number) => {
+    a[2 * i] = x;
+    a[2 * i + 1] = Math.min(255, Math.max(0, y));
+  };
+  // Lips: left corner, along the lower lip to the right corner, back along the upper lip.
+  for (let i = 0; i < 20; i++) {
+    const c = -Math.cos((Math.PI * i) / 10);
+    const s = Math.sin((Math.PI * i) / 10);
+    put(i, 128 + 31 * c, 168 + (s > 0 ? 13 : 11) * s);
+    put(20 + i, 128 + 26 * c, 168 + 1.2 * s);
+  }
+  // Face oval, clockwise from the top of the forehead (clamped like the live frames).
+  for (let i = 0; i < 36; i++) {
+    const th = (2 * Math.PI * i) / 36;
+    put(40 + i, 128 + 89 * Math.sin(th) * (1 + 0.09 * Math.cos(th)), 98 - 118 * Math.cos(th));
+  }
+  put(76, 69, 67);
+  put(77, 107, 70);
+  put(78, 149, 70);
+  put(79, 187, 67);
+  put(80, 128, 128);
+  return a;
+}
+
+const WIRE_PAD = 5;
+const WIRE_DOT_ALPHA = [1, 0.78, 0.56];
+
+/** Draws one wireframe frame. `p` holds 81 points in 0..255; the context is in device px of a `px` square. */
+function drawWire(c: CanvasRenderingContext2D, px: number, p: Float32Array, alpha: number) {
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, px, px);
+  const k = px / WIRE;
+  c.setTransform(k, 0, 0, k, 0, 0);
+  const span = (WIRE - 2 * WIRE_PAD) / 255;
+  const X = (i: number) => WIRE_PAD + p[2 * i] * span;
+  const Y = (i: number) => WIRE_PAD + p[2 * i + 1] * span;
+  const ring = (from: number, count: number) => {
+    const path = new Path2D();
+    path.moveTo(X(from), Y(from));
+    for (let i = 1; i < count; i++) path.lineTo(X(from + i), Y(from + i));
+    path.closePath();
+    return path;
+  };
+  c.globalAlpha = alpha;
+  c.lineJoin = 'round';
+  c.lineCap = 'round';
+
+  // Face oval: the light outline the features sit in. Points clamped to the frame edge (usually the top of
+  // the forehead) are not real positions, so the outline breaks there and reads as cropped, not flattened.
+  const clamped = (i: number) => {
+    const x = p[2 * i];
+    const y = p[2 * i + 1];
+    return x <= 0.5 || x >= 254.5 || y <= 0.5 || y >= 254.5;
+  };
+  const oval = new Path2D();
+  let pen = false;
+  for (let j = 0; j <= 36; j++) {
+    const i = 40 + (j % 36);
+    if (clamped(i)) {
+      pen = false;
+      continue;
+    }
+    if (pen) oval.lineTo(X(i), Y(i));
+    else oval.moveTo(X(i), Y(i));
+    pen = true;
+  }
+  c.strokeStyle = 'rgba(203, 215, 230, 0.6)';
+  c.lineWidth = 1.4;
+  c.stroke(oval);
+
+  // Eyes: two short strokes.
+  c.strokeStyle = 'rgba(32, 62, 104, 0.55)';
+  c.lineWidth = 1.2;
+  c.beginPath();
+  c.moveTo(X(76), Y(76));
+  c.lineTo(X(77), Y(77));
+  c.moveTo(X(78), Y(78));
+  c.lineTo(X(79), Y(79));
+  c.stroke();
+
+  // Lips: the outer ring tinted, the opening between the inner ring filled navy.
+  const outer = ring(0, 20);
+  const inner = ring(20, 20);
+  c.fillStyle = 'rgba(32, 62, 104, 0.08)';
+  c.fill(outer);
+  c.fillStyle = 'rgba(32, 62, 104, 0.72)';
+  c.fill(inner);
+  c.strokeStyle = '#203e68';
+  c.lineWidth = 1.25;
+  c.stroke(outer);
+  c.lineWidth = 0.9;
+  c.stroke(inner);
+
+  // A dot at every vertex, lit from the upper left: smaller and lighter toward the light.
+  const paths = [new Path2D(), new Path2D(), new Path2D()];
+  for (let i = 0; i < 81; i++) {
+    if (i >= 40 && i < 76 && clamped(i)) continue;
+    const x = X(i);
+    const y = Y(i);
+    const sh = shadeAt((p[2 * i] - 128) / 112, (p[2 * i + 1] - 112) / 124);
+    const lip = i < 40;
+    const s = (lip ? 0.95 : 0.8) + (lip ? 1.15 : 1.05) * sh + (i === 80 ? 0.9 : 0);
+    const band = lip || i === 80 ? (sh > 0.35 ? 0 : 1) : sh > 0.5 ? 0 : sh > 0.25 ? 1 : 2;
+    paths[band].moveTo(x + s, y);
+    paths[band].arc(x, y, s, 0, Math.PI * 2);
+  }
+  c.fillStyle = '#203e68';
+  for (let b = 0; b < 3; b++) {
+    c.globalAlpha = alpha * WIRE_DOT_ALPHA[b];
+    c.fill(paths[b]);
+  }
+  c.globalAlpha = 1;
+}
+
 function buildCluster(def: NodeDef, index: number): Cluster {
   const rand = mulberry(1013 * (index + 1));
   const n = def.n;
@@ -525,10 +703,89 @@ interface Engine {
   destroy(): void;
 }
 
-function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, lineEl: () => HTMLElement | null, reduce: boolean): Engine {
+interface EngineIO {
+  /** the span Claude's line types into */
+  line: () => HTMLElement | null;
+  /** the MediaPipe card's wireframe canvas */
+  wire: () => HTMLCanvasElement | null;
+  /** the live card model (read for lip.mesh and audio.spectrum) */
+  model: () => Model;
+}
+
+/**
+ * The Audio cluster as a radial equaliser: each dot maps its angle to one of the 32 bands (mirrored left and
+ * right, low bands at the top) and is pushed outward by that band's level. One spring per band carries the
+ * motion, so every dot on a band moves together and the shape stays coherent.
+ */
+interface Equaliser {
+  /** per dot: its band 0..31, radial weight (with a little per-dot variety), unit direction */
+  band: Uint8Array;
+  weight: Float32Array;
+  ux: Float32Array;
+  uy: Float32Array;
+  target: Float32Array;
+  pos: Float32Array;
+  vel: Float32Array;
+  floor: Float32Array;
+  floorSet: boolean;
+  rms: { target: number; pos: number; vel: number };
+  seen: unknown;
+  live: boolean;
+}
+
+function buildEqualiser(cl: Cluster): Equaliser {
+  const len = cl.dx.length;
+  const band = new Uint8Array(len);
+  const weight = new Float32Array(len);
+  const ux = new Float32Array(len);
+  const uy = new Float32Array(len);
+  const r = cl.def.r;
+  for (let i = 0; i < len; i++) {
+    const rr = cl.rr[i] || 1e-3;
+    ux[i] = cl.dx[i] / rr;
+    uy[i] = cl.dy[i] / rr;
+    // 0 at the top, pi at the bottom, the same on both sides
+    const phi = Math.atan2(Math.abs(cl.dx[i]), -cl.dy[i]);
+    band[i] = Math.min(SPEC_BINS - 1, Math.floor((phi / Math.PI) * SPEC_BINS));
+    const d = Math.min(1.3, rr / r);
+    // the core barely moves, the rim carries the shape; per-dot variety from the cluster's own phase
+    weight[i] = (0.1 + 0.9 * Math.pow(Math.min(1, d), 2) + (d > 1 ? 0.1 : 0)) * (0.88 + 0.24 * ((cl.ph[i] / (Math.PI * 2)) % 1));
+  }
+  return {
+    band,
+    weight,
+    ux,
+    uy,
+    target: new Float32Array(SPEC_BINS),
+    pos: new Float32Array(SPEC_BINS),
+    vel: new Float32Array(SPEC_BINS),
+    floor: new Float32Array(SPEC_BINS),
+    floorSet: false,
+    rms: { target: 0, pos: 0, vel: 0 },
+    seen: null,
+    live: false,
+  };
+}
+
+function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, io: EngineIO, reduce: boolean): Engine {
   const ctx = canvas.getContext('2d')!;
   const clusters = NODES.map(buildCluster);
   const byId = Object.fromEntries(clusters.map((c) => [c.def.id, c])) as Record<NodeId, Cluster>;
+  const eq = buildEqualiser(byId.audio);
+  const scratch = new Float32Array(SPEC_BINS);
+  // Wireframe: positions ease from where they are toward each new frame over MESH_LERP_MS.
+  const wFrom = restingMesh();
+  const wTo = wFrom.slice();
+  const wCur = wFrom.slice();
+  let wT0 = -1e9;
+  let wSeen: unknown = null;
+  let wEl: HTMLCanvasElement | null = null;
+  let wCtx: CanvasRenderingContext2D | null = null;
+  let wAlpha = 0.25;
+  let wDrawnAlpha = -1;
+  let wDrawnK = -1;
+  let wDirty = true;
+  let prevNow = 0;
   const curves = new Map<string, Curve>();
   for (const [s, t, bend] of EDGES) curves.set(`${s}>${t}`, makeCurve(NODE[s], NODE[t], bend));
   const curveFor = (s: NodeId, t: NodeId) => {
@@ -587,6 +844,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, lineEl: () 
     canvas.style.height = `${vh}px`;
     stage.style.transform = `translate(${ox}px, ${oy}px) scale(${scale})`;
     drawStatic();
+    wDirty = true;
     dirtyUntil = performance.now() + 50;
   };
 
@@ -601,9 +859,100 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, lineEl: () 
     ctx.fill();
   };
 
+  /** Folds the newest audio.spectrum into the band targets and steps the springs. */
+  const stepEqualiser = (now: number, dt: number) => {
+    const sp = io.model().spectrum;
+    if (sp && sp !== eq.seen) {
+      eq.seen = sp;
+      // Gate against a slowly adapting noise floor so a quiet room rests flat.
+      for (let k = 0; k < SPEC_BINS; k++) {
+        const v = sp.bins[k];
+        const f = eq.floorSet ? eq.floor[k] : v;
+        eq.floor[k] = v < f ? v : f + (v - f) * 0.01;
+        // a gentle curve keeps the valleys between formants low, so the peaks read as lobes
+        scratch[k] = Math.pow(clamp01((v - eq.floor[k] - 0.04) / Math.max(0.2, 0.96 - eq.floor[k])), 1.4);
+      }
+      eq.floorSet = true;
+      for (let k = 0; k < SPEC_BINS; k++) {
+        const a = scratch[Math.max(0, k - 1)];
+        const b = scratch[Math.min(SPEC_BINS - 1, k + 1)];
+        eq.target[k] = 0.15 * a + 0.7 * scratch[k] + 0.15 * b;
+      }
+      eq.rms.target = clamp01(sp.rms / RMS_FULL);
+      dirtyUntil = Math.max(dirtyUntil, now + 50);
+    }
+    const live = sp !== null && now - sp.at < PERCEPT_MS;
+    if (!live && eq.live) {
+      eq.target.fill(0);
+      eq.rms.target = 0;
+    }
+    if (live !== eq.live) {
+      eq.live = live;
+      dirtyUntil = Math.max(dirtyUntil, now + 50);
+    }
+    if (reduce) {
+      eq.pos.set(eq.target);
+      eq.vel.fill(0);
+      eq.rms.pos = eq.rms.target;
+      return;
+    }
+    // Semi-implicit Euler, in two substeps so a slow frame stays stable.
+    const h = dt / 2;
+    for (let s = 0; s < 2; s++) {
+      for (let k = 0; k < SPEC_BINS; k++) {
+        eq.vel[k] += (SPRING_K * (eq.target[k] - eq.pos[k]) - SPRING_C * eq.vel[k]) * h;
+        eq.pos[k] += eq.vel[k] * h;
+      }
+      const q = eq.rms;
+      q.vel += (SPRING_K * (q.target - q.pos) - SPRING_C * q.vel) * h;
+      q.pos += q.vel * h;
+    }
+  };
+
+  /** Eases the wireframe toward the newest lip.mesh and redraws its canvas only when something moved. */
+  const stepWire = (now: number, dtMs: number) => {
+    const el = io.wire();
+    if (el !== wEl) {
+      wEl = el;
+      wCtx = el ? el.getContext('2d') : null;
+      wDirty = true;
+    }
+    if (!wEl || !wCtx) return;
+    const px = Math.max(1, Math.round(WIRE * scale * dpr));
+    if (wEl.width !== px || wEl.height !== px) {
+      wEl.width = px;
+      wEl.height = px;
+      wDirty = true;
+    }
+    const mesh = io.model().mesh;
+    if (mesh && mesh !== wSeen) {
+      wSeen = mesh;
+      wFrom.set(wCur);
+      for (let i = 0; i < MESH_LEN; i++) wTo[i] = mesh.pts[i];
+      wT0 = now;
+      wDirty = true;
+    }
+    const live = mesh !== null && now - mesh.at < PERCEPT_MS;
+    const aim = live ? 1 : 0.25;
+    if (reduce) wAlpha = aim;
+    else {
+      wAlpha += (aim - wAlpha) * (1 - Math.exp(-dtMs / 140));
+      if (Math.abs(aim - wAlpha) < 0.004) wAlpha = aim;
+    }
+    const k = reduce ? 1 : Math.min(1, Math.max(0, (now - wT0) / MESH_LERP_MS));
+    if (!wDirty && k === wDrawnK && wAlpha === wDrawnAlpha) return;
+    for (let i = 0; i < MESH_LEN; i++) wCur[i] = wFrom[i] + (wTo[i] - wFrom[i]) * k;
+    drawWire(wCtx, px, wCur, wAlpha);
+    wDrawnK = k;
+    wDrawnAlpha = wAlpha;
+    wDirty = false;
+  };
+
   const frame = (now: number) => {
     raf = requestAnimationFrame(frame);
-    const el = lineEl();
+    const dtMs = Math.min(100, Math.max(0, now - prevNow));
+    prevNow = now;
+    const el = io.line();
     if (el) {
       const shown = reduce ? line.length : Math.min(line.length, Math.floor((now - lineAt) / CHAR_MS));
       if (shown !== lineShown) {
@@ -612,6 +961,8 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, lineEl: () 
         el.dataset.typing = shown < line.length ? 'true' : 'false';
       }
     }
+    stepWire(now, dtMs);
+    stepEqualiser(now, Math.min(1 / 30, dtMs / 1000));
     if (reduce && now > dirtyUntil) return;
     const t = reduce ? 0 : now / 1000;
 
@@ -667,7 +1018,11 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, lineEl: () 
     for (const cl of clusters) {
       const { x: cx, y: cy, r } = cl.def;
       const g = cl.glowAmp * Math.exp(-(now - cl.glowAt) / 480);
-      const breath = 1 + 0.022 * Math.sin(t * 1.05 + cl.phase);
+      const isEq = cl === byId.audio;
+      // The audio cluster also swells with the voice's loudness.
+      const loud = isEq && !reduce ? Math.max(-0.1, eq.rms.pos) : 0;
+      const breath = 1 + (0.022 + 0.03 * loud) * Math.sin(t * 1.05 + cl.phase) + 0.09 * loud;
+      const push = r * 0.6;
       const wob = reduce ? 0 : r * 0.012 + 0.35;
       const rAge = now - cl.rippleAt;
       const rip = !reduce && rAge >= 0 && rAge < RIPPLE_MS;
@@ -692,8 +1047,21 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, lineEl: () 
           x += (cl.dx[i] / cl.rr[i]) * push;
           y += (cl.dy[i] / cl.rr[i]) * push;
         }
-        const s = cl.size[i] * grow;
-        const tone = Math.max(0, cl.tone[i] - darken);
+        let s = cl.size[i] * grow;
+        let tone = Math.max(0, cl.tone[i] - darken);
+        if (isEq) {
+          // one band per angular sector, so the rim steps like equaliser bars
+          const level = Math.max(-0.12, eq.pos[eq.band[i]]) * eq.weight[i];
+          if (level > 0.002 || level < -0.002) {
+            x += eq.ux[i] * level * push;
+            y += eq.uy[i] * level * push;
+            // dots flung outward read lighter and smaller, like the halo
+            if (level > 0.08) {
+              s *= 1 - 0.28 * Math.min(1, level);
+              if (level > 0.4) tone = Math.min(3, tone + 1);
+            }
+          }
+        }
         const path = paths[tone];
         path.moveTo(x + s, y);
         path.arc(x, y, s, 0, Math.PI * 2);
@@ -756,6 +1124,7 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, lineEl: () 
 
   return {
     fire(e) {
+      if (PERCEPT.has(e.kind)) return; // drawn in place by stepWire / stepEqualiser
       const now = performance.now();
       const src = byId[e.source];
       const dst = byId[e.target];
@@ -812,37 +1181,40 @@ function createEngine(canvas: HTMLCanvasElement, stage: HTMLElement, lineEl: () 
 const hz = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v)}`);
 const fmt = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString('en-US'));
 
-function Lips({ lip }: { lip: Model['lip'] }) {
-  const w = lip ? lip.width : 0.5;
-  const o = lip ? lip.opening : 0.05;
-  const rd = lip ? lip.rounding : 0.3;
-  const rx = 12 + 26 * w * (1 - 0.35 * rd);
-  const ry = 4 + 14 * o + 6 * rd;
-  const irx = rx * 0.78;
-  const iry = Math.max(0.6, ry * (0.2 + 0.75 * clamp01(o * 2.4)));
+/** 32 bars (the live spectrum, or the rms-ring envelope) and an rms level meter at the right. */
+function Spark({ bars, level }: { bars: number[]; level: number | null }) {
+  const list = bars.length ? bars : Array.from({ length: SPEC_BINS }, () => 0);
   return (
-    <svg className="dash-lips" viewBox="0 0 96 44" aria-hidden="true" data-off={lip && !lip.ok ? 'true' : undefined}>
-      <ellipse cx="48" cy="22" rx={rx} ry={ry} className="dash-lips__outer" />
-      <ellipse cx="48" cy="22" rx={irx} ry={iry} className="dash-lips__inner" />
-    </svg>
-  );
-}
-
-function Spark({ env }: { env: number[] }) {
-  const bars = env.length ? env : Array.from({ length: 32 }, () => 0);
-  return (
-    <svg className="dash-spark" viewBox="0 0 128 30" preserveAspectRatio="none" aria-hidden="true">
-      {bars.map((v, i) => {
-        const h = Math.max(1, v * 28);
-        return <rect key={i} x={i * 4 + 0.5} y={30 - h} width={2.6} height={h} rx={1} />;
-      })}
+    <svg className="dash-spark" viewBox="0 0 140 30" preserveAspectRatio="none" aria-hidden="true">
+      {list.map((v, i) => (
+        <rect
+          key={i}
+          className="dash-spark__bar"
+          x={i * 4 + 0.5}
+          y={2}
+          width={2.6}
+          height={28}
+          rx={1}
+          style={{ transform: `scaleY(${Math.max(1 / 28, clamp01(v)).toFixed(3)})` }}
+        />
+      ))}
+      <rect className="dash-spark__track" x={133} y={2} width={6} height={28} rx={1.5} />
+      <rect
+        className="dash-spark__level"
+        x={133}
+        y={2}
+        width={6}
+        height={28}
+        rx={1.5}
+        style={{ transform: `scaleY(${clamp01(level ?? 0).toFixed(3)})` }}
+      />
     </svg>
   );
 }
 
 const SPARC_LABELS = ['tongue height', 'tongue front', 'jaw open', 'lip forward', 'lip aperture'];
 
-function Detail({ id, s }: { id: NodeId; s: Snap }): ReactNode {
+function Detail({ id, s, wireRef }: { id: NodeId; s: Snap; wireRef: RefObject<HTMLCanvasElement> }): ReactNode {
   switch (id) {
     case 'camera':
       return <p className="dash-status" data-on={s.camera === true || undefined}>{s.camera === null ? 'waiting' : s.camera ? 'on' : 'off'}</p>;
@@ -850,27 +1222,32 @@ function Detail({ id, s }: { id: NodeId; s: Snap }): ReactNode {
       return <p className="dash-status" data-on={s.micOpen === true || undefined}>{s.micOpen === null ? 'waiting' : s.micOpen ? 'listening' : 'closed'}</p>;
     case 'mediapipe':
       return (
-        <div className="dash-card dash-card--row">
-          <Lips lip={s.lip} />
+        <div className="dash-card dash-card--mesh">
+          {/* drawn by the canvas engine from lip.mesh; sized for the device in stepWire */}
+          <canvas ref={wireRef} className="dash-wire" data-live={s.meshLive || undefined} aria-hidden="true" />
           <dl className="dash-kv">
             <div><dt>open</dt><dd>{s.lip ? s.lip.opening.toFixed(2) : '—'}</dd></div>
             <div><dt>wide</dt><dd>{s.lip ? s.lip.width.toFixed(2) : '—'}</dd></div>
             <div><dt>round</dt><dd>{s.lip ? s.lip.rounding.toFixed(2) : '—'}</dd></div>
             <div><dt>face</dt><dd data-warn={s.lip && !s.lip.ok ? 'true' : undefined}>{s.lip ? (s.lip.ok ? 'ok' : 'lost') : '—'}</dd></div>
           </dl>
+          <p className="dash-meta">{s.meshLive ? 'face mesh · 81 points' : 'no face'}</p>
         </div>
       );
-    case 'audio':
+    case 'audio': {
+      const rms = s.spectrum ? s.spectrum.rms : s.audio ? s.audio.rms : null;
       return (
         <div className="dash-card">
-          <Spark env={s.audio?.env ?? []} />
+          <Spark bars={s.spectrum ? s.spectrum.bins : s.audio?.env ?? []} level={rms == null ? null : rms / RMS_FULL} />
           <p className="dash-readout">
             <span>F1 <b>{hz(s.audio?.f1)}</b></span>
             <span>F2 <b>{hz(s.audio?.f2)}</b></span>
-            <span className="dash-unit">Hz</span>
+            <span className="dash-unit dash-unit--inline">Hz</span>
+            <span className="dash-rms">rms <b>{rms == null ? '—' : rms.toFixed(2)}</b></span>
           </p>
         </div>
       );
+    }
     case 'stt':
       return (
         <div className="dash-card">
@@ -1013,9 +1390,12 @@ export default function Dashboard() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const lineRef = useRef<HTMLSpanElement>(null);
+  const wireRef = useRef<HTMLCanvasElement>(null);
   const engine = useRef<Engine | null>(null);
   const model = useRef<Model>(freshModel());
   const dirty = useRef(true);
+  /** perception liveness as last rendered, so going quiet re-renders the cards once */
+  const shownLive = useRef<[boolean, boolean]>([false, false]);
   const [snap, setSnap] = useState<Snap>(() => snapshot(model.current, performance.now()));
   const [conn, setConn] = useState<Conn>('connecting');
   const [forced, setForced] = useState<boolean | null>(() => (params.has('demo') ? true : null));
@@ -1049,7 +1429,12 @@ export default function Dashboard() {
     const stage = stageRef.current;
     if (!canvas || !stage) return;
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const eng = createEngine(canvas, stage, () => lineRef.current, reduce);
+    const eng = createEngine(
+      canvas,
+      stage,
+      { line: () => lineRef.current, wire: () => wireRef.current, model: () => model.current },
+      reduce,
+    );
     engine.current = eng;
     return () => {
       eng.destroy();
@@ -1063,9 +1448,13 @@ export default function Dashboard() {
       const m = model.current;
       const now = performance.now();
       if (prunePresence(m)) dirty.current = true;
+      const ml = meshLive(m, now);
+      const sl = specLive(m, now);
+      if (ml !== shownLive.current[0] || sl !== shownLive.current[1]) dirty.current = true;
       if (!dirty.current && !m.ticker.some((t) => now - t.at >= TICK_MS)) return;
       m.ticker = m.ticker.filter((t) => now - t.at < TICK_MS);
       dirty.current = false;
+      shownLive.current = [ml, sl];
       setSnap(snapshot(m, now));
     }, 100);
     return () => window.clearInterval(id);
@@ -1211,7 +1600,7 @@ export default function Dashboard() {
                 <span className="dash-node__loc">{n.loc}</span>
               </h2>
               <p className="dash-node__cap">{n.caption}</p>
-              {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} />}
+              {n.id === 'claude' ? <ClaudeCard s={snap} lineRef={lineRef} /> : <Detail id={n.id} s={snap} wireRef={wireRef} />}
               {n.id === 'ui' && <Presence dots={snap.dots} />}
             </section>
           );

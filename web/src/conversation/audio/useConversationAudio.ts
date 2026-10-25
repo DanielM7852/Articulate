@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { BargeInDetector, frameLevel } from './bargeIn';
 import { InkStt, Resampler, type InkSession } from './inkStt';
 import { openAecMic, type AecMic } from './micAec';
+import { startSpectrumEmitter } from '../../telemetry/spectrum';
 import { Segmenter, type SegmenterEvent } from './segmenter';
 import type { BargeInMode, ConversationAudio, ListenMode, SegmentResult, TrackedFrame } from './types';
 
@@ -130,10 +131,13 @@ class Engine {
     const gen = ++this.gen;
     let aec: AecMic | null = null;
     let ctx: AudioContext | null = null;
+    let stopSpectrum: (() => void) | null = null;
     let unsub: (() => void) | null = null;
     let url: string | null = null;
     const cleanup = () => {
       unsub?.();
+      stopSpectrum?.();
+      stopSpectrum = null;
       aec?.close();
       void ctx?.close().catch(() => {});
       if (url) URL.revokeObjectURL(url);
@@ -168,6 +172,7 @@ class Engine {
         const mute = ctx.createGain();
         mute.gain.value = 0;
         src.connect(node);
+        stopSpectrum = startSpectrumEmitter(ctx, src);
         node.connect(mute).connect(ctx.destination);
         const rs = new Resampler(ctx.sampleRate, 16000);
         node.port.onmessage = (m: MessageEvent<Float32Array>) => {

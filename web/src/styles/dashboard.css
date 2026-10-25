@@ -204,11 +204,6 @@
   box-shadow: var(--shadow-panel);
   text-align: left;
 }
-.dash-card--row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 .dash-card[data-stale] {
   opacity: 0.6;
 }
@@ -270,29 +265,24 @@
   color: var(--color-warn);
 }
 
-/* lips */
-.dash-lips {
-  flex: none;
-  width: 84px;
-  height: 40px;
-  overflow: visible;
+/* MediaPipe wireframe (drawn by the canvas engine; 200 x 200 design px inside a 226 px card) */
+.dash-card--mesh {
+  padding: 10px 12px 9px;
 }
-.dash-lips ellipse {
-  transition:
-    rx 160ms var(--ease-out),
-    ry 160ms var(--ease-out);
+.dash-wire {
+  display: block;
+  width: 200px;
+  height: 200px;
+  margin-bottom: 7px;
+  /* own layer: redrawing it at 60 Hz must not repaint the whole stage */
+  will-change: transform;
 }
-.dash-lips__outer {
-  fill: var(--color-navy-soft);
-  stroke: var(--color-navy);
-  stroke-width: 1.6;
+.dash-card--mesh .dash-kv {
+  padding-top: 6px;
+  border-top: 1px solid var(--color-line);
 }
-.dash-lips__inner {
-  fill: var(--color-navy);
-  opacity: 0.85;
-}
-.dash-lips[data-off] {
-  opacity: 0.35;
+.dash-card--mesh .dash-meta {
+  margin-top: 4px;
 }
 .dash-kv {
   margin: 0;
@@ -323,10 +313,27 @@
   width: 100%;
   height: 30px;
   margin-bottom: 3px;
+  will-change: transform;
 }
-.dash-spark rect {
+.dash-spark__bar,
+.dash-spark__level {
   fill: var(--color-navy);
   opacity: 0.85;
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  transition: transform 110ms linear;
+}
+.dash-spark__level {
+  opacity: 1;
+}
+.dash-spark__track {
+  fill: var(--color-navy-soft);
+}
+.dash-unit--inline {
+  margin-left: -6px;
+}
+.dash-rms {
+  margin-left: auto;
 }
 
 /* transcript */
@@ -484,8 +491,8 @@
 .dash-legend {
   position: absolute;
   left: 52px;
-  top: 728px;
-  width: 248px;
+  top: 744px;
+  width: 224px;
   font-size: 11.5px;
   line-height: 17px;
   color: #8a9393;
@@ -579,7 +586,8 @@
   .dash-ticker li {
     animation: dash-tick-out 1ms linear 4600ms forwards;
   }
-  .dash-lips ellipse,
+  .dash-spark__bar,
+  .dash-spark__level,
   .dash-bars i::before {
     transition: none;
   }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { startSpectrumEmitter } from '../telemetry/spectrum';
 
 /**
  * Browser-side capture for the practice loop.
@@ -48,6 +49,7 @@ export function useMicrophone() {
   const recordingRef = useRef(false);
   const levelHistory = useRef<number[]>(Array(BAR_COUNT).fill(0));
   const noiseSamples = useRef<number[]>([]);
+  const spectrumStopRef = useRef<(() => void) | null>(null);
 
   const loop = useCallback(() => {
     const analyser = analyserRef.current;
@@ -112,6 +114,7 @@ export function useMicrophone() {
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 2048;
         src.connect(analyser);
+        spectrumStopRef.current = startSpectrumEmitter(ctx, src);
         analyserRef.current = analyser;
         noiseSamples.current = [];
         setNoiseLevel(null);
@@ -135,6 +138,8 @@ export function useMicrophone() {
 
   function stopStream() {
     cancelAnimationFrame(rafRef.current);
+    spectrumStopRef.current?.();
+    spectrumStopRef.current = null;
     recorderRef.current?.state === 'recording' && recorderRef.current.stop();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
