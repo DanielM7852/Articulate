@@ -8,7 +8,7 @@ import { GhostBoard } from '../components/GhostBoard';
 import { MouthReference, type MouthReferenceHandle } from '../components/MouthReference';
 import { TeacherCaptions } from '../components/TeacherCaptions';
 import { VoiceCheck, readStoredVoice, storeVoice, type StoredVoice } from '../components/VoiceCheck';
-import { prepareTeacher, unlockTeacherAudio } from '../audio/teacher';
+import { onTeacherFallback, prepareTeacher, unlockTeacherAudio } from '../audio/teacher';
 import { useAvaRealtime, type AvaCoaching } from '../realtime/useAvaRealtime';
 import { useMicrophone, type MicStatus } from '../audio/useMicrophone';
 import { useVoiceFrames, type VoiceFrames } from '../audio/useVoiceFrames';
@@ -43,6 +43,11 @@ import '../styles/word-lesson.css';
  *   live     -> the board is scoring the learner
  *   thinking -> attempt sent to the coach; a short filler line plays
  *   coaching -> Ava says the coach's line (realtime: then the talk window)
+ *
+ * Talk window (realtime, between tries): the board keeps measuring but never decides. Its results are held; only Ava's
+ * learner_attempt tool call scores the latest one (the Claude word coach, returned as the tool output, Ava relays it),
+ * after which the lesson finishes the word, advances, or stays in the window. ask_coach, small talk and stay_quiet drop
+ * the held results. The board is off while Ava speaks (plus a short echo settle), while deciding and while a relay is pending.
  *   done     -> "That's the word. Nice work." and the next word / Finish
  *
  * Cue-only steps (a lone sh or n) are watch-only: they never go live. Progression is nextStep() in plan.ts.
@@ -108,12 +113,13 @@ function introLine(spec: GhostWordSpec, step: LessonStep): { text: string; side:
 const AVA_START_MS = 5000;
 const AVA_IDLE_MS = 25_000;
 const START_PRACTICE_IDLE_MS = 10_000;
-/** Talk window: how long a finished board result waits for Ava to say whether it was an attempt or talk (and how long
- *  a learner_attempt waits for the board's result). */
-const ATTEMPT_DECIDE_MS = 3000;
+/** Talk window: how far back a board result still counts for learner_attempt, how long that call waits for one
+ *  (the board ends an attempt 600 ms after the voice stops), how many results are kept, and the quiet after Ava speaks. */
+const ATTEMPT_LOOKBACK_MS = 6000;
+const ATTEMPT_WAIT_MS = 1500;
+const MAX_HELD = 4;
+const ECHO_SETTLE_MS = 700;
 const TALK_POLL_MS = 120;
-/** A transcript with at most this many words and no question mark counts as an attempt when Ava did not decide. */
-const ATTEMPT_MAX_WORDS = 3;
 
 const lessonContext = (word: string) =>
   `[app] Lesson context: the practice word is "${word}". The lesson goes one part of the word at a time, then joins the parts back into the whole word. ` +
@@ -127,8 +133,6 @@ const wordDoneMessage = (word: string, next: string | null) =>
   `[app] The word "${word}" is complete and the board is off. ` +
   (next ? `The learner can press the button for "${next}" or Finish. ` : 'The learner can press Finish. ') +
   'If they try the word again, tell them to use those buttons.';
-const MISSED_MESSAGE =
-  '[app] The board did not catch that try; nothing was measured. Briefly ask the learner to say it again.';
 
 /** Per-turn instructions for a relay (appended to Ava's persona, never replacing it). */
 const ADVANCE_INSTRUCTIONS =
@@ -139,22 +143,52 @@ const GENTLE_INSTRUCTIONS =
   'Relay this caption to the learner in your own words, in one short sentence. Keep its meaning. ' +
   `Then say gently that you will move on and come back to it. Do not call it a pass. ` +
   'Do not add numbers or anatomy beyond the caption.';
+const AGAIN_INSTRUCTIONS =
+  'Relay this caption to the learner in your own words, in one or two short sentences. Keep its meaning and direction. ' +
+  'Do not add numbers, anatomy or new instructions. End with a short invitation to try again.';
 const finalInstructions = (word: string) =>
   'Relay this caption to the learner in your own words, in one or two short sentences. Keep its meaning. ' +
   `The word is complete: end with "That's ${word}. Nice work." Give brief, restrained praise and do not invite another try. ` +
   'Do not add numbers or anatomy beyond the caption.';
 
-/** The talk window between attempts: the board listens and Ava hears the learner at the same time. */
+/** A coached learner_attempt whose relay Ava is about to speak; the talk window loop waits for it, then moves on. */
+interface PendingRelay {
+  next: 'final' | 'advance' | 'again';
+  /** Advancing after a part that did not pass ("move on, come back to it"). */
+  gentle: boolean;
+  caption: string;
+  side: boolean;
+  cueId: CueId | null;
+  focus: string | null;
+  /** ava.speechCount() when the tool call returned: a higher count means her relay started. */
+  before: number;
+  /** The side-view / cue presentation; resolves to when the cue appeared (0 if none). */
+  view: Promise<number>;
+}
+
+/**
+ * The talk window between attempts: the board listens (and only measures) while Ava hears the learner. Board results
+ * are held in `results` and age out; only Ava's learner_attempt tool call turns one into an attempt.
+ */
 interface TalkWindow {
   active: boolean;
   run: number;
-  /** Ava called learner_attempt for the current utterance. */
-  attemptCalled: boolean;
-  /** Ava started talking (a sentence started or ask_coach was called) for the current utterance. */
-  talked: boolean;
-  held: WordAttemptResult | null;
-  decideTimer: ReturnType<typeof setTimeout> | null;
-  missTimer: ReturnType<typeof setTimeout> | null;
+  /** Board results received while the window was live, newest last. */
+  results: { result: WordAttemptResult; at: number }[];
+  /** learner_attempt is scoring a held result: the board is not live. */
+  deciding: boolean;
+  pending: PendingRelay | null;
+}
+
+/** Everything one coached attempt produced (see coachResult). */
+interface Coached {
+  prog: ProgressResult;
+  finalStep: boolean;
+  caption: string;
+  focus: string | null;
+  cueId: CueId | null;
+  side: boolean;
+  verdict: string;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -242,20 +276,24 @@ export default function WordLesson() {
   const coachCache = useRef(new Map<string, AvaCoaching>());
   const lastCoachId = useRef<string | null>(null);
   const lastResult = useRef<{ result: WordAttemptResult; practice: string[] } | null>(null);
-  const lastTranscript = useRef<string | null>(null);
   // Who may speak through Cartesia: the scripted sequence or realtime Ava, never both (Ava's canSpeak reads this).
   const floor = useRef<'script' | 'ava'>('script');
-  const win = useRef<TalkWindow>({ active: false, run: 0, attemptCalled: false, talked: false, held: null, decideTimer: null, missTimer: null });
+  const win = useRef<TalkWindow>({ active: false, run: 0, results: [], deciding: false, pending: null });
   const windowLiveRef = useRef(false);
   const [windowLive, setWindowLive] = useState(false);
   // Late-bound handlers for the talk window (assigned each render below), so the hook options stay stable.
-  const talkEvents = useRef<{ attempt: () => void; talk: () => void }>({ attempt: () => undefined, talk: () => undefined });
+  const talkEvents = useRef<{ attempt: () => Promise<unknown>; talk: () => void; quiet: () => void }>({
+    attempt: async () => ({ measured: false }),
+    talk: () => undefined,
+    quiet: () => undefined,
+  });
   const startPracticeSignal = useRef(false);
   const avaLipStop = useRef<(() => void) | null>(null);
   const avaCue = useRef(false); // a cue owns the mouth, so no lip sync
   const avaView = useRef(false); // the realtime path moved the avatar to the side view
   const mounted = useRef(true);
   const [talking, setTalking] = useState(false);
+  const [voiceFallback, setVoiceFallback] = useState(false); // a line fell back to the browser voice (sticky)
   const ava = useAvaRealtime({
     getCoaching: async (id) => {
       const hit = coachCache.current.get(id === 'latest' ? (lastCoachId.current ?? '') : id);
@@ -266,13 +304,8 @@ export default function WordLesson() {
       startPracticeSignal.current = true;
     },
     canSpeak: () => floor.current === 'ava',
-    onLearnerSpeech: () => {
-      lastTranscript.current = null; // a new utterance: the previous transcript no longer describes it
-    },
-    onUserTranscript: (text) => {
-      lastTranscript.current = text;
-    },
     onLearnerAttempt: () => talkEvents.current.attempt(),
+    onStayQuiet: () => talkEvents.current.quiet(),
     askCoach: async (question) => {
       talkEvents.current.talk(); // Ava is about to answer: this utterance was talk
       const { spec: word, plan: steps } = cur.current;
@@ -304,7 +337,7 @@ export default function WordLesson() {
       return { say: resp.say };
     },
     onSpeech: (sp) => {
-      talkEvents.current.talk(); // a sentence started: whatever the learner just said is being answered
+      // A sentence starting says nothing about the held results: it may be the "Let me look." before learner_attempt.
       // Same binding as useCoachSequence.lipSync; the previous sentence's binding is released first.
       avaLipStop.current?.();
       avaLipStop.current = null;
@@ -354,18 +387,17 @@ export default function WordLesson() {
       runId.current++;
       coachAbort.current?.abort();
       releaseWatch();
-      if (win.current.decideTimer) clearTimeout(win.current.decideTimer);
-      if (win.current.missTimer) clearTimeout(win.current.missTimer);
       win.current.active = false;
     };
   }, [releaseWatch]);
 
-  /** Close the talk window: the board and Ava stop deciding, timers cleared. Safe to call at any time. */
+  // Cartesia fell back to the browser voice: say so for the rest of the lesson.
+  useEffect(() => onTeacherFallback(() => setVoiceFallback(true)), []);
+
+  /** Close the talk window: held results, a pending relay and any decision are dropped. Safe to call at any time. */
   const endWindow = useCallback(() => {
     const w = win.current;
-    if (w.decideTimer) clearTimeout(w.decideTimer);
-    if (w.missTimer) clearTimeout(w.missTimer);
-    Object.assign(w, { active: false, attemptCalled: false, talked: false, held: null, decideTimer: null, missTimer: null });
+    Object.assign(w, { active: false, results: [], deciding: false, pending: null });
     windowLiveRef.current = false;
     setWindowLive(false);
     setTalking(false);
@@ -690,6 +722,23 @@ export default function WordLesson() {
     [startWord],
   );
 
+  /** Show the side view / cue for a coaching line. Resolves to when the cue appeared (0 if none or superseded). */
+  const startView = useCallback(async (side: boolean, cueId: CueId | null, my: number): Promise<number> => {
+    avaCue.current = side && cueId !== null;
+    const av = mouthRef.current;
+    if (!side || !av?.ready) return 0;
+    avaView.current = true;
+    try {
+      av.stop();
+      await av.setView('side');
+      if (runId.current !== my) return 0;
+      if (cueId) av.showCue(cueId);
+      return Date.now();
+    } catch {
+      return 0; // presentation only
+    }
+  }, []);
+
   /**
    * Realtime coaching for one attempt: cutaway/cue on the avatar, Ava relays the coach caption. 'spoken' when she
    * did, 'fallback' when she did not start in time or the relay failed (Ava is silenced and gated, the caller
@@ -701,22 +750,7 @@ export default function WordLesson() {
       my: number,
     ): Promise<'spoken' | 'fallback' | 'aborted'> => {
       const a = avaRef.current;
-      avaCue.current = p.side && p.cueId !== null;
-      let viewStart = 0;
-      const viewP = (async () => {
-        const av = mouthRef.current;
-        if (!p.side || !av?.ready) return;
-        avaView.current = true;
-        try {
-          av.stop();
-          await av.setView('side');
-          if (runId.current !== my) return;
-          if (p.cueId) av.showCue(p.cueId);
-          viewStart = Date.now();
-        } catch {
-          /* presentation only */
-        }
-      })();
+      const viewP = startView(p.side, p.cueId, my);
       const before = a.speechCount();
       let relayed = true;
       try {
@@ -724,7 +758,7 @@ export default function WordLesson() {
       } catch {
         relayed = false;
       }
-      await viewP;
+      const viewStart = await viewP;
       if (runId.current !== my) return 'aborted';
       if (relayed) {
         const until = Date.now() + AVA_START_MS;
@@ -753,85 +787,25 @@ export default function WordLesson() {
       quietAva(); // stops lip sync, clears the cue flag and returns the avatar to the front view
       return 'spoken';
     },
-    [avaOpen, quietAva],
+    [avaOpen, quietAva, startView],
   );
 
   /**
-   * Between attempts: Ava has the floor with the mic open (VAD on) and the board listens at the same time. The board is
-   * live while Ava is not speaking and no result is being decided, and goes live again with a fresh attempt id after
-   * she spoke. Each learner utterance is then either an attempt (settleHeld -> runAttempt) or talk (Ava answers); see
-   * evaluateHeld. Ends on an attempt, start_practice, the CTA, or when the session is lost. The board's unit is the
-   * current step's, so an attempt in the window is scored against the part being practised.
+   * Score one finished attempt: progression (nextStep / isClose), the Claude word coach (deterministic fallback line when
+   * the backend is unreachable), the coach cache and the focus zone. `onStart` runs once progression is decided and
+   * before the coach request (runAttempt starts its filler there). Null when run `my` was superseded.
    */
-  const talkWindow = useCallback(
-    async (my: number) => {
-      const a = avaRef.current;
-      const w = win.current;
-      startPracticeSignal.current = false;
-      if (w.decideTimer) clearTimeout(w.decideTimer);
-      if (w.missTimer) clearTimeout(w.missTimer);
-      Object.assign(w, { active: true, run: my, attemptCalled: false, talked: false, held: null, decideTimer: null, missTimer: null });
-      setTalking(true);
-      let live = false;
-      let viaPractice = false;
-      while (runId.current === my) {
-        if (!avaOpen()) break;
-        if (startPracticeSignal.current) {
-          viaPractice = true;
-          break;
-        }
-        let want: boolean = live;
-        if (w.held || a.speakingNow()) want = false; // deciding a result, or Ava is talking
-        else if (!live) {
-          want = await a.waitForIdle(0); // re-arm only once Ava is fully idle
-          if (runId.current !== my) return;
-        }
-        if (want !== live) {
-          live = want;
-          if (live) {
-            w.attemptCalled = false;
-            w.talked = false;
-            lastTranscript.current = null;
-            newAttempt(); // always a fresh attempt id when the board goes live again
-          }
-          windowLiveRef.current = live;
-          setWindowLive(live);
-        }
-        await sleep(TALK_POLL_MS);
-      }
-      if (runId.current !== my) return;
-      if (viaPractice) {
-        await a.waitForIdle(START_PRACTICE_IDLE_MS); // let her finish the sentence she is on
-        if (runId.current !== my) return;
-      }
-      endWindow();
-      await beginTurn(my, false);
-    },
-    [avaOpen, beginTurn, endWindow, newAttempt],
-  );
-
-  /** One finished attempt: coach it (filler, backend coach, then Ava relays or the script speaks) and progress. */
-  const runAttempt = useCallback(
-    async (result: WordAttemptResult) => {
+  const coachResult = useCallback(
+    async (result: WordAttemptResult, step: LessonStep, my: number, onStart?: () => void): Promise<Coached | null> => {
       const { spec: word, plan: steps } = cur.current;
-      const step = steps[shownStep.current];
-      if (!step || !step.practisable) return;
       const practice = step.unit.zoneIds;
-      const my = ++runId.current;
-      endWindow();
-      setPhase('thinking');
       lastResult.current = { result, practice };
       // Progression is decided now (the board's own judgement of the unit); the coaching line follows.
       const prog: ProgressResult = nextStep({ ...progress.current, step: shownStep.current }, isClose(result, step.unit));
       progress.current = prog.state;
       setTries(prog.state.tries);
       const finalStep = prog.advance && prog.state.step >= steps.length;
-      // The script owns the floor from here: Ava is silenced and gated (VAD off, mic disabled) before the filler speaks.
-      takeFloor();
-      let gate: Promise<void> = Promise.resolve();
-      const session = avaRef.current.session();
-      if (realtimeActive() && session && !session.practiceMode) gate = avaRef.current.setPracticeMode(true);
-      void seq.say(LINES.filler, { narration: voiceOnRef.current });
+      onStart?.();
 
       coachAbort.current?.abort();
       const ctl = new AbortController();
@@ -855,12 +829,141 @@ export default function WordLesson() {
         focus = fb.focusZoneId;
         side = focus !== null;
       }
-      if (runId.current !== my) return;
+      if (runId.current !== my) return null;
       // "close" with zoneCount 0 means nothing countable was practised (a liquid-only or cue-only part): not a score.
       const verdict = score.verdict === 'insufficient' ? 'insufficient' : isScored(score) ? score.verdict : 'unscored';
       coachCache.current.set(result.attemptId, { caption, focusZoneId: focus, verdict });
       lastCoachId.current = result.attemptId;
       setFocusZoneId(focus);
+      return { prog, finalStep, caption, focus, cueId, side, verdict };
+    },
+    [profileId],
+  );
+
+  /**
+   * Between attempts: Ava has the floor with the mic open (VAD on) and the board listens at the same time, but only
+   * measures: its results are held and Ava's learner_attempt tool call (talkEvents.attempt) decides whether one counts.
+   * The board is live while Ava is silent (plus ECHO_SETTLE_MS), no decision is running and no relay is pending, and
+   * re-arms with a fresh attempt id. A pending relay (a coached learner_attempt) is finished here once Ava has spoken:
+   * the lesson then finishes the word, advances, or stays in the window. Also ends on start_practice, the CTA, or when the
+   * session is lost. The board's unit is the current step's, so an attempt in the window is scored against that part.
+   */
+  const talkWindow = useCallback(
+    async (my: number) => {
+      const a = avaRef.current;
+      const w = win.current;
+      startPracticeSignal.current = false;
+      Object.assign(w, { active: true, run: my, results: [], deciding: false, pending: null });
+      setTalking(true);
+      let live = false;
+      let viaPractice = false;
+      let lastSpokeAt = Date.now();
+      while (runId.current === my) {
+        if (!avaOpen()) break;
+        if (startPracticeSignal.current) {
+          viaPractice = true;
+          break;
+        }
+        const p = w.pending;
+        if (p) {
+          // Ava relays the coaching the tool call returned; the board stays off until she is done.
+          const viewStart = await p.view;
+          if (runId.current !== my) return;
+          const until = Date.now() + AVA_START_MS;
+          while (a.speechCount() === p.before && avaOpen() && Date.now() < until) {
+            await sleep(100);
+            if (runId.current !== my) return;
+          }
+          const spoken = a.speechCount() !== p.before;
+          if (spoken) {
+            await a.waitForIdle(AVA_IDLE_MS);
+            if (runId.current !== my) return;
+            if (viewStart && p.cueId) {
+              const left = CUE_MIN_MS - (Date.now() - viewStart);
+              if (left > 0) await sleep(left);
+              if (runId.current !== my) return;
+            }
+            quietAva(); // stops lip sync, clears the cue flag and returns the avatar to the front view
+          } else {
+            // She never started: the script speaks the caption itself.
+            floor.current = 'script';
+            quietAva(false);
+            avaView.current = false;
+            await a.setPracticeMode(true).catch(() => undefined);
+            if (runId.current !== my) return;
+            if (!(await line(p.caption, p.side, p.cueId))) return;
+          }
+          if (p.next === 'final') {
+            endWindow();
+            return wordDone(spoken);
+          }
+          if (p.next === 'advance') {
+            endWindow();
+            setFocusZoneId(null);
+            if (!spoken && p.gentle && !(await line(LINES.moveOn))) return;
+            return runStep(my);
+          }
+          // Try again: back to listening (the scripted fallback gave the floor away; hand it back to Ava).
+          if (!spoken) {
+            floor.current = 'ava';
+            await a.setPracticeMode(false).catch(() => undefined);
+            if (runId.current !== my) return;
+          }
+          w.pending = null;
+          w.deciding = false;
+          w.results = [];
+          lastSpokeAt = Date.now();
+          live = false;
+          windowLiveRef.current = false;
+          setWindowLive(false);
+          continue;
+        }
+        if (a.speakingNow()) lastSpokeAt = Date.now();
+        let want: boolean = live;
+        if (w.deciding || a.speakingNow() || Date.now() - lastSpokeAt < ECHO_SETTLE_MS) want = false; // deciding, or Ava is talking / just did
+        else if (!live) {
+          want = await a.waitForIdle(0); // re-arm only once Ava is fully idle
+          if (runId.current !== my) return;
+          if (w.deciding || w.pending) want = false;
+        }
+        if (want !== live) {
+          live = want;
+          if (live) newAttempt(); // always a fresh attempt id when the board goes live again
+          windowLiveRef.current = live;
+          setWindowLive(live);
+        }
+        await sleep(TALK_POLL_MS);
+      }
+      if (runId.current !== my) return;
+      if (viaPractice) {
+        await a.waitForIdle(START_PRACTICE_IDLE_MS); // let her finish the sentence she is on
+        if (runId.current !== my) return;
+      }
+      endWindow();
+      await beginTurn(my, false);
+    },
+    [avaOpen, beginTurn, endWindow, line, newAttempt, quietAva, runStep, wordDone],
+  );
+
+  /** One finished attempt: coach it (filler, backend coach, then Ava relays or the script speaks) and progress. */
+  const runAttempt = useCallback(
+    async (result: WordAttemptResult) => {
+      const { spec: word, plan: steps } = cur.current;
+      const step = steps[shownStep.current];
+      if (!step || !step.practisable) return;
+      const my = ++runId.current;
+      endWindow();
+      setPhase('thinking');
+      let gate: Promise<void> = Promise.resolve();
+      const coached = await coachResult(result, step, my, () => {
+        // The script owns the floor from here: Ava is silenced and gated (VAD off, mic disabled) before the filler speaks.
+        takeFloor();
+        const session = avaRef.current.session();
+        if (realtimeActive() && session && !session.practiceMode) gate = avaRef.current.setPracticeMode(true);
+        void seq.say(LINES.filler, { narration: voiceOnRef.current });
+      });
+      if (!coached) return;
+      const { prog, finalStep, caption, focus, cueId, side, verdict } = coached;
       setPhase('coaching');
 
       /** After the line: move on to the next step / the end of the word, or try the same step again. */
@@ -902,69 +1005,74 @@ export default function WordLesson() {
       if (!(await line(caption, side, cueId))) return;
       await afterScript();
     },
-    [coachWithAva, endWindow, giveFloorToAva, goLive, line, profileId, realtimeActive, runStep, seq.say, setPhase, takeFloor, talkWindow, wordDone],
+    [coachResult, coachWithAva, endWindow, giveFloorToAva, goLive, line, realtimeActive, runStep, seq.say, setPhase, takeFloor, talkWindow, wordDone],
   );
 
-  // ---- talk window decisions: was the learner's utterance an attempt (the board scores it) or talk (Ava answers)?
-
-  /** The held board result is an attempt: close the window and coach it. Or talk: drop it and let the window re-arm. */
-  const settleHeld = (kind: 'attempt' | 'talk') => {
-    const w = win.current;
-    const held = w.held;
-    if (!w.active || !held) return;
-    if (w.decideTimer) clearTimeout(w.decideTimer);
-    w.decideTimer = null;
-    w.held = null;
-    if (kind === 'talk') {
-      w.attemptCalled = false;
-      w.talked = false;
-      newAttempt(); // the board already reported this attempt id; listen again with a fresh one
-      return;
-    }
-    endWindow();
-    void runAttempt(held).catch(() => undefined);
-  };
-
-  /** Ava's verdict wins (attempt before talk); at the ATTEMPT_DECIDE_MS deadline the transcript decides. */
-  const evaluateHeld = (deadline: boolean) => {
-    const w = win.current;
-    if (!w.active || !w.held || runId.current !== w.run) return;
-    if (w.attemptCalled) return settleHeld('attempt');
-    if (w.talked) return settleHeld('talk');
-    if (!deadline) return;
-    const text = lastTranscript.current?.trim() ?? '';
-    const words = text ? text.split(/\s+/).length : 0;
-    settleHeld(!text || (words <= ATTEMPT_MAX_WORDS && !text.includes('?')) ? 'attempt' : 'talk');
-  };
+  // ---- talk window: the board measures, Ava decides (learner_attempt scores a held result; anything else drops them)
 
   talkEvents.current = {
-    attempt: () => {
+    attempt: async () => {
       const w = win.current;
-      if (!w.active) return;
-      w.attemptCalled = true;
-      if (w.held) {
-        evaluateHeld(false);
-        return;
+      const my = w.run;
+      const alive = () => w.active && runId.current === my;
+      const gone = { measured: false, instructions: 'Say nothing more about it.' };
+      if (!alive() || w.deciding || w.pending) return gone;
+      const recent = () => w.results.filter((r) => r.at >= Date.now() - ATTEMPT_LOOKBACK_MS);
+      // The board ends an attempt shortly after the voice stops, so it may still be on its way (it stays live meanwhile).
+      const until = Date.now() + ATTEMPT_WAIT_MS;
+      while (recent().length === 0 && Date.now() < until) {
+        await sleep(TALK_POLL_MS);
+        if (!alive()) return gone;
       }
-      if (w.missTimer) return;
-      // Ava heard an attempt but the board has no result yet; if none comes, ask for another try.
-      w.missTimer = setTimeout(() => {
-        w.missTimer = null;
-        if (!w.active || w.held || runId.current !== w.run) return;
-        w.attemptCalled = false;
-        avaRef.current.sendAppMessage(MISSED_MESSAGE, true);
-        newAttempt();
-      }, ATTEMPT_DECIDE_MS);
+      w.deciding = true; // the board goes non-live while this is scored
+      const fresh = recent();
+      w.results = [];
+      const step = cur.current.plan[shownStep.current];
+      if (fresh.length === 0 || !step || !step.practisable) {
+        w.deciding = false;
+        return {
+          measured: false,
+          caption: 'The board did not catch that try, so nothing was measured.',
+          instructions: 'Say briefly that nothing was measured this time and invite another try.',
+        };
+      }
+      const pick = [...fresh].reverse().find((r) => r.result.quality === 'usable') ?? fresh[fresh.length - 1];
+      const coached = await coachResult(pick.result, step, my);
+      if (!coached || !alive()) return gone;
+      const { prog, finalStep, caption, focus, cueId, side, verdict } = coached;
+      const instructions = finalStep
+        ? finalInstructions(cur.current.spec.word)
+        : prog.advance
+          ? prog.gentle
+            ? GENTLE_INSTRUCTIONS
+            : ADVANCE_INSTRUCTIONS
+          : AGAIN_INSTRUCTIONS;
+      w.pending = {
+        next: finalStep ? 'final' : prog.advance ? 'advance' : 'again',
+        gentle: prog.advance && prog.gentle,
+        caption,
+        side,
+        cueId,
+        focus,
+        before: avaRef.current.speechCount(),
+        view: startView(side, cueId, my),
+      };
+      return { measured: true, caption, focusZoneId: focus, verdict, instructions };
     },
+    // Ava called ask_coach: what the learner said was talk. Small talk needs no clearing (held results age out after
+    // ATTEMPT_LOOKBACK_MS and the newest one is used). Not while she is relaying a learner_attempt.
     talk: () => {
       const w = win.current;
-      if (!w.active) return;
-      w.talked = true;
-      evaluateHeld(false);
+      if (!w.active || w.deciding || w.pending) return;
+      w.results = [];
+    },
+    quiet: () => {
+      const w = win.current;
+      if (w.active) w.results = [];
     },
   };
 
-  /** Board result: a normal attempt end while live, or a result to hold and classify during the talk window. */
+  /** Board result: a normal attempt end while live, or a measurement the talk window holds until Ava decides. */
   const onAttemptEnd = (result: WordAttemptResult) => {
     if (result.attemptId !== attemptIdRef.current) return;
     if (phaseRef.current === 'live') {
@@ -972,12 +1080,11 @@ export default function WordLesson() {
       return;
     }
     const w = win.current;
-    if (!w.active || !windowLiveRef.current || w.held || runId.current !== w.run) return;
-    w.held = result;
-    if (w.missTimer) clearTimeout(w.missTimer);
-    w.missTimer = null;
-    w.decideTimer = setTimeout(() => evaluateHeld(true), ATTEMPT_DECIDE_MS);
-    evaluateHeld(false);
+    // Not gated on windowLiveRef: a result can land just after the board went idle (Ava's acknowledgement started);
+    // the attempt id check above already drops stale ones.
+    if (!w.active || w.deciding || w.pending || runId.current !== w.run) return;
+    w.results = [...w.results, { result, at: Date.now() }].slice(-MAX_HELD);
+    newAttempt(); // the board keeps listening for the next utterance
   };
 
   // Hands-free start: once the microphone is open, begin by itself if the browser already had a tap
@@ -1181,6 +1288,12 @@ export default function WordLesson() {
               {camera ? <Video size={16} aria-hidden="true" /> : <VideoOff size={16} aria-hidden="true" />}
               {camera ? (lip.status === 'off' ? 'Starting camera…' : LIP_LABEL[lip.status]) : 'Camera off'}
             </button>
+            {voiceFallback && (
+              <span className="lp-pill wl-pill is-warn" role="status">
+                <TriangleAlert size={16} aria-hidden="true" />
+                Browser voice · Cartesia unavailable
+              </span>
+            )}
             {realtimeOn && (
               <span className="lp-pill wl-pill" role="status">
                 <MessageCircle size={16} aria-hidden="true" />

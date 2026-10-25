@@ -12,8 +12,10 @@ import { SentenceSplitter, wordOverlap } from './sentences';
  * so sentences are queued and each one starts when the previous one ends (the idle socket keeps the gap short).
  *
  * Tools: get_coaching is answered by the caller's getCoaching (the lesson posts to the backend coach);
- * start_practice / end_practice are intercepted here and only notify the caller. learner_attempt / stay_quiet are
- * silent (no follow-up response, the rest of that response is discarded); learner_attempt also notifies the caller.
+ * start_practice / end_practice are intercepted here and only notify the caller. stay_quiet is silent (notifies
+ * onStayQuiet, no follow-up response, the rest of that response is discarded). learner_attempt is answered by the
+ * caller's onLearnerAttempt (the lesson measures and Claude coaches): the mic gate goes on while it runs and off before
+ * the output is submitted, then Ava relays the coaching; a short "Let me look." before the call is spoken.
  * ask_coach is answered by the caller's askCoach and then relayed by Ava. The lesson owns the mic gate (the session
  * starts gated): setPracticeMode(true) at attempt start, attemptFinished(attemptId) (or relayResult) at the end.
  *
@@ -46,8 +48,13 @@ export interface UseAvaRealtimeOptions {
   onLearnerSpeech?: () => void;
   /** Ava may speak only while this returns true (default always). Checked per text delta and per queued sentence. */
   canSpeak?: () => boolean;
-  /** Ava called learner_attempt(): the learner's last utterance was an attempt at the word (the board scores it). */
-  onLearnerAttempt?: () => void;
+  /**
+   * Ava called learner_attempt(): the learner's last utterance was an attempt. Measure it and resolve with Claude's
+   * coaching (submitted as the tool output). Absent, rejecting or undefined submits LEARNER_ATTEMPT_UNMEASURED.
+   */
+  onLearnerAttempt?: () => Promise<unknown>;
+  /** Ava called stay_quiet(): echo or noise, nothing to do. */
+  onStayQuiet?: () => void;
   /** Ava called ask_coach(question): answer it (the lesson asks the backend coach). */
   askCoach?: (question: string) => Promise<{ say: string }>;
   sessionOptions?: RealtimeSessionOptions;
@@ -66,7 +73,13 @@ const PENDING_EXPIRY_MS = 6000;
 const IDLE_POLL_MS = 80;
 
 /** Tools that only classify what the learner said; the model must stay silent after them. */
-const SILENT_TOOLS = new Set(['learner_attempt', 'stay_quiet']);
+const SILENT_TOOLS = new Set(['stay_quiet']);
+/** learner_attempt output when the lesson has no measurement (hook absent, failed or empty). */
+const LEARNER_ATTEMPT_UNMEASURED = {
+  measured: false,
+  caption: 'The board did not catch that try, so nothing was measured.',
+  instructions: 'Say briefly that nothing was measured this time and invite another try.',
+};
 const ASK_UNAVAILABLE = { unavailable: true, say: "I couldn't reach the coach just now. Let's keep practising." };
 
 const RESULT_INSTRUCTIONS =
@@ -91,7 +104,7 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
   });
   const splitters = useRef(new Map<string, SentenceSplitter>());
   const dropped = useRef(new Set<string>());
-  /** Responses that carried a silent tool call (learner_attempt / stay_quiet): their text is discarded. */
+  /** Responses that carried a silent tool call (stay_quiet): their text is discarded. */
   const silent = useRef(new Set<string>());
   /** Tool calls being answered; the session counts as busy meanwhile (ask_coach can outlast the pending expiry). */
   const toolsBusy = useRef(0);
@@ -167,16 +180,38 @@ export function useAvaRealtime(options: UseAvaRealtimeOptions) {
     for (const call of calls) {
       let output: unknown;
       if (SILENT_TOOLS.has(call.name)) {
-        // Classification only: acknowledge, no follow-up response. learner_attempt tells the lesson.
-        if (call.name === 'learner_attempt') {
-          try { opts.current.onLearnerAttempt?.(); } catch { /* caller errors never break the session */ }
-        }
+        // Classification only: tell the lesson, acknowledge, no follow-up response.
+        try { opts.current.onStayQuiet?.(); } catch { /* caller errors never break the session */ }
         session.submitToolResult(call.callId, { ok: true }, { respond: false });
         continue;
       }
       needsReply = true;
       try {
         switch (call.name) {
+          case 'learner_attempt': {
+            // Gate on (board owns the mic) while the lesson measures and Claude coaches, off again so the reply is not dropped.
+            // No stopSpeaking: a short "Let me look." may finish playing.
+            const gate = sessionRef.current === session;
+            if (gate) {
+              await session.setPracticeMode(true).catch(() => undefined);
+              setPractice(true);
+            }
+            try {
+              const hook = opts.current.onLearnerAttempt;
+              if (!hook) output = LEARNER_ATTEMPT_UNMEASURED;
+              else {
+                const r = await hook();
+                output = typeof r === 'string' ? r : r === undefined ? LEARNER_ATTEMPT_UNMEASURED : r;
+              }
+            } catch {
+              output = LEARNER_ATTEMPT_UNMEASURED;
+            }
+            if (gate && sessionRef.current === session) {
+              await session.setPracticeMode(false).catch(() => undefined);
+              setPractice(false);
+            }
+            break;
+          }
           case 'ask_coach': {
             const question = typeof call.args.question === 'string' ? call.args.question : '';
             const ask = opts.current.askCoach;

@@ -97,6 +97,14 @@ function takeIdle(): { ws: WebSocket; info: TokenResponse } | null {
   return null;
 }
 
+const fallbackListeners = new Set<(reason: string) => void>();
+
+/** Called once per line that falls back from Cartesia to the browser voice. Returns an unsubscribe. */
+export function onTeacherFallback(fn: (reason: string) => void): () => void {
+  fallbackListeners.add(fn);
+  return () => { fallbackListeners.delete(fn); };
+}
+
 /**
  * Fire-and-forget warm-up: cache a speech token and open an idle Cartesia socket so the next
  * speakTeacher starts without a connect delay. Silently does nothing if the token endpoint fails.
@@ -538,6 +546,10 @@ class Impl implements TeacherSpeech {
   // ---- browser fallback
 
   private startBrowser(reason: string): void {
+    console.warn('Cartesia unavailable; using the browser voice:', reason);
+    for (const fn of [...fallbackListeners]) {
+      try { fn(reason); } catch { /* listener errors never stop speech */ }
+    }
     if (typeof speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined') {
       this.emit('error', `${reason} Speech is unavailable in this browser.`);
       this.finish('finished');
