@@ -1,5 +1,10 @@
 import type { MouthDemo } from '@mouth-demo/src/mouth-demo.js';
 import avatarUrl from '@mouth-demo/public/avatars/brunette.glb?url';
+import posterUrl from '../assets/landing/sculptural-voice.png';
+import { attachDemo, noteDecision, reportChange, setGuideShown } from './quality';
+
+/** detect-gpu's benchmark tables, copied into public/ by scripts/copy-detect-gpu.mjs (no CDN at runtime). */
+const BENCHMARKS_URL = new URL(`${import.meta.env.BASE_URL}detect-gpu/benchmarks`, window.location.href).href.replace(/\/$/, '');
 
 /**
  * One guide for the whole session.
@@ -37,10 +42,29 @@ export function acquireGuide(host: HTMLElement, { startDispersed = false }: Acqu
   const el = node();
   host.append(el);
   holder = host;
+  setGuideShown(true);
   if (!loading) {
-    loading = import('@mouth-demo/src/mouth-demo.js')
-      // The particle head is the default look; `?style=hologram` on the page URL compares the painted lattice.
-      .then((m) => m.createMouthDemo(el, { avatarUrl, controls: false, style: 'particles', startDispersed }))
+    // The quality tier is decided first (once per tab session: `?quality=`, then the learner's stored
+    // choice, then the hardware); 'simple' builds no 3D at all. A pinned choice turns off automatic steps.
+    loading = Promise.all([import('@mouth-demo/src/quality.js'), import('@mouth-demo/src/mouth-demo.js')])
+      .then(async ([q, m]) => {
+        const decision = await q.detectTier({ benchmarksURL: BENCHMARKS_URL });
+        noteDecision(decision);
+        // The particle head is the default look; `?style=hologram` on the page URL compares the painted lattice.
+        const demo = await m.createMouthDemo(el, {
+          avatarUrl,
+          controls: false,
+          style: 'particles',
+          startDispersed,
+          quality: decision.tier,
+          adaptive: decision.source !== 'user',
+          qualityReason: decision.reason,
+          posterUrl,
+          onQualityChange: reportChange,
+        });
+        attachDemo(demo);
+        return demo;
+      })
       .catch((err: unknown) => {
         loading = null; // allow a retry on the next screen
         el.replaceChildren();
@@ -62,6 +86,7 @@ export function acquireGuide(host: HTMLElement, { startDispersed = false }: Acqu
 export function releaseGuide(host: HTMLElement) {
   if (holder !== host) return;
   holder = null;
+  setGuideShown(false);
   mount?.remove();
   loading?.then((demo) => {
     if (holder === null) demo.pause();

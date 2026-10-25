@@ -203,6 +203,7 @@ function connect(): void {
         ready = true;
         attempt = 0;
         startPresence();
+        early.splice(0).forEach((args) => emit(...args));
         try {
           c.db.telemetryEvent.onInsert((_ctx, row) => {
             if (conn !== c) return;
@@ -240,6 +241,24 @@ function ensureStarted(): void {
   if (disabled || started) return;
   started = true;
   connect();
+}
+
+/** Events raised before the first connection, held for emitWhenReady. */
+const early: Parameters<typeof emit>[] = [];
+const EARLY_MAX = 8;
+
+/**
+ * Like emit, but an event raised before the first connection is ready is held (up to 8) and sent once it is,
+ * for one-off facts decided at startup (e.g. ui.quality). Later events behave exactly like emit.
+ */
+export function emitWhenReady(...args: Parameters<typeof emit>): void {
+  if (disabled) return;
+  if (ready) {
+    emit(...args);
+    return;
+  }
+  ensureStarted();
+  if (early.length < EARLY_MAX) early.push(args);
 }
 
 /** Fire-and-forget; silently dropped when disconnected or when too many events are in flight. */
