@@ -117,6 +117,9 @@ export class RealtimeSession {
     timer: ReturnType<typeof setTimeout>;
   }> = [];
   private updateSeq = 0;
+  /** First assistant message item of each response, and each item's previous_item_id (for history repair). */
+  private assistantItems = new Map<string, string>();
+  private itemPrev = new Map<string, string | null>();
   private readonly opts: Required<Omit<RealtimeSessionOptions, 'micStream'>> & { micStream?: MediaStream };
   model: string | null = null;
 
@@ -231,6 +234,8 @@ export class RealtimeSession {
     this.pc = null;
     this.sender = null;
     this.activeResponse = null;
+    this.assistantItems.clear();
+    this.itemPrev.clear();
     this.setState('closed');
   }
 
@@ -362,6 +367,58 @@ export class RealtimeSession {
     this.send({ type: 'conversation.item.delete', item_id: itemId });
   }
 
+  /** The assistant message item (type 'message') of a response, once the server announced it. */
+  assistantItemFor(responseId: string): string | null {
+    return this.assistantItems.get(responseId) ?? null;
+  }
+
+  /**
+   * Replace an assistant message with only what was heard: delete it, then (heard non-empty) re-create it at the same
+   * position (previous_item_id of the deleted item, 'root' for the first item; position unknown = delete only) as "<heard> —".
+   * The re-created item gets a client-generated id, and every item that followed the deleted one is re-pointed at it
+   * (or at the deleted item's own predecessor on delete-only), so a second repair still knows its position.
+   * Empty heard just deletes.
+   */
+  replaceAssistantText(itemId: string, heard: string): void {
+    if (!itemId) return;
+    const known = this.itemPrev.has(itemId);
+    const prev = this.itemPrev.get(itemId);
+    this.itemPrev.delete(itemId);
+    for (const [r, i] of this.assistantItems) if (i === itemId) this.assistantItems.delete(r);
+    this.send({ type: 'conversation.item.delete', item_id: itemId });
+    const text = heard.trim();
+    // Position unknown: re-creating would append the shortened reply after later items, so only delete.
+    if (!known) return;
+    if (!text) {
+      for (const [k, v] of this.itemPrev) if (v === itemId) this.itemPrev.set(k, prev ?? null);
+      return;
+    }
+    // "item_" prefix and <= 32 chars: the shape the server's own ids have (the SDK types only say the id may be client-provided).
+    const newId = `item_rep${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`.slice(0, 32);
+    for (const [k, v] of this.itemPrev) if (v === itemId) this.itemPrev.set(k, newId);
+    this.itemPrev.set(newId, prev ?? null);
+    const event: Record<string, unknown> = {
+      type: 'conversation.item.create',
+      item: { id: newId, type: 'message', role: 'assistant', content: [{ type: 'output_text', text: `${text} —` }] },
+    };
+    // First item of the conversation (previous_item_id null): 'root' inserts at the beginning (OpenAI client events).
+    event.previous_item_id = prev ?? 'root';
+    this.send(event);
+  }
+
+  /** Remember the first assistant message item of a response. */
+  private noteAssistantItem(responseId: string, item: Record<string, unknown> | undefined): void {
+    if (item && item.type === 'message' && responseId && str(item.id) && !this.assistantItems.has(responseId)) {
+      this.assistantItems.set(responseId, str(item.id));
+      this.remember(this.assistantItems);
+    }
+  }
+
+  private remember(map: Map<string, unknown>): void {
+    // Bounded: only recent items matter for a barge-in.
+    while (map.size > 200) map.delete(map.keys().next().value as string);
+  }
+
   // ---- server events
 
   private onServerMessage(raw: unknown): void {
@@ -388,8 +445,26 @@ export class RealtimeSession {
       case 'response.output_text.done':
         this.emit('textDone', { responseId: str(ev.response_id), itemId: str(ev.item_id), text: str(ev.text) });
         break;
+      case 'conversation.item.added':
+      case 'conversation.item.created':
+      case 'conversation.item.done': {
+        // GA: added/done; beta: created. All carry previous_item_id.
+        const item = ev.item as Record<string, unknown> | undefined;
+        const id = str(item?.id);
+        const prev = ev.previous_item_id;
+        if (id && (typeof prev === 'string' || prev === null) && (prev !== null || !this.itemPrev.has(id))) {
+          this.itemPrev.set(id, prev);
+          this.remember(this.itemPrev);
+        }
+        break;
+      }
+      case 'response.output_item.added': {
+        this.noteAssistantItem(str(ev.response_id), ev.item as Record<string, unknown> | undefined);
+        break;
+      }
       case 'response.output_item.done': {
         const item = ev.item as Record<string, unknown> | undefined;
+        this.noteAssistantItem(str(ev.response_id), item);
         if (item && item.type === 'function_call') this.emit('functionCall', toCall(item, str(ev.response_id) || null));
         break;
       }

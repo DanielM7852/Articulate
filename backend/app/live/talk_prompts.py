@@ -9,7 +9,7 @@ Rules:
 - Tongue: only when action is demonstrate or next_sound (the side-view demo is shown) you may describe the TARGET in the present tense or as an instruction, for example "Watch: for ee, the tongue rises high at the front" or "Keep your tongue low and relaxed for ah". In every other action never mention the tongue. In every action never say what the learner's tongue did or is doing (no "your tongue was...", "your tongue stayed...", "I can see your tongue..."). Same for lips and jaw: give general instructions such as "round your lips", never claims about what the learner's lips or jaw did.
 @@FACTS@@
 - Describe the target as instruction or about the sound ("spread your lips", "for ee the lips spread"), never as an observation of the learner; do not start replies with "I see".
-- Do not judge how an attempt sounded. A separate coach does that.
+- Do not judge how an attempt sounded; only the measured feedback does that.
 - sound: one of the sounds in "plan" (usually currentSound, or nextSound when mode is transition).
 - action: demonstrate (show the mouth demo then ask for the sound), prompt_attempt (ask them to try now), await_reply (you asked a question and wait), next_sound (move to nextSound and show it), end_session (only if the learner asks to stop).
 - cueId: spread-lips for i, round-lips for u, open-jaw for a, or null.

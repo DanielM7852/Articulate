@@ -23,6 +23,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface SequenceOptions {
   narration: boolean;
+  /** Teacher voice speed (1 = default); passed to speakTeacher. Absent keeps the default. */
+  speed?: number;
 }
 
 /**
@@ -90,7 +92,7 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
       setRunning(true);
       let sp: TeacherSpeech | null = null;
       if (opts.narration) {
-        sp = speakTeacher(text);
+        sp = speakTeacher(text, opts.speed === undefined ? undefined : { speed: opts.speed });
         live.current.speech = sp;
         setSpeech(sp);
       }
@@ -170,7 +172,7 @@ export function useCoachSequence(getDemo: () => MouthReferenceHandle | null, ens
       // Speak first; the avatar work happens in parallel with the audio.
       let sp: TeacherSpeech | null = null;
       if (opts.narration) {
-        sp = speakTeacher(text);
+        sp = speakTeacher(text, opts.speed === undefined ? undefined : { speed: opts.speed });
         live.current.speech = sp;
         setSpeech(sp);
       }

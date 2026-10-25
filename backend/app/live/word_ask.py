@@ -1,4 +1,4 @@
-"""Answer a learner's question about the word lesson (Ava's ask_coach tool) with the Claude speech coach.
+"""Answer a learner's question about the word lesson (Ava's think_it_through tool) with the Claude speech coach.
 
 The question is untrusted data. The answer is validated like every other line Ava speaks; any failure returns a
 deterministic fallback, so the caller never sees a model problem.
