@@ -33,6 +33,23 @@ class LearnerHistory(Protocol):
 
     async def record_articulation(self, profile_id: str, attempt_id: str, sound: str, features: dict) -> bool: ...
 
+    async def get_about(self, profile_id: str) -> str | None: ...
+
+    async def set_about(self, profile_id: str, text: str | None) -> bool: ...
+
+
+LEGACY_ABOUT_KEY = "aboutMe"  # rev1 kept the text inside notes; read once as a fallback, never written
+
+
+def _about_text(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def about_key(profile_id: str) -> str:
+    """Spacetime learner_note key for the learner's about text. A fixed-length hash after "about:" keeps it inside the
+    reducer's [A-Za-z0-9_.:@-]{1,64} rule whatever the profile id length, and apart from real ids ("learner-<hex>")."""
+    return "about:" + hashlib.sha256(profile_id.encode()).hexdigest()[:32]
+
 
 MODEL_LOOKBACK = 200  # turns the learner model is built from
 ARTIC_LOOKBACK = 3  # load limit * 3 attempts so older on_target anchors are available to annotate_attempts
@@ -142,7 +159,9 @@ class LocalHistory:
         }
         compacts = [compact_attempt(t.get("summary") or {}, t.get("decision")) for t in recent]
         context = _split(compacts, features, limit)
-        context.notes = data.get("notes") if isinstance(data.get("notes"), dict) else None
+        notes = data.get("notes")
+        if isinstance(notes, dict):  # a rev1 file may still carry the about text; the coach must never see it
+            context.notes = {k: v for k, v in notes.items() if k != LEGACY_ABOUT_KEY} or None
         return context
 
     async def record(self, profile_id: str, attempt_id: str, summary: dict, decision: dict) -> bool:
@@ -181,7 +200,7 @@ class LocalHistory:
 
     async def save_notes(self, profile_id: str, notes: dict) -> bool:
         def work() -> None:
-            data = self._read(profile_id)
+            data = self._read(profile_id)  # keeps every other top-level key, including "about"
             data["notes"] = notes
             self._write(profile_id, data)
 
@@ -191,6 +210,37 @@ class LocalHistory:
             return True
         except OSError as exc:
             logger.warning("local notes write failed: %s", type(exc).__name__)
+            return False
+
+    async def get_about(self, profile_id: str) -> str | None:
+        try:
+            async with self._lock(profile_id):
+                data = await asyncio.to_thread(self._read, profile_id)
+        except OSError:
+            return None
+        about = _about_text(data.get("about"))
+        if about is None and isinstance(data.get("notes"), dict):
+            about = _about_text(data["notes"].get(LEGACY_ABOUT_KEY))  # rev1 dev files
+        return about
+
+    async def set_about(self, profile_id: str, text: str | None) -> bool:
+        def work() -> None:
+            data = self._read(profile_id)
+            if text:
+                data["about"] = text
+            else:
+                data.pop("about", None)
+            notes = data.get("notes")
+            if isinstance(notes, dict) and LEGACY_ABOUT_KEY in notes:
+                data["notes"] = {k: v for k, v in notes.items() if k != LEGACY_ABOUT_KEY}
+            self._write(profile_id, data)
+
+        try:
+            async with self._lock(profile_id):
+                await asyncio.to_thread(work)
+            return True
+        except OSError as exc:
+            logger.warning("local about write failed: %s", type(exc).__name__)
             return False
 
 
@@ -234,13 +284,15 @@ class SpacetimeHistory:
         context = _split(attempts, features, limit)
         notes = None
         try:
-            note_rows = await self._client.sql(f"SELECT * FROM learner_note WHERE profile_id = {lit}")
-            if note_rows:
-                notes = _loads(note_rows[0].get("notes")) or None
+            notes = await self._read_notes(lit)
         except Exception as exc:  # noqa: BLE001
             logger.warning("learner note read failed: %s", type(exc).__name__)
-        context.notes = notes
+        context.notes = notes or None
         return context
+
+    async def _read_notes(self, lit: str) -> dict[str, Any]:
+        note_rows = await self._client.sql(f"SELECT * FROM learner_note WHERE profile_id = {lit}")
+        return _loads(note_rows[0].get("notes")) if note_rows else {}
 
     async def record(self, profile_id: str, attempt_id: str, summary: dict, decision: dict) -> bool:
         try:
@@ -269,6 +321,23 @@ class SpacetimeHistory:
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning("set_learner_note failed: %s", type(exc).__name__)
+            return False
+
+    async def get_about(self, profile_id: str) -> str | None:
+        profile_literal(profile_id)  # validates the id
+        rows = await self._client.sql(
+            f"SELECT notes FROM learner_note WHERE profile_id = {profile_literal(about_key(profile_id))}")
+        about = _loads(rows[0].get("notes")).get("text") if rows else None
+        return _about_text(about)
+
+    async def set_about(self, profile_id: str, text: str | None) -> bool:
+        try:
+            profile_literal(profile_id)
+            body = json.dumps({"text": text or ""}, separators=(",", ":"))
+            await self._client.call("set_learner_note", [about_key(profile_id), body])
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("set_about failed: %s", type(exc).__name__)
             return False
 
 

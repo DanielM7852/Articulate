@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Mail } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Mail, MessageSquareText } from 'lucide-react';
 import {
   RecapHttpError, emailRecap, getRecap, rememberRecapEmail, rememberedRecapEmail,
   type Recap, type RecapEmailStatus, type RecapStatus, type RecapTrend,
@@ -286,7 +286,12 @@ export default function RecapScreen() {
             }
           }}
         />
-        <div className="recap-foot">{homeButton}</div>
+        <div className="recap-foot btn-row">
+          <Link className="btn btn--primary" to={`/phrases?recap=${encodeURIComponent(recapId)}`}>
+            <MessageSquareText size={16} aria-hidden="true" /> Practise in your own words
+          </Link>
+          {homeButton}
+        </div>
       </>
     );
   } else {

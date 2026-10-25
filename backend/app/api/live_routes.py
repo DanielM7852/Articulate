@@ -19,6 +19,7 @@ from app.live.consonant import ConsonantRequest, ConsonantResponse, coach_conson
 from app.live.coordination import Coordination
 from app.live.identity import authorize_profile, issue_identity, read_identity
 from app.live.notes import update_notes
+from app.live import phrases
 from app.live.orchestrator import LiveDeps, coach_attempt
 from app.live.recap import RecapEmailRequest, RecapLimitError, RecapRequest, RecapStatus, get_service as get_recap_service
 from app.live.runtime import get_runtime
@@ -399,3 +400,42 @@ async def live_recap_email(recapId: str, body: RecapEmailRequest, request: Reque
     entry = _recap_entry(request, recapId, body.profileId)
     await get_recap_service(request.app).set_email(entry, body.email)
     return entry.view()
+
+
+@router.get("/about", response_model=phrases.AboutResponse)
+async def live_about_get(profileId: str, request: Request) -> phrases.AboutResponse:
+    if not valid_profile_id(profileId):
+        raise HTTPException(422, "profileId must match [A-Za-z0-9_.:@-]{1,64}")
+    authorize_profile(request, profileId)
+    return phrases.AboutResponse(aboutMe=await phrases.get_service(request.app).get_about(profileId))
+
+
+@router.put("/about", response_model=phrases.AboutResponse)
+async def live_about_put(body: phrases.AboutPut, request: Request) -> phrases.AboutResponse:
+    authorize_profile(request, body.profileId)
+    about = phrases.clean_about(body.aboutMe)
+    if not await phrases.get_service(request.app).set_about(body.profileId, about):
+        raise HTTPException(503, "about_unavailable")
+    return phrases.AboutResponse(aboutMe=about)
+
+
+@router.post("/phrases", response_model=phrases.PhrasesResponse)
+async def live_phrases(body: phrases.PhrasesRequest, request: Request) -> phrases.PhrasesResponse:
+    """Five practice phrases drawn from the learner's life, aimed at their focus sounds."""
+    authorize_profile(request, body.profileId)
+    try:
+        return phrases.PhrasesResponse(phrases=await phrases.get_service(request.app).generate(body))
+    except phrases.PhraseLimitError:
+        raise HTTPException(429, "phrase_limit") from None
+    except phrases.PhrasesUnavailable:
+        raise HTTPException(502, "phrases_unavailable") from None
+
+
+@router.post("/phrases/assess", response_model=phrases.AssessResponse)
+async def live_phrases_assess(body: phrases.AssessRequest, request: Request) -> phrases.AssessResponse:
+    """A gentle per-word check of one spoken phrase. Never returns numbers; audio and text are not logged."""
+    authorize_profile(request, body.profileId)
+    try:
+        return await phrases.get_service(request.app).assess(body)
+    except phrases.AssessLimitError:
+        raise HTTPException(429, "assess_limit") from None
