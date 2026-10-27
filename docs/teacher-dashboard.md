@@ -28,7 +28,7 @@ Nobody logs in or joins anything in the learner app. When a learner taps **Begin
 - The name is display only. It grants nothing: the route only mints the role it is asked for, a learner identity cannot call teacher reducers, and nothing turns a learner into a teacher. The development route still mints a teacher identity for anyone who asks for `role: teacher` on a host where it is enabled; that is the existing development login, not something the virtual learner adds.
 - The default classroom is `VITE_CLASSROOM_DEFAULT` in `web/.env` (falls back to `room-1`).
 - A virtual learner keeps the usual onboarding (greeting, survey, tutorial). The classroom flow (the teacher greeting, straight to practice, no survey) applies to an explicit class join, or once a teacher has assigned that learner a lesson (a learner override or a classroom assignment, not the default plan). `LessonSync` records that per profile when the lesson arrives.
-- The route's guard is where the database lives, not who calls: it serves any caller when the owner URI in `classroom_owner.json` is `127.0.0.1` or `localhost`, and refuses (404) when the owner points anywhere else, such as Maincloud. That covers local development and the deployed teaching console (`deploy/teach`), whose database runs on `127.0.0.1` in the same container while nginx proxies `/v1/dev/` from the public host.
+- The route's guard is where the database lives, not who calls: it serves any caller when the owner URI is `127.0.0.1` or `localhost`, and refuses (404) when the owner points anywhere else, such as Maincloud, unless `CLASSROOM_DEV_IDENTITIES=true`. That covers local development and the deployed teaching console (`deploy/teach`), whose database runs on `127.0.0.1` in the same container while nginx proxies `/v1/dev/` from the public host.
 
 ## Run it locally
 
@@ -76,20 +76,20 @@ The simulator uses the real reducers and subscriptions, separate synthetic ident
 
 The lesson reducer body was 254 bytes. A classroom assignment reached the other members of that room. Another teacher's board did not. Forty presence calls from one learner overlapped a save to another learner and did not produce a reducer error. Summary timing can include one 20 ms poll. These are local transport numbers, not a capacity limit for a hosted classroom.
 
-## Maincloud, not deployed
+## Maincloud
 
-Publish a new database name. Do not point this at an existing production database, and do not use `--delete-data`.
+By default the classroom uses the backend's SpacetimeDB database (`articulate-live` on Maincloud, `SPACETIME_DATABASE`), and `SPACETIME_TOKEN` is the owner that calls the backend-only reducers (`mint_invite`, `commit_verified_summary`). `classroom_owner.json` in the store still overrides this for a local server. `CLASSROOM_DATABASE` and `CLASSROOM_URI` point the classroom at a different database or server. The module is already published to `articulate-live`. To publish it to another database, use a new name. Do not point this at an existing production database, and do not use `--delete-data`.
 
 ```powershell
 .tools\spacetime\spacetimedb-cli.exe publish articulate-classroom --server maincloud --module-path spacetimedb --yes=skip-login
 ```
 
-Put that database's publisher token only in the server environment, not in the browser. The development routes stay off for this database: they refuse an owner URI that is not `127.0.0.1` or `localhost`, so virtual learners are not minted against Maincloud. Generate bindings with `spacetime generate --lang typescript --out-dir web/src/module_bindings --module-path spacetimedb`. Then run the auth test against that database before sending teachers to it.
+Put the owner token only in the server environment, not in the browser. The development routes stay off for a non-local owner unless `CLASSROOM_DEV_IDENTITIES=true`; with it, any visitor can mint a development teacher or learner identity there, so it is a dev login, not production auth. The RunPod image sets it. The identity roster is kept in `dev_classroom.json` under `STORE_DIR`, with keys scoped by database and host for a non-local owner. Generate bindings with `spacetime generate --lang typescript --out-dir web/src/module_bindings --module-path spacetimedb`. Then run the auth test against that database before sending teachers to it.
 
 ## Limits
 
 - One teacher identity per classroom in this version.
-- The development invite route works only when the classroom database runs beside the backend (owner URI on `127.0.0.1` or `localhost`): local development and `deploy/teach`.
+- The development invite route works when the classroom database runs beside the backend (owner URI on `127.0.0.1` or `localhost`: local development and `deploy/teach`) or when `CLASSROOM_DEV_IDENTITIES=true`.
 - An acknowledgment means the lesson was received or applied, not that the learner understood it.
 - A lesson that arrives during recording waits until the take ends. The attempt keeps the revision it started with.
 - Reconnect shows the current lesson again and does not speak it.

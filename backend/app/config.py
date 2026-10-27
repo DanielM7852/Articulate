@@ -107,8 +107,18 @@ class Settings(BaseSettings):
     # The deployed console proxies this same host to the classroom database.
     # Local sign-in leaves this off and keeps the database URI from the owner file.
     classroom_public_from_host: bool = False
+    # Classroom database name; blank uses SPACETIME_DATABASE (owner is SPACETIME_TOKEN unless classroom_owner.json exists).
+    classroom_database: str | None = None
+    # Classroom database server URI; blank uses SPACETIME_URI.
+    classroom_uri: str | None = None
+    # Open the development sign-in routes on a non-local classroom database (a dev login, not production auth).
+    classroom_dev_identities: bool = False
     # Built web/dist to serve at / (single-container hosting). Blank or a missing directory keeps the API-only app.
     static_dir: str = ""
+    # Base URL of the local phone-recognition service (e.g. http://127.0.0.1:8020); blank disables the /phones relay.
+    phones_url: str = ""
+    # Extra browser Origin pattern (fullmatch) allowed on the /phones/ws relay, beyond same-host and CORS origins.
+    phones_proxy_origin_regex: str = ""
 
     # Engineering comparison thresholds. See docs/backend-contract.md.
     ending_direction_st: float = 1.5

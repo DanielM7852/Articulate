@@ -2,6 +2,8 @@
 # One image for a RunPod GPU Pod (see deploy/runpod/README.md):
 #   - the built React app (web/) and the FastAPI backend (backend/) on one HTTP port, 8000
 #   - the SPARC articulation collector (services/articulation) on 127.0.0.1:8010, inside the container
+#   - the phone-recognition service (services/phones, KoelLabs/xlsr-english-01, torch FP16 on CUDA) on
+#     127.0.0.1:8020, inside the container; the browser reaches it only via the backend's /phones relay
 # Build from the repository root, because web/ aliases ../mouth-demo and ../vowel-mapper:
 #   docker build -t <dockerhub-user>/articulate:<tag> .
 
@@ -12,11 +14,16 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # The browser talks to SpacetimeDB directly; Vite bakes these into the bundle. Defaults match the app's.
 ARG VITE_SPACETIME_URI=wss://maincloud.spacetimedb.com
 ARG VITE_SPACETIME_DATABASE=articulate-live
+# 'same-origin' = the web app reaches the phone service through the backend relay (/phones/ws, /phones).
+ARG VITE_PHONES_WS=same-origin
+ARG VITE_PHONES_HTTP=same-origin
 COPY web/package.json web/package-lock.json web/
 RUN cd web && npm ci --no-audit --no-fund
 COPY web web
 COPY mouth-demo mouth-demo
 COPY vowel-mapper vowel-mapper
+# web aliases @lesson-rules to the classroom module's lessonRules.ts.
+COPY spacetimedb/src spacetimedb/src
 # `build` runs `tsc --noEmit` first, then copies the MediaPipe wasm into public/ and runs vite build.
 RUN cd web && npm run build
 
@@ -51,6 +58,15 @@ RUN if [ "$PREPARE_MODELS" = "1" ]; then python -m articulate_models prepare; fi
 COPY backend backend
 RUN pip install -e ./backend
 
+# Phone service, run from source (its pyproject wants Python 3.12, the base image may be older, so it is
+# NOT pip-installed). Only what the collector's pins don't already provide: websockets for the /ws stream.
+# No onnx/tensorrt: engine.py imports them lazily and PHONES_BACKEND=auto falls back to torch FP16 on CUDA.
+# The model is gated and AGPL, so neither the HF token nor the weights are ever baked in; the entrypoint
+# downloads them into the /workspace volume at pod start.
+COPY services/phones/src services/phones/src
+COPY services/phones/scripts services/phones/scripts
+RUN python -c "import sys; sys.path.insert(0,'/app/services/phones/src'); import phones.app, phones.engine; print('phones import ok')"
+
 COPY --from=web /src/web/dist /app/web/dist
 COPY deploy/entrypoint.sh /app/deploy/entrypoint.sh
 # Strip CRLF in case the context came from a Windows checkout with autocrlf.
@@ -61,7 +77,14 @@ ENV STATIC_DIR=/app/web/dist \
     ARTICULATION_URL=http://127.0.0.1:8010 \
     STORE_DIR=/app/data/store \
     HOST=0.0.0.0 \
-    PORT=8000
+    PORT=8000 \
+    PHONES_URL=http://127.0.0.1:8020 \
+    PHONES_PORT=8020 \
+    PHONES_BACKEND=auto \
+    PHONES_MODELS_DIR=/workspace/phones-models \
+    PHONES_ENGINES_DIR=/workspace/phones-engines
+# Single quotes keep the backslash-free regex and the trailing $ literal (no Docker expansion).
+ENV PHONES_PROXY_ORIGIN_REGEX='^https://[a-z0-9]+-8000[.]proxy[.]runpod[.]net$'
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 ENTRYPOINT ["/app/deploy/entrypoint.sh"]

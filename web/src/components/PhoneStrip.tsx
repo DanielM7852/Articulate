@@ -14,7 +14,7 @@ export interface PhoneStripProps {
   /** Changing this value sends a reset to the service and clears the strip and checklist. */
   resetKey?: unknown;
   onPhones?(committed: Phone[]): void;
-  /** Override the service URL (defaults to VITE_PHONES_WS, then ws://127.0.0.1:8020/ws/phones). */
+  /** Override the service URL (defaults to VITE_PHONES_WS: a ws(s) URL, or `same-origin` for the page's own /phones/ws; unset means ws://127.0.0.1:8020/ws/phones). */
   url?: string;
 }
 

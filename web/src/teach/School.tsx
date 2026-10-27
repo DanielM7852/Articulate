@@ -32,6 +32,7 @@ export default function School() {
   const [phase, setPhase] = useState<'connecting' | 'ready' | 'writing' | 'applied' | 'error'>('connecting');
   const [ackMs, setAckMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [database, setDatabase] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const gate = useRef<Gate>({ armed: false });
   const seatsRef = useRef<Seat[]>([]);
@@ -40,11 +41,14 @@ export default function School() {
     let cancelled = false;
     const gateRef = gate.current;
     loadScale()
-      .then((school) => openSeats(school.rooms, gateRef, (ready) => {
-        if (!cancelled) setConnected(ready);
-      }, () => {
-        if (!cancelled) setTick((value) => value + 1);
-      }))
+      .then((school) => {
+        if (!cancelled) setDatabase(school.database || null);
+        return openSeats(school.rooms, gateRef, (ready) => {
+          if (!cancelled) setConnected(ready);
+        }, () => {
+          if (!cancelled) setTick((value) => value + 1);
+        });
+      })
       .then((opened) => {
         if (cancelled) {
           closeSeats(opened);
@@ -98,7 +102,7 @@ export default function School() {
         <h1 id="school-title">One database for the school</h1>
         <p>
           Twelve rooms, each with a teacher subscribed to <span className="school-db">classroom_board</span> and a learner subscribed to <span className="school-db">my_classroom_lesson</span>.
-          They are rows in <span className="school-db">articulate-classroom</span>, separate from the classroom open on the Classroom tab.
+          They are rows in <span className="school-db">{database ?? 'the classroom database'}</span>, separate from the classroom open on the Classroom tab.
         </p>
         <button type="button" className="btn btn--primary" aria-pressed={target === 12} disabled={phase === 'connecting' || phase === 'writing' || seats.length === 0} onClick={() => void assign(12)}>
           {phase === 'connecting' ? `Connecting ${connected} of 24` : phase === 'writing' ? 'Writing' : 'Assign to room 12'}
@@ -106,7 +110,7 @@ export default function School() {
       </header>
       <div className="school-layout">
         <div className="school-board">
-          <p className="school-db-bar">One database · articulate-classroom</p>
+          <p className="school-db-bar">One database · {database ?? 'classroom database'}</p>
           <div className="school-rooms" role="list">
             {(seats.length > 0 ? seats : Array.from({ length: 12 }, (_, index) => ({ id: index + 1, classroomId: `scale-${index + 1}`, updates: 0 }))).map((room) => {
               const live = 'teacher' in room;

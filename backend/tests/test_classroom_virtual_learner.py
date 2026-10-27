@@ -102,7 +102,7 @@ def test_non_local_owner_still_refuses_both_roles(tmp_path, minted, role):
 
 
 def test_no_owner_refuses_quietly(tmp_path, minted):
-    client = teach_service(make_settings(tmp_path))
+    client = teach_service(make_settings(tmp_path, spacetime_token=None, spacetime_database=None))
     r = client.post("/v1/dev/classroom/session", json={"role": "learner", "name": "learner-k3f9", "classroom": "room-1"})
     assert r.status_code == 404
     assert minted == []
