@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import playwright from "@playwright/test";
+const { test, expect } = playwright;
 test("fixture attempt, caption, audio, retry, interruption, history and reconnect", async ({
   page,
 }) => {
