@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1
+# GPU-only image for an AWS g4dn.xlarge (NVIDIA T4): ONLY the two GPU services, no web build, no backend.
+#   - SPARC articulation collector (services/articulation) on 0.0.0.0:8010
+#   - phone-recognition service (services/phones, KoelLabs/xlsr-english-01, torch FP16 on CUDA) on 0.0.0.0:8020
+# A separate always-on web/backend box relays to them over the VPC (security group: that box only).
+# Build from the repository root (linux/amd64 for EC2):
+#   docker buildx build --platform linux/amd64 -f deploy/Dockerfile.gpu -t articulate-gpu:dev --load .
+# See deploy/aws/README-gpu.md.
+FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONUNBUFFERED=1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libsndfile1 ffmpeg git ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+# Collector. torch==2.8.0 is already satisfied by the base image's CUDA build; the assert fails the
+# build if a CPU-only torch ever replaced it.
+COPY services/articulation services/articulation
+RUN pip install --extra-index-url https://download.pytorch.org/whl/cu128 "./services/articulation[models]" \
+ && python -c "import torch, torchaudio; assert torch.version.cuda, torch.__version__; print('torch', torch.__version__, 'cuda', torch.version.cuda)"
+
+# Pinned SPARC / ARTI-6 / Silero weights baked in (they are not gated). PREPARE_MODELS=0 skips this;
+# the entrypoint then downloads them on first start (into ARTICULATION_MODELS_DIR).
+ENV ARTICULATION_MODELS_DIR=/app/models
+ARG PREPARE_MODELS=1
+RUN if [ "$PREPARE_MODELS" = "1" ]; then python -m articulate_models prepare; fi
+
+# Phone service, run from source (not pip-installed; see the root Dockerfile). No onnx/tensorrt:
+# PHONES_BACKEND=auto falls back to torch FP16 on CUDA. The model is gated and AGPL: neither the HF
+# token nor the weights are baked in; they are downloaded into the /data volume at first start.
+# websockets: uvicorn needs it to serve /ws/phones (the collector's pins don't pull it in), and ws_smoke.py uses it.
+RUN pip install "websockets>=12"
+COPY services/phones/src services/phones/src
+COPY services/phones/scripts services/phones/scripts
+RUN python -c "import sys; sys.path.insert(0,'/app/services/phones/src'); import phones.app, phones.engine; print('phones import ok')"
+
+COPY deploy/aws/gpu-entrypoint.sh /app/deploy/gpu-entrypoint.sh
+COPY deploy/aws/gpu-smoke.sh /app/deploy/gpu-smoke.sh
+RUN sed -i 's/\r$//' /app/deploy/gpu-entrypoint.sh /app/deploy/gpu-smoke.sh \
+ && chmod +x /app/deploy/gpu-entrypoint.sh /app/deploy/gpu-smoke.sh \
+ && mkdir -p /data
+
+ENV ARTICULATION_PORT=8010 \
+    PHONES_PORT=8020 \
+    PHONES_BACKEND=auto \
+    PHONES_MODEL_ID=KoelLabs/xlsr-english-01 \
+    PHONES_MODELS_DIR=/data/phones-models \
+    PHONES_ENGINES_DIR=/data/phones-engines
+VOLUME ["/data"]
+EXPOSE 8010 8020
+# Passes when phones answers /health with ok:true; if phones is intentionally absent (no model, no
+# token) it checks articulation instead so the container still reports healthy for what it serves.
+# A long start period covers the first-boot ~1.2 GB model download.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 CMD ["/app/deploy/gpu-entrypoint.sh", "--healthcheck"]
+ENTRYPOINT ["/app/deploy/gpu-entrypoint.sh"]
