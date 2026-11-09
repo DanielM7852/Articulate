@@ -1,0 +1,21 @@
+# Caddy gets and renews the Let's Encrypt certificate for $SITE_DOMAIN automatically (ports 80 and 443
+# must be open). WebSocket upgrades (/phones/ws) pass through reverse_proxy with no extra config, and Host
+# is forwarded unchanged, which the /phones/ws origin check relies on.
+{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# The page needs the microphone (practice) and camera (mouth tracking) on its own origin.
+		Permissions-Policy "microphone=(self), camera=(self), geolocation=()"
+		X-Frame-Options "SAMEORIGIN"
+		-Server
+	}
+
+	reverse_proxy app:8000 {
+		# Long-lived streams (phones WebSocket, coach responses) must not be buffered or cut.
+		flush_interval -1
+	}
+}

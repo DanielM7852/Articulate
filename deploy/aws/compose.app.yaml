@@ -1,0 +1,47 @@
+# Public demo on one Lightsail box: Caddy (HTTPS) -> app (web + API). Run from the repo root:
+#   docker compose -f deploy/aws/compose.app.yaml up -d --build
+# Needs deploy/aws/app.env (copy app.env.example) and SITE_DOMAIN in the environment or in
+# deploy/aws/.env (compose reads the .env next to the compose file's project directory).
+name: articulate-app
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile.app
+    image: articulate-app:dev
+    env_file: app.env
+    # No published ports: only Caddy reaches the app, over the compose network.
+    expose:
+      - "8000"
+    restart: unless-stopped
+    volumes:
+      - app_store:/app/data/store
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  caddy:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?set SITE_DOMAIN, e.g. demo.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  app_store:
+  caddy_data:
+  caddy_config:
