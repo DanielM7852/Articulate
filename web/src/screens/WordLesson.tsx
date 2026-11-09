@@ -28,6 +28,7 @@ import { isClose, unitDurationMs } from '../game/ghost/follow';
 import { ghostModel } from '../game/ghost/models';
 import { MAX_TRIES, lessonPlan, nextStep, skipStep, startProgress, stepLabel, type LessonStep, type ProgressResult, type ProgressState } from '../game/ghost/plan';
 import { DEFAULT_FACTOR } from '../game/ghost/voice';
+import { lessonWordKeys } from '../demoMvp';
 import { GHOST_WORDS, partPrompt, type GhostWordSpec } from '../game/ghost/words';
 import type { WordAttemptResult } from '../game/types';
 import { useAppState } from '../state/AppState';
@@ -64,7 +65,7 @@ import '../styles/word-lesson.css';
  */
 type Phase = 'setup' | 'intro' | 'watch' | 'cue' | 'live' | 'thinking' | 'coaching' | 'ready' | 'done';
 
-const WORD_KEYS = Object.keys(GHOST_WORDS);
+const WORD_KEYS = lessonWordKeys(Object.keys(GHOST_WORDS));
 const DEFAULT_WORD = 'track';
 
 interface WordData {

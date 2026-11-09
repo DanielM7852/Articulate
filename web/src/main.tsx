@@ -18,6 +18,7 @@ import { startVirtualLearner } from './classroom/autoJoin';
 import { OpenLiveConsole } from './teach/OpenLiveConsole';
 import RecapScreen from './screens/RecapScreen';
 import PhrasesScreen from './screens/PhrasesScreen';
+import { DEMO_MVP } from './demoMvp';
 
 /**
  * Flow: the guide greets the learner, then the quiz, then a tutorial where the
@@ -43,8 +44,9 @@ createRoot(document.getElementById('root')!).render(
       <HashRouter>
         <Routes>
           <Route path="/" element={<Intro />} />
-          <Route path="/quiz/:step" element={<Quiz />} />
-          <Route path="/quiz" element={<Navigate to="/quiz/1" replace />} />
+          {/* The demo build has no survey: /quiz/* goes back to the greeting, which leads to the tutorial. */}
+          <Route path="/quiz/:step" element={DEMO_MVP ? <Navigate to="/" replace /> : <Quiz />} />
+          <Route path="/quiz" element={<Navigate to={DEMO_MVP ? '/' : '/quiz/1'} replace />} />
           <Route path="/tutorial" element={<Guard need="quiz"><Tutorial /></Guard>} />
           <Route path="/lesson" element={<Guard need="quiz"><WordLesson /></Guard>} />
           <Route path="/practice" element={<Guard need="tutorial"><PracticeStudio /></Guard>} />

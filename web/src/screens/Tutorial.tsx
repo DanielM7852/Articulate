@@ -8,6 +8,7 @@ import { MouthReference } from '../components/MouthReference';
 import { CaptionBar, useNarration } from '../components/Narration';
 import { OnboardingFrame, ONBOARDING_STEPS } from '../components/Onboarding';
 import { VowelGraph } from '../components/VowelGraph';
+import { DEMO_MVP } from '../demoMvp';
 import { useAppState } from '../state/AppState';
 import { HOLD_GOAL_SEC, inTarget, targetsFor, type VowelTarget } from '../vowel/targets';
 import { useStoredVoice } from '../audio/useStoredVoice';
@@ -108,7 +109,7 @@ export default function Tutorial() {
 
   const finish = () => {
     completeOnboarding();
-    navigate('/practice');
+    navigate(DEMO_MVP ? '/lesson' : '/practice'); // the demo build goes straight to the word lessons
   };
 
   // Each phase speaks its line; scripted phases advance when the line ends.

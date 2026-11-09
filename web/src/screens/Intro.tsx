@@ -8,6 +8,7 @@ import { prepareTeacher, speakTeacher, unlockTeacherAudio, type TeacherSpeech } 
 import type { SpeechHandle } from '@mouth-demo/src/mouth-demo.js';
 import { IdentityForm } from '../classroom/IdentityForm';
 import { classroomFlow, loadSession } from '../classroom/session';
+import { DEMO_MVP } from '../demoMvp';
 import { useAppState } from '../state/AppState';
 import { useFaceTracking, usePointerLook } from '../vision/useLook';
 import brandMark from '../assets/landing/brand-mark.svg';
@@ -162,7 +163,7 @@ function useGuideVoice(guide: RefObject<MouthReferenceHandle | null>, narration:
 
 export default function Intro() {
   const go = useStepNav();
-  const { onboarded, audio, skipClassroomSurvey } = useAppState();
+  const { onboarded, audio, skipClassroomSurvey, completeQuiz } = useAppState();
   // An explicit class join already has its identity; everyone else gets the optional name and a silent virtual learner.
   const [joined] = useState(() => {
     const session = loadSession();
@@ -244,7 +245,7 @@ export default function Intro() {
           go('/practice');
         });
       } else if (onboarded) play(WELCOME_BACK, () => go('/lesson'));
-      else play(GREETING, () => setPhase('leaving'));
+      else play(DEMO_MVP ? GREETING.slice(0, 1) : GREETING, () => setPhase('leaving')); // the demo has no survey to announce
     });
     return () => {
       current = false;
@@ -261,6 +262,11 @@ export default function Intro() {
       if (classroomFlow()) {
         skipClassroomSurvey();
         go('/practice');
+        return;
+      }
+      if (DEMO_MVP) {
+        completeQuiz(); // no survey in the demo: straight to the tutorial
+        go('/tutorial');
         return;
       }
       go('/quiz/1');
