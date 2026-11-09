@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.classroom_routes import router as classroom_router
 from app.api.live_routes import health_router, router as live_router
 from app.api.phones_proxy import router as phones_proxy_router
+from app.api.rate_limit import RateLimitMiddleware
 from app.api.routes import router
 from app.realtime.routes import router as realtime_router
 from app.config import Settings, get_settings
@@ -77,6 +78,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=_lifespan,
         summary="Pitch comparison and one grounded practice cue for a short intonation phrase.",
     )
+    if active.rate_limits_enabled:
+        # Added before CORS so CORS wraps it and a 429 still carries the CORS headers.
+        app.add_middleware(RateLimitMiddleware, settings=active)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=active.cors_origin_list,

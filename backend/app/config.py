@@ -120,6 +120,16 @@ class Settings(BaseSettings):
     # Extra browser Origin pattern (fullmatch) allowed on the /phones/ws relay, beyond same-host and CORS origins.
     phones_proxy_origin_regex: str = ""
 
+    # Public-demo abuse guard (app/api/rate_limit.py). Off by default; limits are per hour, per process.
+    rate_limits_enabled: bool = False
+    rate_limit_realtime_per_ip_hour: int = Field(default=6, ge=1)
+    rate_limit_realtime_global_hour: int = Field(default=60, ge=1)
+    rate_limit_coach_per_ip_hour: int = Field(default=240, ge=1)
+    rate_limit_coach_global_hour: int = Field(default=2400, ge=1)
+    # Concurrent open /phones/ws connections, not a rate.
+    rate_limit_phones_ws_per_ip: int = Field(default=2, ge=1)
+    rate_limit_phones_ws_global: int = Field(default=4, ge=1)
+
     # Engineering comparison thresholds. See docs/backend-contract.md.
     ending_direction_st: float = 1.5
     ending_window_fraction: float = 0.2
